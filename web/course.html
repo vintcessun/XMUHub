@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>课程 · XMUHub</title>
+<meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<meta name="theme-color" content="#122e66">
+<link rel="icon" href="/assets/xmu-emblem.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="courses">
+<header id="top" class="top"></header>
+<main><div class="wrap">
+  <div class="page-head">
+    <div><div class="crumbs"><a href="/courses">课程</a> / <span id="crumb"></span></div>
+      <h1 id="name">加载中…</h1><div class="muted small" id="info"></div></div>
+    <div class="row"><a class="btn primary" id="upload" href="/upload">上传这门课的资料</a></div>
+  </div>
+  <div id="editor" hidden></div>
+  <div class="toolbar"><div class="chips" id="kinds"></div><span class="grow"></span><select id="year" aria-label="年份"><option value="">全部年份</option></select></div>
+  <section class="card"><div class="list" id="list"><div class="skeleton"></div></div></section>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script type="module" src="/assets/pages/course.js"></script>
+</body>
+</html>

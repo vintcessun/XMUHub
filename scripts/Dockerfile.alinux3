@@ -1,0 +1,23 @@
+# Build image matching the production host (Alibaba Cloud Linux 3, glibc 2.32).
+# XMUHub is pure Rust apart from mimalloc and the rustls crypto provider (both C, built
+# with clang), so no system libraries are linked beyond glibc.
+FROM alibaba-cloud-linux-3-registry.cn-hangzhou.cr.aliyuncs.com/alinux3/alinux3:220901.1
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG ALL_PROXY
+ARG NO_PROXY
+
+ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} ALL_PROXY=${ALL_PROXY} NO_PROXY=${NO_PROXY} \
+    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} all_proxy=${ALL_PROXY} no_proxy=${NO_PROXY}
+
+RUN set -eux; \
+    sed -i 's|http://mirrors.cloud.aliyuncs.com|https://mirrors.aliyun.com|g; s|https://mirrors.cloud.aliyuncs.com|https://mirrors.aliyun.com|g; s|http://mirrors.aliyun.com|https://mirrors.aliyun.com|g' /etc/yum.repos.d/*.repo || true; \
+    dnf clean all; dnf makecache; \
+    dnf install -y gcc gcc-c++ make cmake clang lld perl git curl ca-certificates tar gzip which findutils binutils; \
+    dnf clean all
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /work

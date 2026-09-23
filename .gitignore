@@ -1,0 +1,15 @@
+# secrets — never commit
+.secrets/
+*.env
+!*.env.example
+
+# build outputs
+/target/
+/run
+/run.new
+/data/
+/dist/
+node_modules/
+.wrangler/
+scripts/.build_alinux3_inner.sh
+/target-alinux3/

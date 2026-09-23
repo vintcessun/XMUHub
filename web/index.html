@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XMUHub · 厦大资料库</title>
+<meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<meta name="theme-color" content="#122e66">
+<link rel="icon" href="/assets/xmu-emblem.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="home">
+<header id="top" class="top"></header>
+<main><div class="wrap">
+  <section class="hero">
+    <div class="emblem" aria-hidden="true"></div>
+    <h1><b>XMU</b>Hub</h1>
+    <p>厦门大学学生资料共享 · 试卷、笔记、课件，按课程一站找齐</p>
+    <form class="bigsearch" action="/search" role="search">
+      <input name="q" placeholder="课程名、课程代码、老师或拼音首字母，如 gdsx" aria-label="搜索" autofocus>
+      <button class="btn primary">搜索</button>
+    </form>
+    <div class="stats" id="stats"></div>
+  </section>
+  <div class="section-head"><h2>热门课程</h2><a href="/courses">全部课程 →</a></div>
+  <div class="grid" id="courses"><div class="skeleton"></div></div>
+  <div class="layout-side" style="margin-top:28px">
+    <section class="card"><h2>最新上传</h2><div class="list" id="recent"><div class="skeleton"></div></div></section>
+    <section class="card"><h2>下载最多</h2><div class="list" id="popular"><div class="skeleton"></div></div></section>
+  </div>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script type="module" src="/assets/pages/home.js"></script>
+</body>
+</html>

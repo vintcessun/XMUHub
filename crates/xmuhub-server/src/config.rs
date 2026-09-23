@@ -44,6 +44,13 @@ pub struct Config {
     pub ticket_secret: Vec<u8>,
     pub mirrors: Vec<String>,
     pub db_cache_mb: usize,
+    /// Emails that always get the admin role (bootstrap; no CLI needed while running).
+    pub admins: Vec<String>,
+    /// Bearer token for automation (the archive importer); acts as the system admin.
+    pub script_token: Option<String>,
+    /// Mark the session cookie `Secure` (production is behind HTTPS).
+    pub secure_cookie: bool,
+    pub smtp: Option<crate::mailer::SmtpConfig>,
     /// Cap on bytes the server relays to GitHub per day (only when no Worker is used).
     pub relay_daily_bytes: u64,
     pub relay_concurrency: usize,
@@ -81,6 +88,19 @@ impl Config {
                 .map(|m| m.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
                 .unwrap_or_else(|| DEFAULT_MIRRORS.iter().map(|s| s.to_string()).collect()),
             db_cache_mb: var_or("XMUHUB_DB_CACHE_MB", "32").parse()?,
+            admins: var("XMUHUB_ADMINS").map(|v| v.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()).unwrap_or_default(),
+            script_token: var("XMUHUB_SCRIPT_TOKEN").filter(|t| t.len() >= 32),
+            secure_cookie: var_or("XMUHUB_SECURE_COOKIE", "1") != "0",
+            smtp: match (var("SMTP_HOST"), var("SMTP_USER"), var("SMTP_PASSWORD")) {
+                (Some(host), Some(user), Some(password)) => Some(crate::mailer::SmtpConfig {
+                    host,
+                    port: var_or("SMTP_PORT", "465").parse()?,
+                    from: var("MAIL_FROM").unwrap_or_else(|| user.clone()),
+                    user,
+                    password,
+                }),
+                _ => None,
+            },
             relay_daily_bytes: var_or("RELAY_DAILY_MB", "5120").parse::<u64>()? * 1024 * 1024,
             relay_concurrency: var_or("RELAY_CONCURRENCY", "4").parse()?,
         })

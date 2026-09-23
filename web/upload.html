@@ -6,54 +6,51 @@
 <title>上传资料 · XMUHub</title>
 <meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
 <meta name="theme-color" content="#122e66">
-<link rel="icon" href="/assets/xmu-emblem.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="upload">
 <header id="top" class="top"></header>
 <main><div class="wrap">
-  <div class="page-head"><div><h1>上传资料</h1><div class="muted small">谢谢你的分享！上传前请确认资料不含他人隐私，也不是付费或保密内容。</div></div></div>
-  <div class="steps" id="steps"><span>1 选择文件</span><span>2 填写信息</span><span>3 上传</span><span>4 完成</span></div>
+  <div class="page-head"><div><h1>上传资料</h1><div class="muted small">选好分类、拖入文件，系统按「课程_时间_类型」规范自动命名；可以一次上传多个文件并批量设置。</div></div></div>
   <div id="gate"></div>
-  <form id="form" hidden autocomplete="off">
+  <div id="form" hidden>
     <section class="card">
-      <label class="drop" id="drop"><input type="file" id="file" hidden><b>点击选择文件，或拖到这里</b><span class="muted small" id="droptip"></span></label>
-      <div id="fileinfo" hidden style="margin-top:14px"></div>
-    </section>
-    <section class="card">
-      <h2>课程</h2>
-      <div id="coursepick">
-        <div class="field suggest"><span>搜索课程 <em>*</em></span><input class="input" id="cq" placeholder="课程名 / 课程代码 / 拼音首字母"><ul id="cs" hidden></ul></div>
-        <p class="small muted">找不到？<a href="#" id="newcourse">新建课程</a></p>
+      <h2>1 · 选择分类</h2>
+      <div id="nodepick">
+        <div class="field suggest"><span>搜索课程或分类 <em>*</em></span><input class="input" id="nq" placeholder="课程名 / 代码 / 拼音首字母，如 wjf、A2-1" autocomplete="off"><ul id="ns" hidden></ul></div>
+        <p class="small muted">也可以 <a href="/browse?pick=1" id="browsepick">在分类树里选</a>。专业课找不到课程？<a href="#" id="newcourse">在学院下新建课程</a></p>
       </div>
       <div id="coursenew" hidden>
-        <div class="fields-3">
-          <label class="field"><span>课程名称 <em>*</em></span><input class="input" id="nc_name" maxlength="60"></label>
-          <label class="field"><span>课程代码</span><input class="input" id="nc_code" maxlength="30" placeholder="可不填"></label>
-          <label class="field"><span>开课学院</span><input class="input" id="nc_college" maxlength="40" placeholder="如 数学科学学院"></label>
+        <div class="fields-2">
+          <label class="field"><span>所属学院 <em>*</em></span><select class="input" id="nc_parent"></select></label>
+          <label class="field"><span>课程名称（教务全称） <em>*</em></span><input class="input" id="nc_name" maxlength="60"></label>
         </div>
-        <p class="small muted">新课程会由审核员确认。<a href="#" id="backpick">返回搜索</a></p>
+        <div class="row"><button class="btn sm primary" id="nc_go" type="button">创建</button><a href="#" id="backpick" class="small">返回搜索</a><span class="small muted">新课程会由审核员确认。</span></div>
       </div>
       <div class="picked" id="picked" hidden></div>
     </section>
     <section class="card">
-      <h2>资料信息</h2>
-      <label class="field"><span>标题 <em>*</em></span><input class="input" id="title" maxlength="120" placeholder="如 2023 秋 高等数学A 期末试卷（含答案）"></label>
-      <div class="fields-3">
-        <label class="field"><span>类型 <em>*</em></span><select class="input" id="kind"></select></label>
-        <label class="field"><span>年份</span><select class="input" id="year"><option value="">不确定</option></select></label>
-        <label class="field"><span>学期</span><select class="input" id="term"><option value="">不确定</option><option value="1">秋季学期</option><option value="2">春季学期</option><option value="3">夏季学期</option></select></label>
+      <h2>2 · 添加文件</h2>
+      <label class="drop" id="drop"><input type="file" id="file" multiple hidden><b>点击选择文件，或拖到这里（可多选）</b><span class="muted small" id="droptip"></span></label>
+      <div class="bulkbar" id="bulk" hidden>
+        <b class="small">批量设置选中的文件：</b>
+        <select class="input" id="b_type"><option value="">类型</option></select>
+        <select class="input" id="b_year"><option value="">学年/年份</option></select>
+        <select class="input" id="b_term"><option value="">学期</option><option>秋</option><option>春</option><option>暑</option></select>
+        <select class="input" id="b_paper"><option value="">卷别</option><option>A卷</option><option>B卷</option><option>C卷</option></select>
+        <label class="small"><input type="checkbox" id="b_ans"> 含答案</label>
+        <button class="btn sm" id="b_apply" type="button">应用</button>
+        <span class="grow"></span><label class="small"><input type="checkbox" id="b_all" checked> 全选</label>
       </div>
-      <label class="field"><span>任课老师</span><input class="input" id="teacher" maxlength="40"></label>
-      <label class="field"><span>说明</span><textarea class="input" id="description" maxlength="1000" placeholder="内容范围、是否含答案、对应哪版教材等"></textarea></label>
+      <div class="frows" id="rows"></div>
     </section>
     <section class="card">
       <div id="status"></div>
       <div class="progress" id="prog" hidden><i></i></div>
-      <div class="row" style="margin-top:14px"><button class="btn primary lg" id="submit">上传并提交</button><span class="small muted" id="hint"></span></div>
+      <div class="row" style="margin-top:14px"><button class="btn primary lg" id="submit" type="button">上传并提交</button><span class="small muted" id="hint"></span></div>
     </section>
-  </form>
-  <section class="card" id="done" hidden></section>
+  </div>
 </div></main>
 <footer id="foot" class="foot"></footer>
 <script type="module" src="/assets/pages/upload.js"></script>

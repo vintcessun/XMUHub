@@ -13,7 +13,7 @@ use tantivy::schema::{
 use tantivy::{DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, Term, doc};
 
 use crate::error::Result;
-use crate::model::{Course, Id, Resource};
+use crate::model::{Id, Node, Resource};
 use crate::text::{index_tokens, loose_units, pinyin_forms, query_units};
 
 /// Tantivy's minimum writer arena; we index a few docs at a time, so the floor is plenty.
@@ -21,15 +21,26 @@ const WRITER_BUDGET: usize = 15_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocType {
-    Course = 0,
+    Node = 0,
     Resource = 1,
 }
 
 #[derive(Default, Clone, Copy)]
 pub struct Filter {
     pub ty: Option<DocType>,
-    pub course: Option<Id>,
-    pub kind: Option<u64>,
+    /// Restrict to this node's subtree.
+    pub within: Option<Id>,
+    /// Tag index (see `Tag::ALL`).
+    pub tag: Option<u64>,
+}
+
+/// What a document needs from the category tree: its own node, every ancestor
+/// (for subtree filters) and the path's display text (so "物理 期末" finds A3 papers).
+pub struct Placement<'a> {
+    pub node: Id,
+    pub ancestors: &'a [Id],
+    pub path_text: &'a str,
+    pub aliases_text: &'a str,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -42,8 +53,8 @@ pub struct Hit {
 struct Fields {
     key: Field,
     ty: Field,
-    course: Field,
-    kind: Field,
+    anc: Field,
+    tag: Field,
     main: Field,
     py: Field,
     sub: Field,
@@ -74,8 +85,8 @@ impl Search {
         let f = Fields {
             key: sb.add_u64_field("key", INDEXED | FAST),
             ty: sb.add_u64_field("ty", INDEXED),
-            course: sb.add_u64_field("course", INDEXED),
-            kind: sb.add_u64_field("kind", INDEXED),
+            anc: sb.add_u64_field("anc", INDEXED),
+            tag: sb.add_u64_field("tag", INDEXED),
             main: sb.add_text_field("main", text.clone()),
             py: sb.add_text_field("py", text.clone()),
             sub: sb.add_text_field("sub", text),
@@ -86,44 +97,42 @@ impl Search {
         Ok(Search { f, writer: Mutex::new(writer), reader })
     }
 
-    pub fn put_course(&self, c: &Course) -> Result<()> {
+    pub fn put_node(&self, n: &Node, at: &Placement) -> Result<()> {
         let f = &self.f;
-        let main = format!("{} {} {}", c.name, c.code, c.aliases.join(" "));
+        let mut doc = doc!(
+            f.key => key(DocType::Node, n.id),
+            f.ty => DocType::Node as u64,
+            f.main => joined(&format!("{} {} {} {}", n.name, n.label, n.code, at.aliases_text)),
+            f.py => joined(&pinyin_forms(&format!("{} {} {}", n.name, n.label, at.aliases_text))),
+            f.sub => joined(at.path_text),
+        );
+        for a in at.ancestors.iter().chain(std::iter::once(&n.id)) {
+            doc.add_u64(f.anc, *a);
+        }
         let w = self.writer.lock();
-        w.delete_term(Term::from_field_u64(f.key, key(DocType::Course, c.id)));
-        w.add_document(doc!(
-            f.key => key(DocType::Course, c.id),
-            f.ty => DocType::Course as u64,
-            f.course => c.id,
-            f.main => joined(&main),
-            f.py => joined(&pinyin_forms(&format!("{} {}", c.name, c.aliases.join(" ")))),
-            f.sub => joined(&c.college),
-        ))?;
+        w.delete_term(Term::from_field_u64(f.key, key(DocType::Node, n.id)));
+        w.add_document(doc)?;
         Ok(())
     }
 
-    pub fn put_resource(&self, r: &Resource, course: &Course) -> Result<()> {
+    pub fn put_resource(&self, r: &Resource, at: &Placement) -> Result<()> {
         let f = &self.f;
-        let sub = format!(
-            "{} {} {} {} {} {}",
-            course.name,
-            course.code,
-            course.aliases.join(" "),
-            r.teacher,
-            r.description,
-            r.year.map(|y| y.to_string()).unwrap_or_default()
-        );
-        let w = self.writer.lock();
-        w.delete_term(Term::from_field_u64(f.key, key(DocType::Resource, r.id)));
-        w.add_document(doc!(
+        let stem = r.name.stem();
+        let tag_idx = crate::model::Tag::ALL.iter().position(|t| *t == r.tag).unwrap_or(0) as u64;
+        let mut doc = doc!(
             f.key => key(DocType::Resource, r.id),
             f.ty => DocType::Resource as u64,
-            f.course => r.course_id,
-            f.kind => r.kind as u64,
-            f.main => joined(&format!("{} {}", r.title, r.filename)),
-            f.py => joined(&pinyin_forms(&format!("{} {} {}", r.title, course.name, r.teacher))),
-            f.sub => joined(&sub),
-        ))?;
+            f.tag => tag_idx,
+            f.main => joined(&format!("{stem} {}", at.aliases_text)),
+            f.py => joined(&pinyin_forms(&format!("{} {}", r.name.course, at.aliases_text))),
+            f.sub => joined(&format!("{} {} {}", at.path_text, r.tag.label(), r.note)),
+        );
+        for a in at.ancestors.iter().chain(std::iter::once(&at.node)) {
+            doc.add_u64(f.anc, *a);
+        }
+        let w = self.writer.lock();
+        w.delete_term(Term::from_field_u64(f.key, key(DocType::Resource, r.id)));
+        w.add_document(doc)?;
         Ok(())
     }
 
@@ -185,11 +194,11 @@ impl Search {
         if let Some(ty) = filter.ty {
             clauses.push(exact(f.ty, ty as u64));
         }
-        if let Some(c) = filter.course {
-            clauses.push(exact(f.course, c));
+        if let Some(n) = filter.within {
+            clauses.push(exact(f.anc, n));
         }
-        if let Some(k) = filter.kind {
-            clauses.push(exact(f.kind, k));
+        if let Some(t) = filter.tag {
+            clauses.push(exact(f.tag, t));
         }
         let query = BooleanQuery::new(clauses);
 
@@ -199,7 +208,7 @@ impl Search {
         let mut hits = Vec::with_capacity(top.len());
         for (score, addr) in top {
             let k = self.key_of(&searcher, addr)?;
-            let ty = if k >> 56 == 0 { DocType::Course } else { DocType::Resource };
+            let ty = if k >> 56 == 0 { DocType::Node } else { DocType::Resource };
             hits.push(Hit { ty, id: k & ((1 << 56) - 1), score });
         }
         Ok((hits, total))

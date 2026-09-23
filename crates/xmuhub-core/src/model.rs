@@ -13,19 +13,19 @@ pub fn now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Permission tiers. Ordering matters: a higher level implies every lower level's rights.
+/// Account roles. Ordering matters: a higher level implies every lower level's rights.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Level {
-    /// No token: browse, search, download.
+    /// Not signed in: browse, search, download.
     Guest = 0,
-    /// Self-claimed token: uploads wait for review before they are visible.
+    /// Registered account: uploads wait for review before they are visible.
     Contributor = 1,
     /// Promoted by a reviewer: uploads are visible immediately and reviewed afterwards.
     Trusted = 2,
-    /// Works the review queue, edits metadata, merges courses, promotes/bans L1–L2.
+    /// Works the review queue, edits metadata and the category tree, handles reports.
     Reviewer = 3,
-    /// Issues/revokes any token, manages storage and mirrors.
+    /// Everything, including changing anyone's role.
     Admin = 4,
 }
 
@@ -48,98 +48,210 @@ impl Level {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Token {
+pub struct User {
     pub id: Id,
-    /// sha256 of the secret token string; the secret itself is never stored.
-    pub hash: [u8; 32],
+    /// Lower-cased; unique.
+    pub email: String,
+    pub nickname: String,
+    /// Argon2id PHC string.
+    pub password: String,
     pub level: Level,
-    pub label: String,
     pub banned: bool,
     pub created_at: i64,
     pub created_ip: String,
+    pub last_login: i64,
     pub uploads: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CourseStatus {
-    /// Created by an upload, not yet confirmed by a reviewer. Still browsable.
-    Pending,
-    Active,
-    /// Folded into another course; resources were moved there.
-    Merged(Id),
+impl User {
+    /// Registered with a Xiamen University address.
+    pub fn xmu_verified(&self) -> bool {
+        self.email.ends_with("@xmu.edu.cn") || self.email.ends_with(".xmu.edu.cn")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Course {
+pub struct Session {
+    /// sha256 of the cookie value.
+    pub hash: [u8; 32],
+    pub user: Id,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub ip: String,
+}
+
+/// What a category-tree node represents; drives page layout, not permissions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeKind {
+    /// A 公共课 / B 专业课 / C 教材与参考书 / D 工具模板与校园服务.
+    Section,
+    /// A1 思政, a college, C1 数学, D1 工具 …
+    Group,
+    /// A single course (A2-1 微积分I, B 信息学院/数据结构).
+    Course,
+    /// A level inside a course (I-1, 上, 线代I, 202406).
+    Level,
+}
+
+impl NodeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NodeKind::Section => "section",
+            NodeKind::Group => "group",
+            NodeKind::Course => "course",
+            NodeKind::Level => "level",
+        }
+    }
+    pub fn parse(s: &str) -> Option<NodeKind> {
+        Some(match s {
+            "section" => NodeKind::Section,
+            "group" => NodeKind::Group,
+            "course" => NodeKind::Course,
+            "level" => NodeKind::Level,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeStatus {
+    /// Created by an uploader; visible, awaiting a reviewer's confirmation.
+    Pending,
+    Active,
+    /// Folded into another node; its resources and children were moved there.
+    Merged(Id),
+}
+
+/// A node of the category tree (目录即分类).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node {
     pub id: Id,
-    /// Official course code (may be empty when unknown).
+    pub parent: Option<Id>,
+    pub kind: NodeKind,
+    /// Scheme code such as "A2-1" (may be empty).
     pub code: String,
+    /// Display name, e.g. "微积分I" or "I-1".
     pub name: String,
+    /// Course segment used in file names, e.g. "微积分I-1" (教务全称 + 层次).
+    pub label: String,
+    /// Search aliases (群内俗称: 思修、史纲、毛概 …).
     pub aliases: Vec<String>,
-    pub college: String,
-    pub status: CourseStatus,
+    /// A 公共课 courses group files into 01–04 buckets on their page.
+    pub bucketed: bool,
+    pub sort: u32,
+    pub status: NodeStatus,
     pub created_by: Id,
     pub created_at: i64,
 }
 
+/// Resource type tags T1–T9 of the classification scheme (exactly one per resource).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Kind {
+pub enum Tag {
     Exam,
+    Answer,
     Notes,
+    Bank,
     Slides,
-    Homework,
     Lab,
-    Textbook,
-    Other,
+    Bundle,
+    Book,
+    Tool,
 }
 
-impl Kind {
-    pub const ALL: [Kind; 7] = [
-        Kind::Exam,
-        Kind::Notes,
-        Kind::Slides,
-        Kind::Homework,
-        Kind::Lab,
-        Kind::Textbook,
-        Kind::Other,
+impl Tag {
+    pub const ALL: [Tag; 9] = [
+        Tag::Exam,
+        Tag::Answer,
+        Tag::Notes,
+        Tag::Bank,
+        Tag::Slides,
+        Tag::Lab,
+        Tag::Bundle,
+        Tag::Book,
+        Tag::Tool,
     ];
 
-    pub fn as_str(self) -> &'static str {
+    pub fn code(self) -> &'static str {
         match self {
-            Kind::Exam => "exam",
-            Kind::Notes => "notes",
-            Kind::Slides => "slides",
-            Kind::Homework => "homework",
-            Kind::Lab => "lab",
-            Kind::Textbook => "textbook",
-            Kind::Other => "other",
+            Tag::Exam => "T1",
+            Tag::Answer => "T2",
+            Tag::Notes => "T3",
+            Tag::Bank => "T4",
+            Tag::Slides => "T5",
+            Tag::Lab => "T6",
+            Tag::Bundle => "T7",
+            Tag::Book => "T8",
+            Tag::Tool => "T9",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Kind::Exam => "试卷",
-            Kind::Notes => "笔记",
-            Kind::Slides => "课件",
-            Kind::Homework => "作业",
-            Kind::Lab => "实验",
-            Kind::Textbook => "教材",
-            Kind::Other => "其他",
+            Tag::Exam => "真题试卷",
+            Tag::Answer => "答案与解析",
+            Tag::Notes => "提纲笔记",
+            Tag::Bank => "题库刷题",
+            Tag::Slides => "课件讲义",
+            Tag::Lab => "实验资料",
+            Tag::Bundle => "打包合集",
+            Tag::Book => "电子书",
+            Tag::Tool => "工具模板",
         }
     }
 
-    pub fn parse(s: &str) -> Option<Kind> {
-        Kind::ALL.into_iter().find(|k| k.as_str() == s)
+    pub fn parse(s: &str) -> Option<Tag> {
+        Tag::ALL.into_iter().find(|t| t.code() == s)
     }
+
+    /// Which of the fixed A 公共课 folders (01–04) the tag lives in.
+    pub fn bucket(self) -> u8 {
+        match self {
+            Tag::Exam | Tag::Answer => 1,
+            Tag::Notes => 2,
+            Tag::Bank => 3,
+            _ => 4,
+        }
+    }
+}
+
+/// Closed set of type words used in file names (分类规则 §4) and the tag each implies.
+pub const TYPE_WORDS: &[(&str, Tag)] = &[
+    ("期中试卷", Tag::Exam),
+    ("期末试卷", Tag::Exam),
+    ("小测", Tag::Exam),
+    ("往年试卷", Tag::Exam),
+    ("答案", Tag::Answer),
+    ("重点", Tag::Notes),
+    ("提纲", Tag::Notes),
+    ("笔记", Tag::Notes),
+    ("单词表", Tag::Notes),
+    ("题库", Tag::Bank),
+    ("思考题", Tag::Bank),
+    ("课件", Tag::Slides),
+    ("讲义", Tag::Slides),
+    ("资料", Tag::Slides),
+    ("实验报告", Tag::Lab),
+    ("合集", Tag::Bundle),
+    ("教材", Tag::Book),
+    ("模板", Tag::Tool),
+    ("工具", Tag::Tool),
+];
+
+pub fn type_word_tag(word: &str) -> Option<Tag> {
+    TYPE_WORDS.iter().find(|(w, _)| *w == word).map(|(_, t)| *t)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
-    /// Waiting for review, invisible to guests.
+    /// compliance = review: waiting for a reviewer, invisible to the public.
     Pending,
+    /// compliance = public.
     Published,
     Rejected,
+    /// Taken down (e.g. after a report); reversible.
     Removed,
+    /// compliance = restricted: kept for staff only, never public or searchable.
+    Restricted,
 }
 
 impl Status {
@@ -149,24 +261,89 @@ impl Status {
             Status::Published => "published",
             Status::Rejected => "rejected",
             Status::Removed => "removed",
+            Status::Restricted => "restricted",
         }
+    }
+    pub fn parse(s: &str) -> Option<Status> {
+        Some(match s {
+            "pending" => Status::Pending,
+            "published" => Status::Published,
+            "rejected" => Status::Rejected,
+            "removed" => Status::Removed,
+            "restricted" => Status::Restricted,
+            _ => return None,
+        })
+    }
+}
+
+/// Structured name parts; the file name is generated from these (课程_时间_类型).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NameParts {
+    /// Course segment, normally the node's label.
+    pub course: String,
+    /// "2023-2024秋", "2025春", "2023", "202406" or empty.
+    pub time: String,
+    /// One of `TYPE_WORDS`.
+    pub type_word: String,
+    /// "A卷", "B卷" or empty.
+    pub paper: String,
+    pub with_answer: bool,
+    /// Extra bracket detail such as "201题" or "第1册".
+    pub extra: String,
+    /// 1 = no suffix, 2 = "_v2", …
+    pub version: u16,
+}
+
+impl NameParts {
+    /// The file name stem without version suffix, e.g. `微积分I-1_2023-2024秋_期中试卷(A卷、含答案)`.
+    pub fn base(&self) -> String {
+        let mut s = self.course.clone();
+        if !self.time.is_empty() {
+            s.push('_');
+            s.push_str(&self.time);
+        }
+        s.push('_');
+        s.push_str(&self.type_word);
+        let mut detail: Vec<&str> = Vec::new();
+        if !self.paper.is_empty() {
+            detail.push(&self.paper);
+        }
+        if self.with_answer {
+            detail.push("含答案");
+        }
+        if !self.extra.is_empty() {
+            detail.push(&self.extra);
+        }
+        if !detail.is_empty() {
+            s.push('(');
+            s.push_str(&detail.join("、"));
+            s.push(')');
+        }
+        s
+    }
+
+    pub fn stem(&self) -> String {
+        if self.version > 1 { format!("{}_v{}", self.base(), self.version) } else { self.base() }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resource {
     pub id: Id,
-    pub course_id: Id,
-    pub title: String,
-    pub kind: Kind,
-    pub year: Option<u16>,
-    /// 1 = autumn, 2 = spring, 3 = summer.
-    pub term: Option<u8>,
-    pub teacher: String,
-    pub description: String,
-    /// Content hash key into the blob table.
+    pub node: Id,
+    pub tag: Tag,
+    pub name: NameParts,
+    /// Lower-case extension without dot ("pdf").
+    pub ext: String,
+    /// Public note (备注) shown on the resource page.
+    pub note: String,
+    /// Original upload file name — staff only (分类规则 §5.7).
+    pub original_name: String,
+    /// Archive / source description — staff only.
+    pub source: String,
+    /// Category or content not yet verified (the archive's "（不确定）").
+    pub uncertain: bool,
     pub blob: String,
-    pub filename: String,
     pub size: u64,
     pub mime: String,
     pub status: Status,
@@ -178,6 +355,27 @@ pub struct Resource {
     pub created_at: i64,
     pub updated_at: i64,
     pub downloads: u64,
+}
+
+impl Resource {
+    pub fn filename(&self) -> String {
+        if self.ext.is_empty() { self.name.stem() } else { format!("{}.{}", self.name.stem(), self.ext) }
+    }
+}
+
+/// A takedown / problem report (侵权投诉通道).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Report {
+    pub id: Id,
+    pub resource: Id,
+    pub reason: String,
+    pub contact: String,
+    pub reporter: Option<Id>,
+    pub ip: String,
+    pub created_at: i64,
+    pub handled: bool,
+    pub handled_by: Option<Id>,
+    pub handled_note: String,
 }
 
 /// Where one stored part physically lives. A part may have several replicas.
@@ -234,7 +432,7 @@ pub struct PendingPart {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Upload {
     pub id: Id,
-    pub token: Id,
+    pub user: Id,
     pub filename: String,
     pub mime: String,
     pub size: u64,

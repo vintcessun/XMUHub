@@ -1,0 +1,123 @@
+import { api, esc, layout, nodeCard, pathId, resourceItem, toast, $ } from '../app.js';
+
+const id = pathId();
+const mePromise = layout('browse');
+
+// A 公共课 courses keep the four fixed folders of the scheme.
+const BUCKETS = [[1, '01 真题与答案'], [2, '02 提纲笔记'], [3, '03 题库刷题'], [4, '04 课件与拓展']];
+let data = null;
+let bucket = 0;
+
+function renderList() {
+  const time = $('#time').value;
+  const rs = data.resources.filter((r) => (!bucket || r.tag.bucket === bucket) && (!time || r.name.time === time));
+  $('#list').innerHTML = rs.length
+    ? rs.map((r) => resourceItem(r, { showNode: false })).join('')
+    : `<div class="empty"><b>这里还没有资料</b><a href="/upload?node=${data.node.id}">上传第一份</a></div>`;
+}
+
+async function load() {
+  try {
+    data = await api(`/nodes/${id}`);
+  } catch (e) {
+    $('#name').textContent = e.status === 404 ? '分类不存在' : '加载失败';
+    $('#list').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
+    return;
+  }
+  const n = data.node;
+  if (n.id !== id) history.replaceState(null, '', `/n/${n.id}`);
+  document.title = `${n.name} · XMUHub`;
+  $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
+  $('#name').textContent = n.name;
+  $('#info').innerHTML = [
+    n.code && `<span class="mono">${esc(n.code)}</span>`,
+    `${n.count} 份资料`,
+    n.aliases.length && `又名 ${n.aliases.map(esc).join('、')}`,
+    n.status === 'pending' && '<span class="badge pending">待确认</span>',
+  ].filter(Boolean).join(' · ');
+  $('#upload').href = `/upload?node=${n.id}`;
+  $('#upload').hidden = n.kind === 'section';
+
+  $('#children').innerHTML = data.children.map((c) => nodeCard(c).replace('class="card node-card"', `class="card node-card${c.count ? '' : ' empty-node'}"`)).join('');
+  $('#children').hidden = !data.children.length;
+
+  const hasRes = data.resources.length > 0;
+  $('#rescard').hidden = !hasRes && data.children.length > 0;
+  $('#bar').hidden = !hasRes;
+  if (hasRes) {
+    const counts = new Map();
+    for (const r of data.resources) counts.set(r.tag.bucket, (counts.get(r.tag.bucket) || 0) + 1);
+    const chips = n.bucketed
+      ? [[0, '全部'], ...BUCKETS.filter(([b]) => counts.get(b))]
+      : [];
+    $('#buckets').innerHTML = chips.map(([b, l]) => `<button class="chip${b === bucket ? ' on' : ''}" data-b="${b}">${l}${b ? ` ${counts.get(b)}` : ''}</button>`).join('');
+    const times = [...new Set(data.resources.map((r) => r.name.time).filter(Boolean))].sort().reverse();
+    $('#time').innerHTML = '<option value="">全部时间</option>' + times.map((t) => `<option>${esc(t)}</option>`).join('');
+    $('#time').hidden = !times.length;
+  }
+  renderList();
+
+  const me = await mePromise;
+  if (me && me.level >= 3) renderEditor(n);
+}
+
+$('#buckets').onclick = (e) => {
+  const b = e.target.closest('[data-b]');
+  if (!b) return;
+  bucket = Number(b.dataset.b);
+  document.querySelectorAll('#buckets .chip').forEach((x) => x.classList.toggle('on', x === b));
+  renderList();
+};
+$('#time').onchange = renderList;
+
+function renderEditor(n) {
+  const box = $('#editor');
+  box.hidden = false;
+  box.innerHTML = `<details class="card" style="margin-bottom:16px"><summary><b>管理这个分类</b> <span class="small muted">（审核员）</span></summary>
+    <div style="margin-top:14px">
+      <div class="fields-3">
+        <label class="field"><span>名称</span><input class="input" id="e_name" value="${esc(n.name)}"></label>
+        <label class="field"><span>命名用课程名（文件名第一段）</span><input class="input" id="e_label" value="${esc(n.label)}"></label>
+        <label class="field"><span>代号</span><input class="input" id="e_code" value="${esc(n.code)}"></label>
+      </div>
+      <label class="field"><span>别名 / 俗称（逗号分隔，用于搜索）</span><input class="input" id="e_alias" value="${esc(n.aliases.join('，'))}"></label>
+      <div class="row"><label class="small"><input type="checkbox" id="e_bucket"${n.bucketed ? ' checked' : ''}> 按 01–04 类型目录分组显示</label>
+        <button class="btn primary sm" id="e_save">保存${n.status === 'pending' ? '并确认' : ''}</button></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+      <div class="row">
+        <input class="input" id="c_name" placeholder="新建下级：名称" style="max-width:200px">
+        <select class="input" id="c_kind" style="max-width:120px"><option value="course">课程</option><option value="level">层次</option><option value="group">分组</option></select>
+        <button class="btn sm" id="c_go">新建下级</button>
+        <span class="grow"></span>
+        <input class="input" id="m_into" placeholder="合并到分类 ID" style="max-width:130px">
+        <button class="btn danger sm" id="m_go">合并</button>
+        <button class="btn danger sm" id="d_go">删除（仅空分类）</button>
+      </div>
+      <p class="small faint" style="margin:8px 0 0">分类 ID：${n.id}</p>
+    </div></details>`;
+  const call = async (fn, ok) => { try { await fn(); toast(ok); load(); } catch (e) { toast(e.message, true); } };
+  $('#e_save').onclick = () => call(() => api(`/nodes/${n.id}`, {
+    method: 'PATCH',
+    body: {
+      name: $('#e_name').value, label: $('#e_label').value, code: $('#e_code').value, bucketed: $('#e_bucket').checked,
+      aliases: $('#e_alias').value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean), approve: true,
+    },
+  }), '已保存');
+  $('#c_go').onclick = () => call(() => api('/nodes', { method: 'POST', body: { parent: n.id, kind: $('#c_kind').value, name: $('#c_name').value, bucketed: n.bucketed } }), '已新建');
+  $('#m_go').onclick = async () => {
+    const into = Number($('#m_into').value);
+    if (!into) return toast('填写目标分类 ID', true);
+    try {
+      const t = await api(`/nodes/${n.id}/merge`, { method: 'POST', body: { into } });
+      location.href = `/n/${t.id}`;
+    } catch (e) { toast(e.message, true); }
+  };
+  $('#d_go').onclick = async () => {
+    try {
+      await api(`/nodes/${n.id}`, { method: 'DELETE' });
+      location.href = data.path.length ? `/n/${data.path[data.path.length - 1].id}` : '/browse';
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+load();

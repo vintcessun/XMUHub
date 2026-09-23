@@ -4,7 +4,7 @@ pub enum Error {
     NotFound(&'static str),
     #[error("权限不足")]
     Forbidden,
-    #[error("需要有效的访问令牌")]
+    #[error("请先登录")]
     Unauthorized,
     #[error("{0}")]
     BadRequest(String),

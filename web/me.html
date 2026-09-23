@@ -6,15 +6,23 @@
 <title>我的 · XMUHub</title>
 <meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
 <meta name="theme-color" content="#122e66">
-<link rel="icon" href="/assets/xmu-emblem.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="me">
 <header id="top" class="top"></header>
 <main><div class="wrap">
-  <div class="page-head"><div><h1>我的</h1><div class="muted small">XMUHub 不需要注册，用访问令牌识别你的上传。</div></div></div>
-  <section class="card" id="tokencard"></section>
-  <section class="card" id="minecard" hidden><h2>我上传的资料</h2><div class="list" id="mine"></div></section>
+  <div class="page-head"><div><h1>我的</h1><div class="muted small" id="who"></div></div><button class="btn" id="logout">退出登录</button></div>
+  <div class="layout-side">
+    <section class="card"><h2>我上传的资料</h2><div class="list" id="mine"><div class="skeleton"></div></div></section>
+    <aside>
+      <section class="card"><h3>修改昵称</h3><form id="nickf" class="row"><input class="input grow" id="nick" maxlength="20"><button class="btn">保存</button></form></section>
+      <section class="card"><h3>修改密码</h3><form id="pwf">
+        <label class="field"><span>原密码</span><input class="input" id="oldpw" type="password" autocomplete="current-password"></label>
+        <label class="field"><span>新密码（至少 8 位）</span><input class="input" id="newpw" type="password" autocomplete="new-password"></label>
+        <button class="btn">修改</button></form></section>
+    </aside>
+  </div>
 </div></main>
 <footer id="foot" class="foot"></footer>
 <script type="module" src="/assets/pages/me.js"></script>

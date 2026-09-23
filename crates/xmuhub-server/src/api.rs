@@ -1,27 +1,32 @@
 //! JSON API under `/api`, the `/d/{id}` download redirect and HTML page routes.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::extract::{FromRequestParts, Path, Query, Request, State};
 use axum::http::request::Parts;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use parking_lot::Mutex;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 
-use xmuhub_core::hub::{CoursePatch, NewCourse, PartSpec, ResourceInput, SearchItem, Viewer};
-use xmuhub_core::model::{Course, CourseStatus, Id, Kind, Level, Resource, Status, Token, now};
+use xmuhub_core::hub::{AdminExtras, CodePurpose, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SearchItem, Viewer};
+use xmuhub_core::model::{Id, Level, Node, NodeStatus, Report, Resource, Status, TYPE_WORDS, Tag, User};
 use xmuhub_core::search::{DocType, Filter};
 use xmuhub_core::storage::Receipt;
 use xmuhub_core::storage::local::LocalBackend;
 use xmuhub_core::storage::mirrors::Mirrors;
 use xmuhub_core::{Error, Hub};
 
+use crate::mailer::Mailer;
 use crate::web::Site;
+
+pub const SESSION_COOKIE: &str = "xh_sid";
+/// Non-GET API calls must carry this header. Browsers never attach custom headers to
+/// cross-site form posts, so together with SameSite=Lax cookies it stops CSRF.
+pub const CSRF_HEADER: &str = "x-xmuhub";
 
 pub struct App {
     pub hub: Arc<Hub>,
@@ -30,8 +35,9 @@ pub struct App {
     pub local: Option<Arc<LocalBackend>>,
     pub worker_url: String,
     pub relay: Option<crate::relay::Relay>,
-    /// ip → (day, claims) for self-service token claims.
-    pub claims: Mutex<HashMap<String, (i64, u32)>>,
+    pub mailer: Option<Mailer>,
+    pub script_token: Option<String>,
+    pub secure_cookie: bool,
 }
 
 type S = State<Arc<App>>;
@@ -67,7 +73,11 @@ impl IntoResponse for ApiError {
 
 type R<T> = Result<T, ApiError>;
 
-/// Runs a (possibly fsync-ing) write off the async executor.
+fn bad(msg: &str) -> ApiError {
+    ApiError(xmuhub_core::error::bad(msg))
+}
+
+/// Runs a (possibly fsync-ing or password-hashing) call off the async executor.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> xmuhub_core::Result<T> + Send + 'static) -> R<T> {
     tokio::task::spawn_blocking(f)
         .await
@@ -75,14 +85,38 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> xmuhub_core::Result<T> 
         .map_err(ApiError)
 }
 
+pub async fn csrf_guard(req: Request, next: Next) -> Response {
+    let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
+    if !safe && req.uri().path().starts_with("/api/") && !req.headers().contains_key(CSRF_HEADER) {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "缺少请求头，请刷新页面后重试" }))).into_response();
+    }
+    next.run(req).await
+}
+
 // ------------------------------------------------------------------ auth
 
-/// The caller's token, if any. A malformed or revoked token is treated as a guest.
-pub struct Auth(pub Option<Token>);
+fn cookie_value<'a>(h: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    h.get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == name)
+        .map(|(_, v)| v)
+}
+
+/// The signed-in user, if any. Invalid or expired sessions are treated as guests.
+pub struct Auth {
+    pub user: Option<User>,
+    pub session: Option<String>,
+}
 
 impl Auth {
     pub fn viewer(&self) -> Viewer<'_> {
-        Viewer { token: self.0.as_ref() }
+        Viewer { user: self.user.as_ref() }
+    }
+    fn require(&self) -> R<&User> {
+        self.user.as_ref().ok_or(ApiError(Error::Unauthorized))
     }
 }
 
@@ -90,18 +124,26 @@ impl FromRequestParts<Arc<App>> for Auth {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, Self::Rejection> {
-        let token = parts
-            .headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .and_then(|secret| app.hub.authenticate(secret.trim()));
-        Ok(Auth(token))
+        if let (Some(expected), Some(given)) = (
+            app.script_token.as_deref(),
+            parts.headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")),
+        ) {
+            if constant_eq(expected.as_bytes(), given.trim().as_bytes()) {
+                return Ok(Auth { user: app.hub.system_user().ok(), session: None });
+            }
+        }
+        let session = cookie_value(&parts.headers, SESSION_COOKIE).map(str::to_string);
+        let user = session.as_deref().and_then(|s| app.hub.session_user(s));
+        Ok(Auth { user, session })
     }
 }
 
+fn constant_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// Client IP as seen by the reverse proxy (we only ever listen on loopback).
-fn client_ip(h: &HeaderMap) -> String {
+pub fn client_ip(h: &HeaderMap) -> String {
     h.get("x-real-ip")
         .or_else(|| h.get("x-forwarded-for"))
         .and_then(|v| v.to_str().ok())
@@ -110,90 +152,81 @@ fn client_ip(h: &HeaderMap) -> String {
         .unwrap_or_else(|| "local".into())
 }
 
+fn session_cookie(app: &App, secret: &str, max_age: i64) -> HeaderValue {
+    let secure = if app.secure_cookie { "; Secure" } else { "" };
+    HeaderValue::from_str(&format!("{SESSION_COOKIE}={secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")).unwrap()
+}
+
+fn with_session(app: &App, secret: &str, body: Value) -> Response {
+    let mut res = Json(body).into_response();
+    res.headers_mut().insert(header::SET_COOKIE, session_cookie(app, secret, xmuhub_core::hub::SESSION_TTL));
+    res
+}
+
 // ------------------------------------------------------------------ views
 
-#[derive(Serialize)]
-struct CourseView {
-    id: Id,
-    code: String,
-    name: String,
-    aliases: Vec<String>,
-    college: String,
-    status: &'static str,
-    count: usize,
+fn node_brief(n: &Node) -> Value {
+    json!({ "id": n.id, "name": n.name, "code": n.code, "label": n.label, "kind": n.kind.as_str() })
 }
 
-fn course_view(c: &Course, count: usize) -> CourseView {
-    CourseView {
-        id: c.id,
-        code: c.code.clone(),
-        name: c.name.clone(),
-        aliases: c.aliases.clone(),
-        college: c.college.clone(),
-        status: match c.status {
-            CourseStatus::Pending => "pending",
-            CourseStatus::Active => "active",
-            CourseStatus::Merged(_) => "merged",
-        },
-        count,
-    }
-}
-
-#[derive(Serialize)]
-struct ResourceView {
-    id: Id,
-    course: Value,
-    title: String,
-    kind: &'static str,
-    kind_label: &'static str,
-    year: Option<u16>,
-    term: Option<u8>,
-    teacher: String,
-    description: String,
-    filename: String,
-    size: u64,
-    mime: String,
-    status: &'static str,
-    needs_review: bool,
-    review_note: String,
-    created_at: i64,
-    updated_at: i64,
-    downloads: u64,
-    mine: bool,
-}
-
-fn resource_view(r: &Resource, c: &Course, me: Option<&Token>) -> ResourceView {
-    let mine = me.is_some_and(|t| t.id == r.uploader);
-    let insider = mine || me.is_some_and(|t| t.level >= Level::Reviewer);
-    ResourceView {
-        id: r.id,
-        course: json!({ "id": c.id, "name": c.name, "code": c.code, "college": c.college }),
-        title: r.title.clone(),
-        kind: r.kind.as_str(),
-        kind_label: r.kind.label(),
-        year: r.year,
-        term: r.term,
-        teacher: r.teacher.clone(),
-        description: r.description.clone(),
-        filename: r.filename.clone(),
-        size: r.size,
-        mime: r.mime.clone(),
-        status: r.status.as_str(),
-        // "Awaiting re-review" is internal; guests just see a published resource.
-        needs_review: r.needs_review && insider,
-        review_note: r.review_note.clone(),
-        created_at: r.created_at,
-        updated_at: r.updated_at,
-        downloads: r.downloads,
-        mine,
-    }
-}
-
-fn token_view(t: &Token) -> Value {
+fn node_view(n: &Node, count: usize) -> Value {
     json!({
-        "id": t.id, "level": t.level as u8, "label": t.label, "banned": t.banned,
-        "created_at": t.created_at, "created_ip": t.created_ip, "uploads": t.uploads,
+        "id": n.id, "parent": n.parent, "kind": n.kind.as_str(), "code": n.code, "name": n.name,
+        "label": n.label, "aliases": n.aliases, "bucketed": n.bucketed, "sort": n.sort, "count": count,
+        "status": match n.status { NodeStatus::Pending => "pending", NodeStatus::Active => "active", NodeStatus::Merged(_) => "merged" },
     })
+}
+
+fn tag_view(t: Tag) -> Value {
+    json!({ "code": t.code(), "label": t.label(), "bucket": t.bucket() })
+}
+
+fn user_view(u: &User) -> Value {
+    json!({
+        "id": u.id, "email": u.email, "nickname": u.nickname, "level": u.level as u8, "banned": u.banned,
+        "created_at": u.created_at, "last_login": u.last_login, "uploads": u.uploads, "xmu": u.xmu_verified(),
+    })
+}
+
+fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node], viewer: Viewer) -> Value {
+    let mine = viewer.id() == Some(r.uploader);
+    let staff = viewer.staff();
+    let mut v = json!({
+        "id": r.id,
+        "title": r.name.stem(),
+        "filename": r.filename(),
+        "ext": r.ext,
+        "name": {
+            "course": r.name.course, "time": r.name.time, "type_word": r.name.type_word, "paper": r.name.paper,
+            "with_answer": r.name.with_answer, "extra": r.name.extra, "version": r.name.version,
+        },
+        "tag": tag_view(r.tag),
+        "node": node_brief(node),
+        "path": path.iter().map(node_brief).collect::<Vec<_>>(),
+        "note": r.note,
+        "size": r.size,
+        "mime": r.mime,
+        "status": r.status.as_str(),
+        // "Awaiting re-review" is internal; the public just sees a published resource.
+        "needs_review": r.needs_review && (mine || staff),
+        "review_note": if mine || staff { r.review_note.as_str() } else { "" },
+        "created_at": r.created_at,
+        "updated_at": r.updated_at,
+        "downloads": r.downloads,
+        "mine": mine,
+    });
+    if staff {
+        // 分类规则 §5.6–5.7: uploader, source and original name are staff-only.
+        v["original_name"] = json!(r.original_name);
+        v["source"] = json!(r.source);
+        v["uncertain"] = json!(r.uncertain);
+        v["uploader"] = json!({ "id": r.uploader, "nickname": app.hub.uploader_name(r.uploader) });
+    }
+    v
+}
+
+fn list(app: &App, v: Vec<(Resource, Node)>, viewer: Viewer) -> Json<Value> {
+    Json(json!(v.iter().map(|(r, n)| resource_view(app, r, n, &[], viewer)).collect::<Vec<_>>()))
 }
 
 // ------------------------------------------------------------------ routes
@@ -201,28 +234,37 @@ fn token_view(t: &Token) -> Value {
 pub fn router(app: Arc<App>) -> Router {
     let api = Router::new()
         .route("/meta", get(meta))
-        .route("/me", get(me))
-        .route("/token/claim", post(claim_token))
-        .route("/colleges", get(colleges))
-        .route("/courses", get(courses))
-        .route("/courses/suggest", get(suggest))
-        .route("/courses/{id}", get(course).patch(patch_course))
-        .route("/courses/{id}/merge", post(merge_course))
+        .route("/me", get(me).patch(update_me))
+        .route("/auth/code", post(send_code))
+        .route("/auth/register", post(register))
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
+        .route("/auth/reset", post(reset))
+        .route("/tree", get(tree))
+        .route("/nodes", post(create_node))
+        .route("/nodes/suggest", get(suggest))
+        .route("/nodes/{id}", get(node).patch(patch_node).delete(delete_node))
+        .route("/nodes/{id}/merge", post(merge_node))
         .route("/search", get(search))
         .route("/recent", get(recent))
         .route("/popular", get(popular))
         .route("/mine", get(mine))
         .route("/resources", post(create_resource))
+        .route("/resources/preview-name", post(preview_name))
         .route("/resources/{id}", get(resource).patch(patch_resource))
         .route("/resources/{id}/review", post(review))
+        .route("/resources/{id}/report", post(report))
         .route("/resources/{id}/download", get(download_plan))
         .route("/uploads", post(begin_upload))
         .route("/uploads/{id}", get(upload_plan))
         .route("/uploads/{id}/parts/{index}", post(confirm_part))
         .route("/uploads/{id}/parts/{index}/renew", post(renew_part))
         .route("/review", get(review_queue))
-        .route("/admin/tokens", get(list_tokens).post(create_token))
-        .route("/admin/tokens/{id}", axum::routing::patch(update_token))
+        .route("/review/nodes", get(pending_nodes))
+        .route("/admin/reports", get(reports))
+        .route("/admin/reports/{id}/handle", post(handle_report))
+        .route("/admin/users", get(users))
+        .route("/admin/users/{id}", axum::routing::patch(update_user))
         .route("/admin/status", get(status))
         .route("/relay/upload", post(crate::relay::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/upload", put(local_upload).layer(axum::extract::DefaultBodyLimit::disable()))
@@ -232,90 +274,145 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .nest("/api", api)
         .route("/d/{id}", get(download_redirect))
-        .route("/", get(page_home))
-        .route("/c/{id}", get(page_course))
-        .route("/r/{id}", get(page_resource))
+        .route("/", get(|s: S, h: HeaderMap| async move { page(s, "index.html", h) }))
+        .route("/n/{id}", get(|s: S, h: HeaderMap| async move { page(s, "node.html", h) }))
+        .route("/r/{id}", get(|s: S, h: HeaderMap| async move { page(s, "resource.html", h) }))
         .route("/{*path}", get(static_file))
+        .layer(axum::middleware::from_fn(csrf_guard))
         .with_state(app)
 }
 
-// ------------------------------------------------------------------ pages
-
-async fn page_home(State(app): S, h: HeaderMap) -> Response {
-    app.site.respond("index.html", &h, StatusCode::OK)
-}
-async fn page_course(State(app): S, h: HeaderMap) -> Response {
-    app.site.respond("course.html", &h, StatusCode::OK)
-}
-async fn page_resource(State(app): S, h: HeaderMap) -> Response {
-    app.site.respond("resource.html", &h, StatusCode::OK)
+fn page(State(app): S, file: &str, h: HeaderMap) -> Response {
+    app.site.respond(file, &h, StatusCode::OK)
 }
 
 async fn static_file(State(app): S, Path(path): Path<String>, h: HeaderMap) -> Response {
     // Clean URLs: /search → search.html.
-    let path = if app.site.get(&path).is_none() && app.site.get(&format!("{path}.html")).is_some() {
-        format!("{path}.html")
-    } else {
-        path
-    };
+    let path = if app.site.get(&path).is_none() && app.site.get(&format!("{path}.html")).is_some() { format!("{path}.html") } else { path };
     app.site.respond(&path, &h, StatusCode::OK)
 }
 
-// ------------------------------------------------------------------ public reads
+// ------------------------------------------------------------------ meta & account
 
 async fn meta(State(app): S) -> Json<Value> {
     let l = &app.hub.limits;
     Json(json!({
-        "kinds": Kind::ALL.iter().map(|k| json!({"key": k.as_str(), "label": k.label()})).collect::<Vec<_>>(),
-        "terms": [{"key":1,"label":"秋季学期"},{"key":2,"label":"春季学期"},{"key":3,"label":"夏季学期"}],
-        "levels": ["访客","贡献者","可信贡献者","审核员","管理员"],
+        "tags": Tag::ALL.iter().map(|t| tag_view(*t)).collect::<Vec<_>>(),
+        "type_words": TYPE_WORDS.iter().map(|(w, t)| json!({ "word": w, "tag": t.code() })).collect::<Vec<_>>(),
+        "papers": ["A卷", "B卷", "C卷"],
+        "levels": ["访客", "贡献者", "可信贡献者", "审核员", "管理员"],
         "limits": { "max_file": l.max_file, "max_part": l.max_part },
         "stats": app.hub.stats(),
         "upload_via": if app.worker_url.is_empty() { "relay" } else { "worker" },
+        "mail": app.mailer.is_some(),
     }))
 }
 
 async fn me(auth: Auth) -> Json<Value> {
-    Json(match &auth.0 {
-        Some(t) => json!({ "id": t.id, "level": t.level as u8, "label": t.label, "uploads": t.uploads }),
-        None => json!({ "level": 0 }),
-    })
-}
-
-async fn claim_token(State(app): S, h: HeaderMap, auth: Auth) -> R<Json<Value>> {
-    if auth.0.is_some() {
-        return Err(Error::Conflict("你已经有令牌了".into()).into());
-    }
-    let ip = client_ip(&h);
-    {
-        let day = now() / 86400;
-        let mut claims = app.claims.lock();
-        let e = claims.entry(ip.clone()).or_insert((day, 0));
-        if e.0 != day {
-            *e = (day, 0);
-        }
-        if e.1 >= 3 {
-            return Err(Error::TooMany("同一网络今天领取的令牌太多了".into()).into());
-        }
-        e.1 += 1;
-    }
-    let hub = app.hub.clone();
-    let (secret, t) = blocking(move || hub.issue_token(Level::Contributor, "自助领取", &ip)).await?;
-    Ok(Json(json!({ "token": secret, "level": t.level as u8, "id": t.id })))
-}
-
-async fn colleges(State(app): S) -> Json<Value> {
-    Json(json!(app.hub.colleges().into_iter().map(|(n, c)| json!({"name": n, "count": c})).collect::<Vec<_>>()))
+    Json(json!({ "user": auth.user.as_ref().map(user_view) }))
 }
 
 #[derive(Deserialize)]
-struct CoursesQ {
-    college: Option<String>,
+struct CodeIn {
+    email: String,
+    #[serde(default)]
+    purpose: String,
 }
 
-async fn courses(State(app): S, Query(q): Query<CoursesQ>) -> Json<Value> {
-    let v: Vec<CourseView> = app.hub.courses(q.college.as_deref()).iter().map(|(c, n)| course_view(c, *n)).collect();
-    Json(json!(v))
+async fn send_code(State(app): S, h: HeaderMap, Json(b): Json<CodeIn>) -> R<Json<Value>> {
+    let mailer = app.mailer.as_ref().ok_or_else(|| bad("站点暂未开放邮件验证，请联系管理员"))?;
+    let purpose = if b.purpose == "reset" { CodePurpose::Reset } else { CodePurpose::Register };
+    let (email, code) = app.hub.request_code(&b.email, purpose, &client_ip(&h))?;
+    if let Err(e) = mailer.send_code(&email, &code, if purpose == CodePurpose::Reset { "reset" } else { "register" }).await {
+        tracing::warn!("send code to {email}: {e}");
+        app.hub.cancel_code(&email, purpose);
+        return Err(ApiError(Error::Upstream("验证码邮件发送失败，请稍后重试".into())));
+    }
+    Ok(Json(json!({ "sent": true })))
+}
+
+#[derive(Deserialize)]
+struct RegisterIn {
+    email: String,
+    code: String,
+    password: String,
+    nickname: String,
+}
+
+async fn register(State(app): S, h: HeaderMap, Json(b): Json<RegisterIn>) -> R<Response> {
+    let hub = app.hub.clone();
+    let ip = client_ip(&h);
+    let (secret, u) = blocking(move || hub.register(Registration { email: b.email, code: b.code, password: b.password, nickname: b.nickname }, &ip)).await?;
+    Ok(with_session(&app, &secret, json!({ "user": user_view(&u) })))
+}
+
+#[derive(Deserialize)]
+struct LoginIn {
+    email: String,
+    password: String,
+}
+
+async fn login(State(app): S, h: HeaderMap, Json(b): Json<LoginIn>) -> R<Response> {
+    let hub = app.hub.clone();
+    let ip = client_ip(&h);
+    let (secret, u) = blocking(move || hub.login(&b.email, &b.password, &ip)).await?;
+    Ok(with_session(&app, &secret, json!({ "user": user_view(&u) })))
+}
+
+async fn logout(State(app): S, auth: Auth) -> R<Response> {
+    if let Some(s) = auth.session {
+        let hub = app.hub.clone();
+        blocking(move || hub.logout(&s)).await?;
+    }
+    let mut res = Json(json!({ "ok": true })).into_response();
+    res.headers_mut().insert(header::SET_COOKIE, session_cookie(&app, "", 0));
+    Ok(res)
+}
+
+#[derive(Deserialize)]
+struct ResetIn {
+    email: String,
+    code: String,
+    password: String,
+}
+
+async fn reset(State(app): S, h: HeaderMap, Json(b): Json<ResetIn>) -> R<Response> {
+    let hub = app.hub.clone();
+    let ip = client_ip(&h);
+    let (secret, u) = blocking(move || hub.reset_password(&b.email, &b.code, &b.password, &ip)).await?;
+    Ok(with_session(&app, &secret, json!({ "user": user_view(&u) })))
+}
+
+#[derive(Deserialize)]
+struct MeIn {
+    nickname: Option<String>,
+    old_password: Option<String>,
+    new_password: Option<String>,
+}
+
+async fn update_me(State(app): S, auth: Auth, Json(b): Json<MeIn>) -> R<Json<Value>> {
+    let me = auth.require()?.clone();
+    let session = auth.session.clone().unwrap_or_default();
+    let hub = app.hub.clone();
+    let u = blocking(move || hub.update_profile(&me, &session, b.nickname.as_deref(), b.old_password.as_deref(), b.new_password.as_deref())).await?;
+    Ok(Json(json!({ "user": user_view(&u) })))
+}
+
+// ------------------------------------------------------------------ tree
+
+async fn tree(State(app): S) -> Json<Value> {
+    Json(json!(app.hub.tree().iter().map(|i| node_view(&i.node, i.count)).collect::<Vec<_>>()))
+}
+
+async fn node(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let (info, path, children, resources) = app.hub.node(auth.viewer(), id)?;
+    let v = auth.viewer();
+    Ok(Json(json!({
+        "node": node_view(&info.node, info.count),
+        "path": path.iter().map(node_brief).collect::<Vec<_>>(),
+        "children": children.iter().map(|c| node_view(&c.node, c.count)).collect::<Vec<_>>(),
+        "resources": resources.iter().map(|r| resource_view(&app, r, &info.node, &[], v)).collect::<Vec<_>>(),
+    })))
 }
 
 #[derive(Deserialize)]
@@ -324,23 +421,57 @@ struct Q {
 }
 
 async fn suggest(State(app): S, Query(q): Query<Q>) -> Json<Value> {
-    let v: Vec<CourseView> = app.hub.suggest_courses(q.q.as_deref().unwrap_or(""), 10).iter().map(|c| course_view(c, 0)).collect();
+    let v: Vec<Value> = app
+        .hub
+        .suggest_nodes(q.q.as_deref().unwrap_or(""), 12)
+        .iter()
+        .map(|(n, path)| json!({ "node": node_view(n, 0), "path": path.iter().map(node_brief).collect::<Vec<_>>() }))
+        .collect();
     Json(json!(v))
 }
 
-async fn course(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
-    let (c, n) = app.hub.course(auth.viewer(), id)?;
-    let rs: Vec<ResourceView> = app.hub.course_resources(auth.viewer(), c.id).iter().map(|r| resource_view(r, &c, auth.0.as_ref())).collect();
-    Ok(Json(json!({ "course": course_view(&c, n), "resources": rs })))
+async fn create_node(State(app): S, auth: Auth, Json(b): Json<NodeInput>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let n = blocking(move || hub.create_node(Viewer { user: user.as_ref() }, b)).await?;
+    Ok(Json(node_view(&n, 0)))
 }
+
+async fn patch_node(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<NodePatch>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let n = blocking(move || hub.update_node(Viewer { user: user.as_ref() }, id, b)).await?;
+    Ok(Json(node_view(&n, 0)))
+}
+
+#[derive(Deserialize)]
+struct MergeIn {
+    into: Id,
+}
+
+async fn merge_node(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<MergeIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let n = blocking(move || hub.merge_node(Viewer { user: user.as_ref() }, id, b.into)).await?;
+    Ok(Json(node_view(&n, 0)))
+}
+
+async fn delete_node(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_node(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+// ------------------------------------------------------------------ search & lists
 
 #[derive(Deserialize)]
 struct SearchQ {
     q: Option<String>,
     #[serde(rename = "type")]
     ty: Option<String>,
-    kind: Option<String>,
-    course: Option<Id>,
+    tag: Option<String>,
+    within: Option<Id>,
     page: Option<usize>,
 }
 
@@ -348,46 +479,120 @@ async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<V
     const PAGE: usize = 20;
     let filter = Filter {
         ty: match q.ty.as_deref() {
-            Some("course") => Some(DocType::Course),
+            Some("node") => Some(DocType::Node),
             Some("resource") => Some(DocType::Resource),
             _ => None,
         },
-        course: q.course,
-        kind: q.kind.as_deref().and_then(Kind::parse).map(|k| k as u64),
+        within: q.within,
+        tag: q.tag.as_deref().and_then(Tag::parse).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
     };
     let page = q.page.unwrap_or(1).clamp(1, 50);
-    let (items, total) = app.hub.search(auth.viewer(), q.q.as_deref().unwrap_or(""), filter, PAGE, (page - 1) * PAGE)?;
+    let v = auth.viewer();
+    let (items, total) = app.hub.search(v, q.q.as_deref().unwrap_or(""), filter, PAGE, (page - 1) * PAGE)?;
     let items: Vec<Value> = items
         .iter()
         .map(|i| match i {
-            SearchItem::Course { course, count } => json!({ "type": "course", "course": course_view(course, *count) }),
-            SearchItem::Resource { resource, course } => {
-                json!({ "type": "resource", "resource": resource_view(resource, course, auth.0.as_ref()) })
+            SearchItem::Node { node, path, count } => {
+                json!({ "type": "node", "node": node_view(node, *count), "path": path.iter().map(node_brief).collect::<Vec<_>>() })
             }
+            SearchItem::Resource { resource, node, path } => json!({ "type": "resource", "resource": resource_view(&app, resource, node, path, v) }),
         })
         .collect();
     Ok(Json(json!({ "items": items, "total": total, "page": page, "page_size": PAGE })))
 }
 
-fn list(v: Vec<(Resource, Course)>, me: Option<&Token>) -> Json<Value> {
-    Json(json!(v.iter().map(|(r, c)| resource_view(r, c, me)).collect::<Vec<_>>()))
+async fn recent(State(app): S, auth: Auth) -> Json<Value> {
+    list(&app, app.hub.recent(12), auth.viewer())
 }
 
-async fn recent(State(app): S) -> Json<Value> {
-    list(app.hub.recent(12), None)
-}
-
-async fn popular(State(app): S) -> Json<Value> {
-    list(app.hub.popular(12), None)
+async fn popular(State(app): S, auth: Auth) -> Json<Value> {
+    list(&app, app.hub.popular(12), auth.viewer())
 }
 
 async fn mine(State(app): S, auth: Auth) -> R<Json<Value>> {
-    Ok(list(app.hub.my_resources(auth.viewer())?, auth.0.as_ref()))
+    Ok(list(&app, app.hub.my_resources(auth.viewer())?, auth.viewer()))
 }
 
+// ------------------------------------------------------------------ resources
+
 async fn resource(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
-    let (r, c) = app.hub.resource(auth.viewer(), id)?;
-    Ok(Json(json!(resource_view(&r, &c, auth.0.as_ref()))))
+    let (r, n, path) = app.hub.resource(auth.viewer(), id)?;
+    Ok(Json(resource_view(&app, &r, &n, &path, auth.viewer())))
+}
+
+#[derive(Deserialize)]
+struct CreateResource {
+    upload_id: Id,
+    #[serde(flatten)]
+    input: ResourceInput,
+    #[serde(default)]
+    admin: Option<AdminExtras>,
+}
+
+async fn create_resource(State(app): S, auth: Auth, Json(b): Json<CreateResource>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let r = blocking(move || hub.create_resource(Viewer { user: user.as_ref() }, b.upload_id, b.input, b.admin.unwrap_or_default())).await?;
+    let (r, n, path) = app.hub.resource(auth.viewer(), r.id)?;
+    Ok(Json(resource_view(&app, &r, &n, &path, auth.viewer())))
+}
+
+#[derive(Deserialize)]
+struct PreviewIn {
+    #[serde(flatten)]
+    input: ResourceInput,
+    #[serde(default)]
+    ext: String,
+}
+
+async fn preview_name(State(app): S, Json(b): Json<PreviewIn>) -> R<Json<Value>> {
+    Ok(Json(json!({ "filename": app.hub.preview_name(&b.input, &b.ext)? })))
+}
+
+#[derive(Deserialize)]
+struct PatchResource {
+    #[serde(flatten)]
+    input: ResourceInput,
+    #[serde(default)]
+    admin: Option<AdminExtras>,
+}
+
+async fn patch_resource(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<PatchResource>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.update_resource(Viewer { user: user.as_ref() }, id, b.input, b.admin.unwrap_or_default())).await?;
+    let (r, n, path) = app.hub.resource(auth.viewer(), id)?;
+    Ok(Json(resource_view(&app, &r, &n, &path, auth.viewer())))
+}
+
+#[derive(Deserialize)]
+struct ReviewIn {
+    action: String,
+    #[serde(default)]
+    note: String,
+}
+
+async fn review(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let (r, garbage) = blocking(move || hub.review(Viewer { user: user.as_ref() }, id, &b.action, &b.note)).await?;
+    delete_later(&app, garbage);
+    Ok(Json(json!({ "status": r.status.as_str() })))
+}
+
+#[derive(Deserialize)]
+struct ReportIn {
+    reason: String,
+    #[serde(default)]
+    contact: String,
+}
+
+async fn report(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<Id>, Json(b): Json<ReportIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let ip = client_ip(&h);
+    blocking(move || hub.report(Viewer { user: user.as_ref() }, id, &b.reason, &b.contact, &ip)).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn download_plan(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
@@ -403,88 +608,6 @@ async fn download_redirect(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<R
     }
     let url = plan.parts[0].urls.first().cloned().ok_or(Error::NotFound("下载地址"))?;
     Ok(Redirect::to(&url).into_response())
-}
-
-// ------------------------------------------------------------------ uploads
-
-#[derive(Deserialize)]
-struct BeginUpload {
-    filename: String,
-    #[serde(default)]
-    mime: String,
-    parts: Vec<PartSpec>,
-}
-
-async fn begin_upload(State(app): S, auth: Auth, Json(b): Json<BeginUpload>) -> R<Json<Value>> {
-    let plan = app.hub.begin_upload(auth.viewer(), &b.filename, &b.mime, b.parts).await?;
-    Ok(Json(json!(plan)))
-}
-
-async fn upload_plan(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
-    Ok(Json(json!(app.hub.upload_plan(auth.viewer(), id)?)))
-}
-
-async fn confirm_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>, Json(r): Json<ReceiptIn>) -> R<Json<Value>> {
-    let finished = app.hub.confirm_part(auth.viewer(), id, index, Receipt { asset_id: r.asset_id }).await?;
-    Ok(Json(json!({ "finished": finished })))
-}
-
-async fn renew_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>) -> R<Json<Value>> {
-    Ok(Json(json!(app.hub.renew_part(auth.viewer(), id, index).await?)))
-}
-
-#[derive(Deserialize)]
-struct ReceiptIn {
-    asset_id: Option<u64>,
-}
-
-#[derive(Deserialize)]
-struct CreateResource {
-    upload_id: Id,
-    course_id: Option<Id>,
-    new_course: Option<NewCourse>,
-    #[serde(flatten)]
-    input: ResourceInput,
-}
-
-async fn create_resource(State(app): S, auth: Auth, Json(b): Json<CreateResource>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let tok = auth.0.clone();
-    let r = blocking(move || hub.create_resource(Viewer { token: tok.as_ref() }, b.upload_id, b.course_id, b.new_course, b.input)).await?;
-    let (r, c) = app.hub.resource(auth.viewer(), r.id)?;
-    Ok(Json(json!(resource_view(&r, &c, auth.0.as_ref()))))
-}
-
-#[derive(Deserialize)]
-struct PatchResource {
-    course_id: Option<Id>,
-    #[serde(flatten)]
-    input: ResourceInput,
-}
-
-async fn patch_resource(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<PatchResource>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let tok = auth.0.clone();
-    blocking(move || hub.update_resource(Viewer { token: tok.as_ref() }, id, b.input, b.course_id)).await?;
-    let (r, c) = app.hub.resource(auth.viewer(), id)?;
-    Ok(Json(json!(resource_view(&r, &c, auth.0.as_ref()))))
-}
-
-// ------------------------------------------------------------------ review
-
-#[derive(Deserialize)]
-struct ReviewIn {
-    action: String,
-    #[serde(default)]
-    note: String,
-}
-
-async fn review(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ReviewIn>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let tok = auth.0.clone();
-    let (r, garbage) = blocking(move || hub.review(Viewer { token: tok.as_ref() }, id, &b.action, &b.note)).await?;
-    delete_later(&app, garbage);
-    Ok(Json(json!({ "status": r.status.as_str() })))
 }
 
 /// Deletes storage replicas in the background; failures are logged, not surfaced.
@@ -507,107 +630,129 @@ pub fn delete_later(app: &Arc<App>, locs: Vec<xmuhub_core::model::Location>) {
     });
 }
 
-async fn review_queue(State(app): S, auth: Auth) -> R<Json<Value>> {
-    let q = app.hub.review_queue(auth.viewer())?;
-    let courses = app.hub.pending_courses(auth.viewer())?;
-    Ok(Json(json!({
-        "resources": q.iter().map(|(r, c)| resource_view(r, c, auth.0.as_ref())).collect::<Vec<_>>(),
-        "courses": courses.iter().map(|(c, n)| course_view(c, *n)).collect::<Vec<_>>(),
-    })))
-}
+// ------------------------------------------------------------------ uploads
 
 #[derive(Deserialize)]
-struct PatchCourse {
-    #[serde(flatten)]
-    patch: CoursePatchIn,
+struct BeginUpload {
+    filename: String,
     #[serde(default)]
-    approve: bool,
+    mime: String,
+    parts: Vec<PartSpec>,
+}
+
+async fn begin_upload(State(app): S, auth: Auth, Json(b): Json<BeginUpload>) -> R<Json<Value>> {
+    let plan = app.hub.begin_upload(auth.viewer(), &b.filename, &b.mime, b.parts).await?;
+    Ok(Json(json!(plan)))
+}
+
+async fn upload_plan(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.upload_plan(auth.viewer(), id)?)))
 }
 
 #[derive(Deserialize)]
-struct CoursePatchIn {
-    code: Option<String>,
-    name: Option<String>,
-    college: Option<String>,
-    aliases: Option<Vec<String>>,
+struct ReceiptIn {
+    asset_id: Option<u64>,
 }
 
-async fn patch_course(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<PatchCourse>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let tok = auth.0.clone();
-    let p = CoursePatch { code: b.patch.code, name: b.patch.name, college: b.patch.college, aliases: b.patch.aliases };
-    let c = blocking(move || hub.update_course(Viewer { token: tok.as_ref() }, id, p, b.approve)).await?;
-    Ok(Json(json!(course_view(&c, 0))))
+async fn confirm_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>, Json(r): Json<ReceiptIn>) -> R<Json<Value>> {
+    let finished = app.hub.confirm_part(auth.viewer(), id, index, Receipt { asset_id: r.asset_id }).await?;
+    Ok(Json(json!({ "finished": finished })))
 }
+
+async fn renew_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.renew_part(auth.viewer(), id, index).await?)))
+}
+
+// ------------------------------------------------------------------ review & admin
 
 #[derive(Deserialize)]
-struct MergeIn {
-    into: Id,
-}
-
-async fn merge_course(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<MergeIn>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let tok = auth.0.clone();
-    let c = blocking(move || hub.merge_course(Viewer { token: tok.as_ref() }, id, b.into)).await?;
-    Ok(Json(json!(course_view(&c, 0))))
-}
-
-// ------------------------------------------------------------------ admin
-
-async fn list_tokens(State(app): S, auth: Auth) -> R<Json<Value>> {
-    Ok(Json(json!(app.hub.tokens(auth.viewer())?.iter().map(token_view).collect::<Vec<_>>())))
-}
-
-#[derive(Deserialize)]
-struct NewToken {
-    level: u8,
+struct QueueQ {
+    status: Option<String>,
     #[serde(default)]
-    label: String,
+    uncertain: bool,
 }
 
-async fn create_token(State(app): S, auth: Auth, h: HeaderMap, Json(b): Json<NewToken>) -> R<Json<Value>> {
-    let me = auth.0.as_ref().ok_or(Error::Unauthorized)?;
-    let level = Level::from_u8(b.level).filter(|l| *l > Level::Guest).ok_or_else(|| xmuhub_core::error::bad("级别不合法"))?;
-    // Reviewers may hand out tokens below their own tier; admins anything.
-    if me.level < Level::Reviewer || (me.level < Level::Admin && level >= Level::Reviewer) {
-        return Err(Error::Forbidden.into());
-    }
-    let hub = app.hub.clone();
-    let ip = client_ip(&h);
-    let (secret, t) = blocking(move || hub.issue_token(level, &b.label, &ip)).await?;
-    Ok(Json(json!({ "token": secret, "info": token_view(&t) })))
+async fn review_queue(State(app): S, auth: Auth, Query(q): Query<QueueQ>) -> R<Json<Value>> {
+    let v = auth.viewer();
+    let items = app.hub.review_queue(v, q.status.as_deref(), q.uncertain)?;
+    Ok(Json(json!(items.iter().map(|(r, n)| resource_view(&app, r, n, &[], v)).collect::<Vec<_>>())))
+}
+
+async fn pending_nodes(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let v: Vec<Value> = app
+        .hub
+        .pending_nodes(auth.viewer())?
+        .iter()
+        .map(|(n, path, count)| json!({ "node": node_view(n, *count), "path": path.iter().map(node_brief).collect::<Vec<_>>() }))
+        .collect();
+    Ok(Json(json!(v)))
 }
 
 #[derive(Deserialize)]
-struct UpdateToken {
+struct ReportsQ {
+    #[serde(default)]
+    all: bool,
+}
+
+fn report_view(app: &App, r: &Report, res: &Option<(Resource, Node)>, v: Viewer) -> Value {
+    json!({
+        "id": r.id, "reason": r.reason, "contact": r.contact, "created_at": r.created_at, "handled": r.handled,
+        "handled_note": r.handled_note,
+        "resource": res.as_ref().map(|(x, n)| resource_view(app, x, n, &[], v)),
+    })
+}
+
+async fn reports(State(app): S, auth: Auth, Query(q): Query<ReportsQ>) -> R<Json<Value>> {
+    let v = auth.viewer();
+    Ok(Json(json!(app.hub.reports(v, q.all)?.iter().map(|(r, res)| report_view(&app, r, res, v)).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct HandleIn {
+    #[serde(default)]
+    note: String,
+}
+
+async fn handle_report(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<HandleIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.handle_report(Viewer { user: user.as_ref() }, id, &b.note)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn users(State(app): S, auth: Auth, Query(q): Query<Q>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.users(auth.viewer(), q.q.as_deref().unwrap_or(""))?.iter().map(user_view).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct UpdateUser {
     level: Option<u8>,
     banned: Option<bool>,
-    label: Option<String>,
 }
 
-async fn update_token(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<UpdateToken>) -> R<Json<Value>> {
+async fn update_user(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<UpdateUser>) -> R<Json<Value>> {
     let level = match b.level {
-        Some(l) => Some(Level::from_u8(l).filter(|l| *l > Level::Guest).ok_or_else(|| xmuhub_core::error::bad("级别不合法"))?),
+        Some(l) => Some(Level::from_u8(l).filter(|l| *l > Level::Guest).ok_or_else(|| bad("级别不合法"))?),
         None => None,
     };
     let hub = app.hub.clone();
-    let tok = auth.0.clone();
-    let t = blocking(move || hub.update_token(Viewer { token: tok.as_ref() }, id, level, b.banned, b.label)).await?;
-    Ok(Json(token_view(&t)))
+    let user = auth.user.clone();
+    let u = blocking(move || hub.update_user(Viewer { user: user.as_ref() }, id, level, b.banned)).await?;
+    Ok(Json(user_view(&u)))
 }
 
 async fn status(State(app): S, auth: Auth) -> R<Json<Value>> {
-    match &auth.0 {
-        Some(t) if t.level >= Level::Reviewer => {}
-        _ => return Err(Error::Forbidden.into()),
+    if !auth.viewer().staff() {
+        return Err(ApiError(Error::Forbidden));
     }
     Ok(Json(json!({
         "stats": app.hub.stats(),
         "mirrors": app.mirrors.stats(),
         "rss_bytes": crate::alloc::rss_bytes(),
         "relay_bytes_today": app.relay.as_ref().map(|r| r.used_today()),
+        "mail": app.mailer.is_some(),
         "version": env!("CARGO_PKG_VERSION"),
-        "pending_statuses": [Status::Pending.as_str()],
+        "statuses": [Status::Pending.as_str(), Status::Restricted.as_str()],
     })))
 }
 
@@ -633,7 +778,7 @@ async fn local_upload(State(app): S, Query(q): Query<TicketQ>, body: axum::body:
         n += chunk.len() as u64;
         if n > t.s {
             let _ = tokio::fs::remove_file(&tmp).await;
-            return Err(xmuhub_core::error::bad("文件比声明的大").into());
+            return Err(bad("文件比声明的大"));
         }
         f.write_all(&chunk).await.map_err(Error::from)?;
     }
@@ -641,7 +786,7 @@ async fn local_upload(State(app): S, Query(q): Query<TicketQ>, body: axum::body:
     drop(f);
     if n != t.s {
         let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(xmuhub_core::error::bad("文件不完整").into());
+        return Err(bad("文件不完整"));
     }
     tokio::fs::rename(&tmp, &path).await.map_err(Error::from)?;
     Ok(Json(json!({ "ok": true })))

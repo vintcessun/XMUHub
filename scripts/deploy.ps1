@@ -38,9 +38,11 @@ param(
     [string]$UploadWorkerUrl = "",
     [switch]$OnlyWorker,
     [switch]$WebOnly,
-    # Issue a new admin (L4) token on the server and print it; nothing is deployed.
-    [switch]$NewAdminToken,
-    [string]$TokenLabel = "管理员"
+    # Set a registered user's role instead of deploying: -SetRole a@b.com -Level 3
+    [string]$SetRole = "",
+    [int]$Level = 3,
+    # Accounts registered with these emails are always admins (comma separated).
+    [string]$Admins = "vintces@gmail.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +62,7 @@ function Read-EnvFile([string]$Path) {
 $gh = Read-EnvFile (Join-Path $Root ".secrets/github.env")
 $cf = Read-EnvFile (Join-Path $Root ".secrets/cloudflare.env")
 $up = Read-EnvFile (Join-Path $Root ".secrets/upload.env")
+$mail = Read-EnvFile (Join-Path $Root ".secrets/mail.env")
 $WorkerName = if ($up.UPLOAD_WORKER_NAME) { $up.UPLOAD_WORKER_NAME } else { "xmuhub-upload" }
 
 # ================================================================ 1. Cloudflare Worker
@@ -130,17 +133,17 @@ function Invoke-Remote([string]$Script, [string]$What) {
     if ($LASTEXITCODE -ne 0) { throw "远端步骤失败（$What），exit=$LASTEXITCODE" }
 }
 
-if ($NewAdminToken) {
-    # redb holds an exclusive lock while the service runs, so stop it for the moment it takes.
+if ($SetRole -ne "") {
+    # Usage: -SetRole someone@example.com -Level 3. redb is locked while the service runs,
+    # so stop it for the moment it takes. (Admins can also do this on the /admin page.)
     Invoke-Remote @"
 set -e
 cd '$RemoteBase'
 systemctl stop $Service
 set -a; . ./xmuhub.env; set +a
-./run token --level 4 --label '$TokenLabel' 2>/dev/null | tail -n 2 || true
+./run role --email '$SetRole' --level $Level || true
 systemctl start $Service
-"@ "签发管理员令牌"
-    Write-Host "请妥善保存上面的令牌，在网站「我的」页面粘贴即可成为管理员。" -ForegroundColor Green
+"@ "设置角色"
     return
 }
 
@@ -169,6 +172,13 @@ UPLOAD_WORKER_URL=$UploadWorkerUrl
 RELAY_DAILY_MB=5120
 RELAY_CONCURRENCY=4
 UPLOAD_TICKET_SECRET=$($up.UPLOAD_TICKET_SECRET)
+XMUHUB_SCRIPT_TOKEN=$($up.XMUHUB_SCRIPT_TOKEN)
+XMUHUB_ADMINS=$Admins
+SMTP_HOST=$($mail.SMTP_HOST)
+SMTP_PORT=$($mail.SMTP_PORT)
+SMTP_USER=$($mail.SMTP_USER)
+SMTP_PASSWORD=$($mail.SMTP_PASSWORD)
+MAIL_FROM=$($mail.MAIL_FROM)
 RUST_LOG=info,tantivy=warn
 MIMALLOC_PURGE_DELAY=0
 "@
@@ -288,4 +298,4 @@ Invoke-Remote $deploy "替换/重启"
 Write-Host ""
 Write-Host "===== 部署完成：$PublicUrl =====" -ForegroundColor Green
 Write-Host "回滚：ssh $Remote `"cd $RemoteBase && systemctl stop $Service && mv -f run.bak run && rm -rf web && mv web.bak web && systemctl start $Service`""
-Write-Host "签发管理员令牌：pwsh scripts/deploy.ps1 -NewAdminToken"
+Write-Host "管理员：用 $Admins 注册即自动成为管理员；其他人的角色在 /admin 的「用户」里调整"

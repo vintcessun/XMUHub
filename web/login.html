@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · XMUHub</title>
+<meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<meta name="theme-color" content="#122e66">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="me">
+<header id="top" class="top"></header>
+<main><div class="wrap">
+  <section class="card auth-card">
+    <div class="tabs" id="tabs"><button data-t="login" class="on">登录</button><button data-t="register">注册</button><button data-t="reset">找回密码</button></div>
+    <form id="f" autocomplete="on">
+      <label class="field"><span>邮箱</span><input class="input" id="email" type="email" autocomplete="email" required></label>
+      <div id="codebox" hidden><label class="field"><span>邮箱验证码</span><div class="row" style="flex-wrap:nowrap"><input class="input" id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button class="btn" id="sendcode" type="button" style="flex:none">获取验证码</button></div></label></div>
+      <div id="nickbox" hidden><label class="field"><span>昵称（仅审核员可见）</span><input class="input" id="nickname" maxlength="20"></label></div>
+      <label class="field"><span id="pwlabel">密码</span><input class="input" id="password" type="password" autocomplete="current-password" minlength="8" required></label>
+      <div id="msg"></div>
+      <button class="btn primary lg" id="go" style="width:100%">登录</button>
+    </form>
+    <p class="small muted" style="margin-top:14px">任何邮箱都可以注册；使用厦大邮箱（@stu.xmu.edu.cn / @xmu.edu.cn）注册会显示“已认证”。</p>
+  </section>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script type="module" src="/assets/pages/login.js"></script>
+</body>
+</html>

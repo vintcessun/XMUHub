@@ -1,56 +1,246 @@
-import { api, esc, fmtSize, layout, meta, qs, token, toast, $ } from '../app.js';
+import { api, esc, fmtSize, layout, loginUrl, meta, pathText, qs, toast, tree, $ } from '../app.js';
 
-const mePromise = layout('upload');
-
-const state = {
-  file: null,
-  parts: null, // [{start, end, size, sha256}]
-  course: null, // picked {id, name, ...}
-  newCourse: false,
-  hashing: null,
-};
+const state = { node: null, path: [], rows: [], busy: false };
+let M = null; // meta
 
 // ---------------------------------------------------------------- gate
 
-async function gate() {
-  const me = await mePromise;
-  const m = await meta();
-  $('#droptip').textContent = `单个文件最大 ${fmtSize(m.limits.max_file)}，大文件会自动分卷上传`;
-  $('#kind').innerHTML = m.kinds.map((k) => `<option value="${k.key}">${k.label}</option>`).join('');
-  const y = new Date().getFullYear();
-  $('#year').innerHTML += Array.from({ length: 16 }, (_, i) => `<option>${y - i}</option>`).join('');
-  if (me.level >= 1) {
-    $('#form').hidden = false;
-    step(0);
+(async () => {
+  const me = await layout('upload');
+  if (!me) {
+    $('#gate').innerHTML = `<section class="card"><h2>请先登录</h2><p class="muted">上传资料需要一个账号，注册只需邮箱验证码。</p>
+      <a class="btn primary" href="${loginUrl()}">登录 / 注册</a></section>`;
     return;
   }
-  $('#gate').innerHTML = `<section class="card">
-    <h2>上传前先领取一个令牌</h2>
-    <p class="muted">XMUHub 不用注册。令牌保存在你的浏览器里，用来识别你的上传；新令牌是<b>贡献者</b>级别，上传的资料会在审核通过后公开。</p>
-    <div class="row"><button class="btn primary" id="claim">领取令牌并继续</button><a href="/me">我已经有令牌了</a></div>
-  </section>`;
-  $('#claim').onclick = async () => {
-    try {
-      const r = await api('/token/claim', { method: 'POST' });
-      token.set(r.token);
-      toast('令牌已保存到本浏览器，可以在「我的」页面备份');
-      location.reload();
-    } catch (e) { toast(e.message, true); }
-  };
+  M = await meta();
+  $('#form').hidden = false;
+  $('#droptip').textContent = `单个文件最大 ${fmtSize(M.limits.max_file)}，大文件会自动分卷上传`;
+  $('#b_type').innerHTML += M.type_words.map((t) => `<option>${t.word}</option>`).join('');
+  $('#b_year').innerHTML += yearOptions('');
+  if (qs.get('node')) {
+    try { const d = await api(`/nodes/${Number(qs.get('node'))}`); pick(d.node, d.path); } catch { /* ignore */ }
+  }
+  if (me.level < 2) $('#hint').textContent = '你的上传会在审核通过后公开。';
+})();
+
+function yearOptions(cur) {
+  const y = new Date().getFullYear();
+  const acad = Array.from({ length: 16 }, (_, i) => `${y - i}-${y - i + 1}`);
+  const single = Array.from({ length: 16 }, (_, i) => `${y + 1 - i}`);
+  const opt = (v) => `<option${v === cur ? ' selected' : ''}>${v}</option>`;
+  // Exam months (四六级 202406) and older years aren't in the lists; keep them selectable.
+  const extra = cur && !acad.includes(cur) && !single.includes(cur) ? opt(cur) : '';
+  return `${extra}<optgroup label="学年">${acad.map(opt).join('')}</optgroup><optgroup label="年份">${single.map(opt).join('')}</optgroup>`;
 }
 
-function step(i) {
-  document.querySelectorAll('#steps span').forEach((s, j) => {
-    s.className = j < i ? 'done' : j === i ? 'on' : '';
-  });
+// ---------------------------------------------------------------- node picker
+
+function pick(node, path) {
+  state.node = node;
+  state.path = path || [];
+  $('#nodepick').hidden = true;
+  $('#coursenew').hidden = true;
+  $('#picked').hidden = false;
+  $('#picked').innerHTML = `<div><b>${esc(node.name)}</b> <span class="small muted">${esc(pathText(state.path))}</span>
+    <div class="small faint">文件名将以「${esc(node.label || node.name)}」开头</div></div><span class="grow"></span><a href="#" id="unpick">更换</a>`;
+  $('#unpick').onclick = (e) => { e.preventDefault(); state.node = null; $('#picked').hidden = true; $('#nodepick').hidden = false; $('#nq').focus(); };
+  renderRows();
 }
 
-// ---------------------------------------------------------------- file & hashing
+let timer = 0;
+let seq = 0;
+$('#nq').oninput = () => {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const q = $('#nq').value.trim();
+    const ul = $('#ns');
+    if (!q) { ul.hidden = true; return; }
+    const my = ++seq;
+    const list = await api(`/nodes/suggest?q=${encodeURIComponent(q)}`).catch(() => []);
+    if (my !== seq) return;
+    ul.hidden = false;
+    ul.innerHTML = list.length
+      ? list.map((x, i) => `<li data-i="${i}">${esc(x.node.name)}<small>${esc(pathText(x.path))}${x.node.status === 'pending' ? ' · 待确认' : ''}</small></li>`).join('')
+      : '<li class="faint">没有找到，试试拼音首字母，或在分类树里选</li>';
+    ul.onclick = (e) => {
+      const li = e.target.closest('li[data-i]');
+      if (!li) return;
+      ul.hidden = true;
+      const x = list[Number(li.dataset.i)];
+      pick(x.node, x.path);
+    };
+  }, 160);
+};
+document.addEventListener('click', (e) => { if (!e.target.closest('.suggest')) $('#ns').hidden = true; });
 
-let hasherLoaded = null;
+$('#newcourse').onclick = async (e) => {
+  e.preventDefault();
+  const t = await tree();
+  const b = t.children(0).find((s) => s.code === 'B' || s.name.startsWith('B'));
+  const colleges = b ? t.children(b.id) : [];
+  $('#nc_parent').innerHTML = colleges.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('#nodepick').hidden = true;
+  $('#coursenew').hidden = false;
+};
+$('#backpick').onclick = (e) => { e.preventDefault(); $('#coursenew').hidden = true; $('#nodepick').hidden = false; };
+$('#nc_go').onclick = async () => {
+  try {
+    const n = await api('/nodes', { method: 'POST', body: { parent: Number($('#nc_parent').value), kind: 'course', name: $('#nc_name').value } });
+    const d = await api(`/nodes/${n.id}`);
+    pick(d.node, d.path);
+  } catch (err) { toast(err.message, true); }
+};
+
+// ---------------------------------------------------------------- filename recognition
+
+/** Guesses name parts from an original file name (rule-based 自动识别). */
+function guess(name) {
+  const stem = name.replace(/\.[^.]+$/, '');
+  const ext = (/\.([^.]+)$/.exec(name)?.[1] || '').toLowerCase();
+  const g = { year: '', term: '', type_word: '', paper: '', with_answer: false, extra: '' };
+  let m;
+  if ((m = /(20\d{2})\s*[-–~至]\s*(20\d{2})/.exec(stem))) g.year = `${m[1]}-${m[2]}`;
+  else if ((m = /(?<!\d)(\d{2})\s*[-–]\s*(\d{2})(?!\d)/.exec(stem)) && Number(m[2]) === Number(m[1]) + 1) g.year = `20${m[1]}-20${m[2]}`;
+  else if ((m = /(?<!\d)(20\d{2})(0[1-9]|1[0-2])(?!\d)/.exec(stem))) g.year = `${m[1]}${m[2]}`;
+  else if ((m = /(?<!\d)(20\d{2})(?!\d)/.exec(stem))) g.year = m[1];
+  if (/第一学期|秋季|秋/.test(stem)) g.term = '秋';
+  else if (/第二学期|春季|春/.test(stem)) g.term = '春';
+  else if (/暑期|暑假|夏季学期|暑/.test(stem)) g.term = '暑';
+  if ((m = /([ABC])\s*卷/i.exec(stem))) g.paper = `${m[1].toUpperCase()}卷`;
+  if (/答案|解答|解析|参考答案|评分标准|solution|sln|\bkey\b/i.test(stem)) g.with_answer = true;
+  if ((m = /(\d{2,4})\s*题/.exec(stem))) g.extra = `${m[1]}题`;
+  const rules = [
+    [/期中/, '期中试卷'], [/期末/, '期末试卷'], [/小测|测验|quiz/i, '小测'], [/思考题/, '思考题'], [/题库|刷题|选择题/, '题库'],
+    [/真题|试卷|试题|往年|卷|exam|final|midterm/i, '往年试卷'], [/单词/, '单词表'], [/提纲|大纲/, '提纲'], [/重点|复习|考点/, '重点'],
+    [/笔记|note/i, '笔记'], [/实验|报告/, '实验报告'], [/讲义/, '讲义'], [/课件|slides?|lecture/i, '课件'], [/教材|课本|教科书|第.版|edition/i, '教材'],
+    [/模板|template/i, '模板'],
+  ];
+  // "期中复习重点" is notes, not a paper: study-material words win unless the name says 试卷/考试.
+  const isPaper = /试卷|试题|考试|真题|[ABC]\s*卷/i.test(stem);
+  const notes = [[/思考题/, '思考题'], [/题库|刷题/, '题库'], [/单词/, '单词表'], [/提纲|大纲/, '提纲'], [/重点|考点|复习/, '重点'], [/笔记/, '笔记']];
+  if (!isPaper) for (const [re, w] of notes) if (re.test(stem)) { g.type_word = w; break; }
+  if (!g.type_word) for (const [re, w] of rules) if (re.test(stem)) { g.type_word = w; break; }
+  if (!g.type_word) {
+    if (['ppt', 'pptx', 'key'].includes(ext)) g.type_word = '课件';
+    else if (['zip', 'rar', '7z'].includes(ext)) g.type_word = '合集';
+    else if (['html', 'exe', 'py'].includes(ext)) g.type_word = '工具';
+    else if (g.with_answer) g.type_word = '往年试卷';
+    else g.type_word = '资料';
+  }
+  if (g.paper && g.type_word === '资料') g.type_word = '往年试卷';
+  return g;
+}
+
+function timeOf(r) {
+  if (!r.year) return '';
+  return r.term && /^\d{4}(-\d{4})?$/.test(r.year) ? `${r.year}${r.term}` : r.year;
+}
+
+function genName(r) {
+  if (!state.node) return '（先选择分类）';
+  let s = state.node.label || state.node.name;
+  const t = timeOf(r);
+  if (t) s += `_${t}`;
+  s += `_${r.type_word}`;
+  const d = [r.paper, r.with_answer && '含答案', r.extra].filter(Boolean);
+  if (d.length) s += `(${d.join('、')})`;
+  const ext = (/\.([^.]+)$/.exec(r.file.name)?.[1] || '').toLowerCase();
+  return ext ? `${s}.${ext}` : s;
+}
+
+// ---------------------------------------------------------------- rows
+
+function addFiles(files) {
+  for (const f of files) {
+    if (!f.size) { toast(`${f.name} 是空文件，已跳过`, true); continue; }
+    if (f.size > M.limits.max_file) { toast(`${f.name} 太大了`, true); continue; }
+    if (state.rows.some((r) => r.file.name === f.name && r.file.size === f.size)) continue;
+    const g = guess(f.name);
+    state.rows.push({ file: f, sel: true, parts: null, hashing: 0, status: '', err: false, done: false, note: '', ...g });
+  }
+  renderRows();
+  hashQueue();
+}
+
+function rowHtml(r, i) {
+  const types = M.type_words.map((t) => `<option${t.word === r.type_word ? ' selected' : ''}>${t.word}</option>`).join('');
+  const hashed = r.parts ? '' : ` · 校验中 ${Math.round(r.hashing * 100)}%`;
+  return `<div class="frow${r.done ? ' done' : r.err ? ' err' : ''}" data-i="${i}">
+    <div class="head"><input type="checkbox" data-f="sel"${r.sel ? ' checked' : ''}${r.done ? ' disabled' : ''}>
+      <span class="orig">${esc(r.file.name)} <span class="faint">· ${fmtSize(r.file.size)}${hashed}</span></span>
+      ${r.done ? '' : `<button class="btn sm" data-x="del" type="button">移除</button>`}</div>
+    <div class="gen">→ ${esc(genName(r))}</div>
+    <div class="opts">
+      <label>类型<select class="input" data-f="type_word">${types}</select></label>
+      <label>学年 / 年份<select class="input" data-f="year"><option value="">不填</option>${yearOptions(r.year)}</select></label>
+      <label>学期<select class="input" data-f="term"><option value="">不填</option>${['秋', '春', '暑'].map((t) => `<option${t === r.term ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label>卷别<select class="input" data-f="paper"><option value="">无</option>${M.papers.map((p) => `<option${p === r.paper ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
+      <label>补充（如 201题）<input class="input" data-f="extra" value="${esc(r.extra)}" maxlength="20"></label>
+      <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:8px"><input type="checkbox" data-f="with_answer"${r.with_answer ? ' checked' : ''}> 含答案</label>
+      <label class="wide" style="grid-column:1/-1">备注（选填，公开显示，如“只有选择题答案”）<input class="input" data-f="note" value="${esc(r.note)}" maxlength="500"></label>
+    </div>
+    ${r.status ? `<div class="st ${r.err ? 'bad' : ''}" style="color:${r.err ? 'var(--bad)' : r.done ? 'var(--ok)' : 'var(--muted)'}">${r.status}</div>` : ''}
+  </div>`;
+}
+
+function renderRows() {
+  $('#rows').innerHTML = state.rows.map(rowHtml).join('');
+  $('#bulk').hidden = state.rows.length < 2;
+  const pending = state.rows.filter((r) => !r.done).length;
+  $('#submit').textContent = pending > 1 ? `上传并提交 ${pending} 个文件` : '上传并提交';
+}
+
+function updateRow(i) {
+  const el = document.querySelector(`.frow[data-i="${i}"]`);
+  if (el) el.outerHTML = rowHtml(state.rows[i], i);
+}
+
+$('#rows').addEventListener('change', (e) => {
+  const row = e.target.closest('.frow');
+  const f = e.target.dataset.f;
+  if (!row || !f) return;
+  const r = state.rows[Number(row.dataset.i)];
+  r[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  if (f !== 'note' && f !== 'sel') row.querySelector('.gen').textContent = `→ ${genName(r)}`;
+});
+$('#rows').addEventListener('input', (e) => {
+  const row = e.target.closest('.frow');
+  const f = e.target.dataset.f;
+  if (!row || (f !== 'extra' && f !== 'note')) return;
+  const r = state.rows[Number(row.dataset.i)];
+  r[f] = e.target.value;
+  if (f === 'extra') row.querySelector('.gen').textContent = `→ ${genName(r)}`;
+});
+$('#rows').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-x="del"]');
+  if (!b || state.busy) return;
+  state.rows.splice(Number(b.closest('.frow').dataset.i), 1);
+  renderRows();
+});
+
+$('#b_apply').onclick = () => {
+  const v = { type_word: $('#b_type').value, year: $('#b_year').value, term: $('#b_term').value, paper: $('#b_paper').value };
+  for (const r of state.rows) {
+    if (!r.sel || r.done) continue;
+    for (const [k, x] of Object.entries(v)) if (x) r[k] = x;
+    if ($('#b_ans').checked) r.with_answer = true;
+  }
+  renderRows();
+};
+$('#b_all').onchange = (e) => { for (const r of state.rows) if (!r.done) r.sel = e.target.checked; renderRows(); };
+
+$('#file').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
+const drop = $('#drop');
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); };
+
+// ---------------------------------------------------------------- hashing (one file at a time)
+
+let hasher = null;
 function loadHasher() {
-  if (!hasherLoaded) {
-    hasherLoaded = new Promise((resolve, reject) => {
+  if (!hasher) {
+    hasher = new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = '/vendor/sha256.umd.min.js';
       s.onload = () => resolve(window.hashwasm);
@@ -58,107 +248,44 @@ function loadHasher() {
       document.head.appendChild(s);
     });
   }
-  return hasherLoaded;
+  return hasher;
 }
 
-async function hashFile(file, maxPart, onProgress) {
-  const hw = await loadHasher();
-  const parts = [];
-  const CHUNK = 4 * 1024 * 1024;
-  let done = 0;
-  for (let start = 0; start < file.size; start += maxPart) {
-    const end = Math.min(file.size, start + maxPart);
-    const h = await hw.createSHA256();
-    h.init();
-    for (let off = start; off < end; off += CHUNK) {
-      const buf = new Uint8Array(await file.slice(off, Math.min(end, off + CHUNK)).arrayBuffer());
-      h.update(buf);
-      done += buf.length;
-      onProgress(done / file.size);
-    }
-    parts.push({ start, end, size: end - start, sha256: h.digest('hex') });
-  }
-  return parts;
-}
-
-async function pickFile(file) {
-  const m = await meta();
-  if (!file) return;
-  if (file.size === 0) return toast('这是一个空文件', true);
-  if (file.size > m.limits.max_file) return toast(`文件太大，最大 ${fmtSize(m.limits.max_file)}`, true);
-  state.file = file;
-  state.parts = null;
-  const info = $('#fileinfo');
-  info.hidden = false;
-  info.innerHTML = `<div class="row"><b style="overflow-wrap:anywhere">${esc(file.name)}</b><span class="muted small">${fmtSize(file.size)}</span></div>
-    <div class="small muted" id="hashmsg">正在计算校验值…</div><div class="progress"><i id="hashbar"></i></div>`;
-  if (!$('#title').value) $('#title').value = file.name.replace(/\.[^.]+$/, '');
-  step(1);
-  const my = (state.hashing = Symbol());
+let hashing = false;
+async function hashQueue() {
+  if (hashing) return;
+  hashing = true;
   try {
-    const parts = await hashFile(file, m.limits.max_part, (p) => { if (state.hashing === my) $('#hashbar').style.width = `${Math.round(p * 100)}%`; });
-    if (state.hashing !== my) return;
-    state.parts = parts;
-    $('#hashmsg').textContent = parts.length > 1 ? `校验完成，将分 ${parts.length} 卷上传` : '校验完成';
-  } catch (e) {
-    $('#hashmsg').textContent = e.message;
-  }
-}
-
-$('#file').onchange = (e) => pickFile(e.target.files[0]);
-const drop = $('#drop');
-drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); };
-drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); pickFile(e.dataTransfer.files[0]); };
-
-// ---------------------------------------------------------------- course picker
-
-function showPicked() {
-  const c = state.course;
-  $('#picked').hidden = !c;
-  $('#coursepick').hidden = !!c || state.newCourse;
-  $('#coursenew').hidden = !state.newCourse;
-  if (c) {
-    $('#picked').innerHTML = `<b>${esc(c.name)}</b><span class="small muted">${esc(c.code || '')} ${esc(c.college || '')}</span><span class="grow"></span><a href="#" id="unpick">更换</a>`;
-    $('#unpick').onclick = (e) => { e.preventDefault(); state.course = null; showPicked(); $('#cq').focus(); };
-  }
-}
-
-let timer = 0;
-let seq = 0;
-$('#cq').oninput = () => {
-  clearTimeout(timer);
-  timer = setTimeout(async () => {
-    const q = $('#cq').value.trim();
-    const ul = $('#cs');
-    if (!q) { ul.hidden = true; return; }
-    const my = ++seq;
-    const list = await api(`/courses/suggest?q=${encodeURIComponent(q)}`).catch(() => []);
-    if (my !== seq) return;
-    ul.hidden = false;
-    ul.innerHTML = list.length
-      ? list.map((c, i) => `<li data-i="${i}">${esc(c.name)}<small>${esc(c.code)} ${esc(c.college)}${c.status === 'pending' ? ' · 待确认' : ''}</small></li>`).join('')
-      : `<li data-new="1">没有找到「${esc(q)}」，点这里新建课程</li>`;
-    ul.onclick = (e) => {
-      const li = e.target.closest('li');
-      if (!li) return;
-      ul.hidden = true;
-      if (li.dataset.new) {
-        state.newCourse = true;
-        $('#nc_name').value = q;
-      } else {
-        state.course = list[Number(li.dataset.i)];
+    const hw = await loadHasher();
+    for (;;) {
+      const i = state.rows.findIndex((r) => !r.parts);
+      if (i < 0) break;
+      const r = state.rows[i];
+      const f = r.file;
+      const parts = [];
+      const CHUNK = 4 * 1024 * 1024;
+      let done = 0;
+      let lastPaint = 0;
+      for (let start = 0; start < f.size; start += M.limits.max_part) {
+        const end = Math.min(f.size, start + M.limits.max_part);
+        const h = await hw.createSHA256();
+        h.init();
+        for (let off = start; off < end; off += CHUNK) {
+          h.update(new Uint8Array(await f.slice(off, Math.min(end, off + CHUNK)).arrayBuffer()));
+          done = Math.min(f.size, off + CHUNK);
+          r.hashing = done / f.size;
+          if (performance.now() - lastPaint > 300) { lastPaint = performance.now(); updateRow(state.rows.indexOf(r)); }
+        }
+        parts.push({ start, end, size: end - start, sha256: h.digest('hex') });
       }
-      showPicked();
-    };
-  }, 180);
-};
-document.addEventListener('click', (e) => { if (!e.target.closest('.suggest')) $('#cs').hidden = true; });
-$('#newcourse').onclick = (e) => { e.preventDefault(); state.newCourse = true; $('#nc_name').value = $('#cq').value.trim(); showPicked(); };
-$('#backpick').onclick = (e) => { e.preventDefault(); state.newCourse = false; showPicked(); };
-
-if (qs.get('course')) {
-  api(`/courses/${Number(qs.get('course'))}`).then((d) => { state.course = d.course; showPicked(); }).catch(() => {});
+      r.parts = parts;
+      updateRow(state.rows.indexOf(r));
+    }
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    hashing = false;
+  }
 }
 
 // ---------------------------------------------------------------- upload
@@ -168,6 +295,8 @@ function sendPart(target, blob, onProgress) {
     const xhr = new XMLHttpRequest();
     xhr.open(target.method, target.url);
     for (const [k, v] of target.headers) xhr.setRequestHeader(k, v);
+    // Same-origin relay requires the anti-CSRF header; the cross-origin Worker must not get it.
+    if (target.url.startsWith('/')) xhr.setRequestHeader('X-XMUHub', '1');
     xhr.upload.onprogress = (e) => onProgress(e.loaded);
     xhr.onload = () => {
       let body = null;
@@ -180,80 +309,77 @@ function sendPart(target, blob, onProgress) {
   });
 }
 
-function setStatus(html, cls = '') {
-  $('#status').innerHTML = html ? `<div class="notice ${cls}">${html}</div>` : '';
+async function uploadRow(r, bar, base, total) {
+  while (!r.parts) await new Promise((res) => setTimeout(res, 300));
+  const f = r.file;
+  r.status = '正在准备…';
+  updateRow(state.rows.indexOf(r));
+  const plan = await api('/uploads', { method: 'POST', body: { filename: f.name, mime: f.type, parts: r.parts.map((p) => ({ size: p.size, sha256: p.sha256 })) } });
+  if (!plan.dedup) {
+    let sent = 0;
+    for (const pp of plan.parts) {
+      if (pp.done) { sent += pp.size; continue; }
+      const part = r.parts[pp.index];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          r.status = plan.parts.length > 1 ? `上传第 ${pp.index + 1} / ${plan.parts.length} 卷…` : '上传中…';
+          updateRow(state.rows.indexOf(r));
+          const target = attempt === 0 ? pp.target : (await api(`/uploads/${plan.upload_id}/parts/${pp.index}/renew`, { method: 'POST' })).target;
+          const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => {
+            bar.style.width = `${Math.round(((base + sent + n) / total) * 100)}%`;
+          });
+          await api(`/uploads/${plan.upload_id}/parts/${pp.index}`, { method: 'POST', body: { asset_id: receipt.id ?? null } });
+          break;
+        } catch (err) {
+          if (attempt >= 2) throw err;
+          r.status = `${esc(err.message)}，重试中…`;
+          updateRow(state.rows.indexOf(r));
+          await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
+        }
+      }
+      sent += pp.size;
+    }
+  }
+  const res = await api('/resources', {
+    method: 'POST',
+    body: {
+      upload_id: plan.upload_id, node: state.node.id, time: timeOf(r), type_word: r.type_word,
+      paper: r.paper, with_answer: r.with_answer, extra: r.extra, note: r.note,
+    },
+  });
+  r.done = true;
+  r.sel = false;
+  r.status = res.status === 'published'
+    ? `✓ 已发布：<a href="/r/${res.id}">${esc(res.filename)}</a>`
+    : `✓ 已提交，等待审核：<a href="/r/${res.id}">${esc(res.filename)}</a>`;
 }
 
-$('#form').onsubmit = async (e) => {
-  e.preventDefault();
-  const f = state.file;
-  if (!f) return toast('请先选择文件', true);
-  if (!state.parts) return toast('文件还在校验中，请稍候', true);
-  if (!state.course && !state.newCourse) return toast('请选择课程', true);
-  if (state.newCourse && $('#nc_name').value.trim().length < 2) return toast('请填写课程名称', true);
-  if ($('#title').value.trim().length < 2) return toast('请填写标题', true);
-
-  const btn = $('#submit');
-  btn.disabled = true;
-  const bar = $('#prog');
-  bar.hidden = false;
-  step(2);
-  try {
-    setStatus('正在准备上传…');
-    let plan = await api('/uploads', {
-      method: 'POST',
-      body: { filename: f.name, mime: f.type, parts: state.parts.map((p) => ({ size: p.size, sha256: p.sha256 })) },
-    });
-    if (plan.dedup) {
-      setStatus('服务器上已经有完全相同的文件，秒传完成 ✓', 'ok');
-    } else {
-      let sent = 0;
-      for (const pp of plan.parts) {
-        if (pp.done) { sent += pp.size; continue; }
-        const part = state.parts[pp.index];
-        let attempt = 0;
-        for (;;) {
-          try {
-            setStatus(plan.parts.length > 1 ? `正在上传第 ${pp.index + 1} / ${plan.parts.length} 卷…` : '正在上传…');
-            const target = attempt === 0 ? pp.target : (await api(`/uploads/${plan.upload_id}/parts/${pp.index}/renew`, { method: 'POST' })).target;
-            const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => {
-              bar.firstElementChild.style.width = `${Math.round(((sent + n) / f.size) * 100)}%`;
-            });
-            setStatus('正在校验…');
-            await api(`/uploads/${plan.upload_id}/parts/${pp.index}`, { method: 'POST', body: { asset_id: receipt.id ?? null } });
-            break;
-          } catch (err) {
-            if (++attempt >= 3) throw err;
-            setStatus(`${esc(err.message)}，正在重试（${attempt}/2）…`, 'warn');
-            await new Promise((r) => setTimeout(r, 1500 * attempt));
-          }
-        }
-        sent += pp.size;
-      }
+$('#submit').onclick = async () => {
+  if (!state.node) return toast('请先选择分类', true);
+  const todo = state.rows.filter((r) => !r.done);
+  if (!todo.length) return toast('请先添加文件', true);
+  state.busy = true;
+  $('#submit').disabled = true;
+  $('#prog').hidden = false;
+  const bar = $('#prog').firstElementChild;
+  const total = todo.reduce((s, r) => s + r.file.size, 0);
+  let base = 0;
+  let ok = 0;
+  for (const r of todo) {
+    r.err = false;
+    try {
+      await uploadRow(r, bar, base, total);
+      ok++;
+    } catch (err) {
+      r.err = true;
+      r.status = esc(err.message);
     }
-    bar.firstElementChild.style.width = '100%';
-    setStatus('正在提交资料信息…');
-    const body = {
-      upload_id: plan.upload_id,
-      title: $('#title').value, kind: $('#kind').value,
-      year: Number($('#year').value) || null, term: Number($('#term').value) || null,
-      teacher: $('#teacher').value, description: $('#description').value,
-    };
-    if (state.course) body.course_id = state.course.id;
-    else body.new_course = { name: $('#nc_name').value, code: $('#nc_code').value, college: $('#nc_college').value };
-    const r = await api('/resources', { method: 'POST', body });
-    step(4);
-    $('#form').hidden = true;
-    const done = $('#done');
-    done.hidden = false;
-    done.innerHTML = r.status === 'published'
-      ? `<h2>上传成功 🎉</h2><p>资料已经公开，谢谢你的分享！</p><div class="row"><a class="btn primary" href="/r/${r.id}">查看资料</a><a class="btn" href="/upload?course=${r.course.id}">继续上传这门课</a></div>`
-      : `<h2>上传成功，等待审核</h2><p class="muted">审核通过后所有人都能看到它。你可以在「我的」页面查看审核进度。</p><div class="row"><a class="btn primary" href="/r/${r.id}">查看资料</a><a class="btn" href="/upload?course=${r.course.id}">继续上传这门课</a></div>`;
-  } catch (err) {
-    step(1);
-    setStatus(esc(err.message), 'bad');
-    btn.disabled = false;
+    base += r.file.size;
+    updateRow(state.rows.indexOf(r));
   }
+  bar.style.width = '100%';
+  state.busy = false;
+  $('#submit').disabled = false;
+  renderRows();
+  $('#status').innerHTML = `<div class="notice ${ok === todo.length ? 'ok' : 'warn'}">完成 ${ok} / ${todo.length} 个文件${ok < todo.length ? '，失败的可以直接再点一次上传重试' : '，谢谢你的分享！'}</div>`;
 };
-
-gate();

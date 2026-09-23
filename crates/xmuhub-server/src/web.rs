@@ -87,13 +87,9 @@ impl Site {
                 _ => (StatusCode::NOT_FOUND, "not found").into_response(),
             };
         };
-        let cache = if a.immutable {
-            "public, max-age=31536000, immutable"
-        } else if a.mime.starts_with("text/html") {
-            "no-cache"
-        } else {
-            "public, max-age=600, stale-while-revalidate=86400"
-        };
+        // Pages, scripts and styles revalidate every time (a 304 costs ~200 bytes) so a deploy
+        // never mixes new HTML with stale JS/CSS. Only third-party vendor files are immutable.
+        let cache = if a.immutable { "public, max-age=31536000, immutable" } else { "no-cache" };
         if status == StatusCode::OK && req.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(a.etag.as_str()) {
             return Response::builder()
                 .status(StatusCode::NOT_MODIFIED)

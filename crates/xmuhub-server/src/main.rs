@@ -1,6 +1,7 @@
 mod alloc;
 mod api;
 mod config;
+mod mailer;
 mod relay;
 mod web;
 
@@ -29,13 +30,13 @@ struct Cli {
 enum Cmd {
     /// Run the web server (default).
     Serve,
-    /// Issue an access token and print its secret once.
-    Token {
+    /// Set a registered user's role (stop the service first: the database is locked while it runs).
+    Role {
+        #[arg(long)]
+        email: String,
         /// 1 贡献者, 2 可信贡献者, 3 审核员, 4 管理员
         #[arg(long)]
         level: u8,
-        #[arg(long, default_value = "")]
-        label: String,
     },
     /// Write a JSON dump of the database to stdout.
     Export,
@@ -105,13 +106,22 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         }
         StorageKind::Local => (Storage::new(vec![local.clone() as Arc<dyn StorageBackend>]), None, Some(local.clone())),
     };
-    let hub = Arc::new(Hub::open(db, storage, Limits::default())?);
+    let hub = Arc::new(Hub::open(db, storage, Limits::default(), cfg.admins.clone())?);
 
     match cmd {
-        Cmd::Token { level, label } => {
+        Cmd::Role { email, level } => {
+            use xmuhub_core::hub::Viewer;
             let level = Level::from_u8(level).filter(|l| *l > Level::Guest).ok_or_else(|| anyhow::anyhow!("level must be 1-4"))?;
-            let (secret, t) = hub.issue_token(level, &label, "cli")?;
-            println!("level {} token (id {}):\n{secret}", t.level as u8, t.id);
+            let system = hub.system_user()?;
+            let as_system = Viewer { user: Some(&system) };
+            let email = email.trim().to_lowercase();
+            let target = hub
+                .users(as_system, &email)?
+                .into_iter()
+                .find(|u| u.email == email)
+                .ok_or_else(|| anyhow::anyhow!("no user with email {email}"))?;
+            let u = hub.update_user(as_system, target.id, Some(level), None)?;
+            println!("{} is now level {}", u.email, u.level as u8);
             return Ok(());
         }
         Cmd::Export => {
@@ -142,7 +152,15 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         local: local_opt,
         worker_url: cfg.worker_url.clone(),
         relay,
-        claims: Default::default(),
+        mailer: match &cfg.smtp {
+            Some(smtp) => Some(mailer::Mailer::new(smtp)?),
+            None => {
+                tracing::warn!("SMTP not configured: registration by email is disabled");
+                None
+            }
+        },
+        script_token: cfg.script_token.clone(),
+        secure_cookie: cfg.secure_cookie,
     });
     spawn_jobs(app.clone(), github, probe_http);
 
@@ -178,6 +196,19 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
                 tracing::error!("flush downloads: {e}");
             }
             alloc::collect();
+        }
+    });
+
+    // Expired sessions.
+    let hub = app.hub.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(6 * 3600));
+        loop {
+            tick.tick().await;
+            let h = hub.clone();
+            if let Ok(Err(e)) = tokio::task::spawn_blocking(move || h.purge_sessions()).await {
+                tracing::error!("purge sessions: {e}");
+            }
         }
     });
 

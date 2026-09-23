@@ -6,27 +6,28 @@
 <title>资料 · XMUHub</title>
 <meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
 <meta name="theme-color" content="#122e66">
-<link rel="icon" href="/assets/xmu-emblem.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
-<body data-page="courses">
+<body data-page="browse">
 <header id="top" class="top"></header>
 <main><div class="wrap">
   <div class="crumbs" id="crumbs"></div>
   <div class="layout-side">
     <section class="card">
-      <h1 id="title">加载中…</h1>
+      <h1 id="title" style="overflow-wrap:anywhere">加载中…</h1>
       <div class="row small muted" id="tags" style="margin-bottom:14px"></div>
       <div id="notice"></div>
-      <p id="desc" class="muted" style="white-space:pre-wrap"></p>
+      <p id="note" class="muted" style="white-space:pre-wrap" hidden></p>
       <dl class="kv" id="kv"></dl>
     </section>
     <aside>
       <section class="card">
         <button class="btn primary lg" id="dl" style="width:100%">下载</button>
         <div class="progress" id="dlprog" hidden style="margin-top:12px"><i></i></div>
-        <p class="small faint" id="dlhint" style="margin:10px 0 0">文件经国内加速镜像下载，不占用本站流量。</p>
+        <p class="small faint" style="margin:10px 0 0">文件经国内加速镜像下载，不占用本站流量。</p>
         <div id="parts" class="small" hidden></div>
+        <p class="small" style="margin:10px 0 0"><a href="#" id="report">投诉 / 申请下架</a></p>
       </section>
       <section class="card" id="manage" hidden></section>
     </aside>

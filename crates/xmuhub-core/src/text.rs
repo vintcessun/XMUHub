@@ -153,7 +153,8 @@ pub fn ascii_filename(name: &str) -> String {
         if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
             out.push(c);
         } else if let Some(p) = c.to_pinyin() {
-            out.push_str(p.plain());
+            // 绿 → "lü": write ü as v (the usual keyboard spelling) to stay ASCII.
+            out.extend(p.plain().chars().map(|c| if c == 'ü' { 'v' } else { c }).filter(char::is_ascii));
         } else if !out.ends_with('_') {
             out.push('_');
         }
@@ -188,5 +189,6 @@ mod tests {
     fn pinyin() {
         assert_eq!(pinyin_forms("高等数学").trim(), "gaodengshuxue gdsx");
         assert_eq!(ascii_filename("高数 期末(2023).PDF"), "gaoshu_qimo_2023.pdf");
+        assert_eq!(ascii_filename("绿色化学_Müller.pdf"), "lvsehuaxue_M_ller.pdf");
     }
 }

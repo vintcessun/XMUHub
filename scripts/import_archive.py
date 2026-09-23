@@ -15,7 +15,7 @@
 Needs .secrets/upload.env (XMUHUB_SCRIPT_TOKEN) and .secrets/github.env (GH_STORE_TOKEN).
 """
 
-import argparse, base64, csv, hashlib, io, json, os, re, sys, time, urllib.error, urllib.request, zipfile
+import argparse, base64, csv, hashlib, io, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request, zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -273,6 +273,7 @@ def main():
                             # Decode the signed ticket and upload straight to GitHub.
                             payload = url.split('t=', 1)[1].split('.', 1)[0]
                             dest = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))['u']
+                            dest = urllib.parse.quote(dest, safe=':/?=&')
                             req = urllib.request.Request(dest, data=body, method='POST', headers={
                                 'Authorization': 'Bearer ' + gh['GH_STORE_TOKEN'], 'Accept': 'application/vnd.github+json',
                                 'Content-Type': 'application/octet-stream', 'User-Agent': 'XMUHub-importer/1.0'})

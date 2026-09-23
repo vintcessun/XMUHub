@@ -21,6 +21,7 @@
     pwsh scripts/deploy.ps1
     pwsh scripts/deploy.ps1 -OnlyWorker          # 只更新 Cloudflare Worker（需配合自定义域名才在国内可用）
     pwsh scripts/deploy.ps1 -WebOnly             # 只更新网页文件（不需要重新编译）
+    pwsh scripts/deploy.ps1 -AdminsOnly          # 只同步管理员名单 .secrets/admins.txt
 #>
 param(
     [string]$User = "root",
@@ -41,8 +42,8 @@ param(
     # Set a registered user's role instead of deploying: -SetRole a@b.com -Level 3
     [string]$SetRole = "",
     [int]$Level = 3,
-    # Accounts registered with these emails are always admins (comma separated).
-    [string]$Admins = "vintces@gmail.com"
+    # Only sync .secrets/admins.txt (the maintained admin list) to the server.
+    [switch]$AdminsOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -147,6 +148,19 @@ systemctl start $Service
     return
 }
 
+$AdminsFile = Join-Path $Root ".secrets/admins.txt"
+if (-not (Test-Path $AdminsFile)) { throw "缺少管理员名单：$AdminsFile" }
+function Sync-Admins {
+    & scp @scpOpts $AdminsFile "${Remote}:$RemoteBase/admins.txt.new"
+    if ($LASTEXITCODE -ne 0) { throw "上传管理员名单失败" }
+    Invoke-Remote "set -e; cd '$RemoteBase'; mv -f admins.txt.new admins.txt; chmod 600 admins.txt; echo '[remote] 管理员名单已更新：'; grep -v '^#' admins.txt | grep '@' | sed 's/^/  /'" "更新管理员名单"
+}
+if ($AdminsOnly) {
+    Sync-Admins
+    Write-Host "===== 完成：服务每分钟重读名单，一分钟内生效 =====" -ForegroundColor Green
+    return
+}
+
 Write-Host "===== 部署到 ${Remote}:$RemoteBase =====" -ForegroundColor Cyan
 Invoke-Remote "echo connected as `$(whoami) on `$(hostname)" "连接测试"
 
@@ -173,7 +187,7 @@ RELAY_DAILY_MB=5120
 RELAY_CONCURRENCY=4
 UPLOAD_TICKET_SECRET=$($up.UPLOAD_TICKET_SECRET)
 XMUHUB_SCRIPT_TOKEN=$($up.XMUHUB_SCRIPT_TOKEN)
-XMUHUB_ADMINS=$Admins
+XMUHUB_ADMINS_FILE=$RemoteBase/admins.txt
 SMTP_HOST=$($mail.SMTP_HOST)
 SMTP_PORT=$($mail.SMTP_PORT)
 SMTP_USER=$($mail.SMTP_USER)
@@ -254,6 +268,8 @@ finally {
     Remove-Item $envPath -Force -ErrorAction SilentlyContinue
 }
 
+Sync-Admins
+
 # ---- 替换并重启（停机只在这一小段）----
 $swapRun = if ($WebOnly) { "" } else { @"
 [ -f run ] && cp -f run run.bak || true
@@ -298,4 +314,4 @@ Invoke-Remote $deploy "替换/重启"
 Write-Host ""
 Write-Host "===== 部署完成：$PublicUrl =====" -ForegroundColor Green
 Write-Host "回滚：ssh $Remote `"cd $RemoteBase && systemctl stop $Service && mv -f run.bak run && rm -rf web && mv web.bak web && systemctl start $Service`""
-Write-Host "管理员：用 $Admins 注册即自动成为管理员；其他人的角色在 /admin 的「用户」里调整"
+Write-Host "管理员名单：.secrets/admins.txt（改完运行 deploy.ps1 -AdminsOnly，一分钟内生效）"

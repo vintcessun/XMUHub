@@ -46,6 +46,8 @@ pub struct Config {
     pub db_cache_mb: usize,
     /// Emails that always get the admin role (bootstrap; no CLI needed while running).
     pub admins: Vec<String>,
+    /// File with the maintained admin list (one email per line, `#` comments); re-read every minute.
+    pub admins_file: Option<std::path::PathBuf>,
     /// Bearer token for automation (the archive importer); acts as the system admin.
     pub script_token: Option<String>,
     /// Mark the session cookie `Secure` (production is behind HTTPS).
@@ -89,6 +91,7 @@ impl Config {
                 .unwrap_or_else(|| DEFAULT_MIRRORS.iter().map(|s| s.to_string()).collect()),
             db_cache_mb: var_or("XMUHUB_DB_CACHE_MB", "32").parse()?,
             admins: var("XMUHUB_ADMINS").map(|v| v.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()).unwrap_or_default(),
+            admins_file: var("XMUHUB_ADMINS_FILE").map(Into::into),
             script_token: var("XMUHUB_SCRIPT_TOKEN").filter(|t| t.len() >= 32),
             secure_cookie: var_or("XMUHUB_SECURE_COOKIE", "1") != "0",
             smtp: match (var("SMTP_HOST"), var("SMTP_USER"), var("SMTP_PASSWORD")) {
@@ -110,4 +113,16 @@ impl Config {
 fn rand_secret() -> Vec<u8> {
     use std::hash::{BuildHasher, RandomState};
     (0..4).flat_map(|i| RandomState::new().hash_one(i).to_le_bytes()).collect()
+}
+
+/// Reads the admin list file; a missing file means an empty list.
+pub fn read_admins(path: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .map(|s| {
+            s.lines()
+                .map(|l| l.split('#').next().unwrap_or("").trim().to_lowercase())
+                .filter(|l| l.contains('@'))
+                .collect()
+        })
+        .unwrap_or_default()
 }

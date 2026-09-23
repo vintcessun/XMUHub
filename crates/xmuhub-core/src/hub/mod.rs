@@ -21,7 +21,7 @@ use crate::model::*;
 use crate::search::{DocType, Placement, Search};
 use crate::storage::Storage;
 
-pub use accounts::{CodePurpose, Registration, SESSION_TTL};
+pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
@@ -311,8 +311,9 @@ impl Hub {
             writer: Mutex::new(()),
             quota: Mutex::new(HashMap::new()),
             dirty_downloads: Mutex::new(HashSet::new()),
-            auth: accounts::AuthState::new(admins),
+            auth: accounts::AuthState::new(Vec::new()),
         };
+        hub.set_admins(admins)?;
         hub.rebuild_index()?;
         Ok(hub)
     }

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use sha2::{Digest, Sha256};
 
 use super::{Hub, State, Viewer, clean};
@@ -35,8 +35,12 @@ struct Code {
     attempts: u32,
 }
 
+/// Built-in account used by automation; never subject to the admin list.
+pub const SYSTEM_EMAIL: &str = "system@xmuhub.local";
+
 pub(super) struct AuthState {
-    admins: Vec<String>,
+    /// The admin list (maintained in a file outside the repo). Admin is granted only by it.
+    admins: RwLock<Vec<String>>,
     codes: Mutex<HashMap<(String, CodePurpose), Code>>,
     /// email → (day, codes sent)
     per_email: Mutex<HashMap<String, (i64, u32)>>,
@@ -49,7 +53,7 @@ pub(super) struct AuthState {
 impl AuthState {
     pub(super) fn new(admins: Vec<String>) -> AuthState {
         AuthState {
-            admins: admins.into_iter().map(|a| a.trim().to_lowercase()).filter(|a| !a.is_empty()).collect(),
+            admins: RwLock::new(normalize_list(admins)),
             codes: Mutex::new(HashMap::new()),
             per_email: Mutex::new(HashMap::new()),
             per_ip: Mutex::new(HashMap::new()),
@@ -78,6 +82,13 @@ impl AuthState {
     fn clear_fails(&self, key: &str) {
         self.fails.lock().remove(key);
     }
+}
+
+fn normalize_list(list: Vec<String>) -> Vec<String> {
+    let mut v: Vec<String> = list.into_iter().map(|a| a.trim().to_lowercase()).filter(|a| a.contains('@')).collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 pub struct Registration {
@@ -227,8 +238,49 @@ impl Hub {
         st.users.get(&s.user).filter(|u| !u.banned).cloned()
     }
 
+    /// Admin comes only from the list: listed → Admin, unlisted admin → Reviewer.
     fn role_for(&self, email: &str, current: Level) -> Level {
-        if self.auth.admins.iter().any(|a| a == email) { Level::Admin } else { current }
+        if email == SYSTEM_EMAIL {
+            return current;
+        }
+        let listed = self.auth.admins.read().iter().any(|a| a == email);
+        match (listed, current) {
+            (true, _) => Level::Admin,
+            (false, Level::Admin) => Level::Reviewer,
+            (false, l) => l,
+        }
+    }
+
+    pub fn admin_list(&self) -> Vec<String> {
+        self.auth.admins.read().clone()
+    }
+
+    /// Replaces the admin list and applies it to existing accounts. Returns how many changed.
+    pub fn set_admins(&self, list: Vec<String>) -> Result<usize> {
+        let list = normalize_list(list);
+        if *self.auth.admins.read() == list {
+            return Ok(0);
+        }
+        *self.auth.admins.write() = list;
+        let changes: Vec<(Id, Level)> = {
+            let st = self.st.read();
+            st.users.values().filter_map(|u| {
+                let want = self.role_for(&u.email, u.level);
+                (want != u.level).then_some((u.id, want))
+            }).collect()
+        };
+        if changes.is_empty() {
+            return Ok(0);
+        }
+        self.mutate(|st, tx| {
+            for (id, level) in &changes {
+                let mut u = st.users[id].clone();
+                tracing::info!(email = %u.email, from = u.level as u8, to = *level as u8, "admin list applied");
+                u.level = *level;
+                st.put_user(tx, u)?;
+            }
+            Ok(changes.len())
+        })
     }
 
     pub fn register(&self, r: Registration, ip: &str) -> Result<(String, User)> {
@@ -373,6 +425,7 @@ impl Hub {
         let mut v: Vec<User> = st
             .users
             .values()
+            .filter(|u| u.email != SYSTEM_EMAIL)
             .filter(|u| me.level == Level::Admin || u.level < Level::Reviewer)
             .filter(|u| q.is_empty() || u.email.contains(&q) || u.nickname.to_lowercase().contains(&q))
             .cloned()
@@ -388,6 +441,10 @@ impl Hub {
             let mut u = st.users.get(&id).cloned().ok_or(Error::NotFound("用户"))?;
             if u.id == me.id {
                 return Err(bad("不能修改自己的权限"));
+            }
+            // Admins are defined by the maintained list only, never by clicks.
+            if level == Some(Level::Admin) || (u.level == Level::Admin && level.is_some()) {
+                return Err(bad("管理员由名单统一维护，请修改管理员名单"));
             }
             if me.level < Level::Admin {
                 // Reviewers manage contributors only, and cannot mint more reviewers.
@@ -416,7 +473,7 @@ impl Hub {
 
     /// The built-in account automation (imports) acts as; created on first use.
     pub fn system_user(&self) -> Result<User> {
-        const EMAIL: &str = "system@xmuhub.local";
+        const EMAIL: &str = SYSTEM_EMAIL;
         {
             let st = self.st.read();
             if let Some(u) = st.user_by_email.get(EMAIL).and_then(|id| st.users.get(id)) {

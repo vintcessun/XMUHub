@@ -34,7 +34,7 @@ enum Cmd {
     Role {
         #[arg(long)]
         email: String,
-        /// 1 贡献者, 2 可信贡献者, 3 审核员, 4 管理员
+        /// 1 贡献者, 2 可信贡献者, 3 审核员（管理员只由管理员名单决定）
         #[arg(long)]
         level: u8,
     },
@@ -65,7 +65,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     let db = match Db::open(&cfg.data_dir.join("xmuhub.redb"), cfg.db_cache_mb * 1024 * 1024) {
         Ok(db) => Arc::new(db),
         Err(e) if e.to_string().contains("already open") => {
-            anyhow::bail!("数据库正被运行中的服务占用。请先 `systemctl stop xmuhub`，执行完再 `systemctl start xmuhub`（或用 deploy.ps1 -NewAdminToken）")
+            anyhow::bail!("数据库正被运行中的服务占用。请先 `systemctl stop xmuhub`，执行完再 `systemctl start xmuhub`（或用 deploy.ps1 -SetRole）")
         }
         Err(e) => return Err(e.into()),
     };
@@ -106,12 +106,20 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         }
         StorageKind::Local => (Storage::new(vec![local.clone() as Arc<dyn StorageBackend>]), None, Some(local.clone())),
     };
-    let hub = Arc::new(Hub::open(db, storage, Limits::default(), cfg.admins.clone())?);
+    let admin_list = || {
+        let mut v = cfg.admins.clone();
+        if let Some(f) = &cfg.admins_file {
+            v.extend(config::read_admins(f));
+        }
+        v
+    };
+    let hub = Arc::new(Hub::open(db, storage, Limits::default(), admin_list())?);
+    tracing::info!(admins = hub.admin_list().len(), "admin list loaded");
 
     match cmd {
         Cmd::Role { email, level } => {
             use xmuhub_core::hub::Viewer;
-            let level = Level::from_u8(level).filter(|l| *l > Level::Guest).ok_or_else(|| anyhow::anyhow!("level must be 1-4"))?;
+            let level = Level::from_u8(level).filter(|l| *l > Level::Guest && *l < Level::Admin).ok_or_else(|| anyhow::anyhow!("level must be 1-3; admins come from the admin list"))?;
             let system = hub.system_user()?;
             let as_system = Viewer { user: Some(&system) };
             let email = email.trim().to_lowercase();
@@ -163,6 +171,26 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         secure_cookie: cfg.secure_cookie,
     });
     spawn_jobs(app.clone(), github, probe_http);
+
+    // Keep the admin list in sync with its file (edit + redeploy, or edit in place).
+    if let Some(file) = cfg.admins_file.clone() {
+        let hub = hub.clone();
+        let base = cfg.admins.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                tick.tick().await;
+                let mut list = base.clone();
+                list.extend(config::read_admins(&file));
+                let h = hub.clone();
+                match tokio::task::spawn_blocking(move || h.set_admins(list)).await {
+                    Ok(Ok(n)) if n > 0 => tracing::info!(changed = n, "admin list reloaded"),
+                    Ok(Err(e)) => tracing::error!("admin list: {e}"),
+                    _ => {}
+                }
+            }
+        });
+    }
 
     let router = api::router(app.clone()).layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = tokio::net::TcpListener::bind(cfg.bind).await?;

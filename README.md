@@ -20,7 +20,9 @@
   | 贡献者 | 注册 | 上传，**先审后发** |
   | 可信贡献者 | 审核员提升 | 上传，**先发后审** |
   | 审核员 | 管理员提升 | 审核队列、编辑元数据、整理分类树、处理投诉、管理贡献者 |
-  | 管理员 | `XMUHUB_ADMINS` 里的邮箱，或其他管理员提升 | 以上全部 |
+  | 管理员 | **只由管理员名单决定** | 以上全部 |
+
+  管理员名单是服务器上的一个文件（`XMUHUB_ADMINS_FILE`，每行一个邮箱），源文件放在不入库的 `.secrets/admins.txt`，用 `deploy.ps1 -AdminsOnly` 同步，服务每分钟重新读取一次。列入名单的账号自动成为管理员，移出名单的降为审核员；网页后台最多只能把人提升到审核员。
 
 - **分类即目录，文件名由系统生成。** 分类树按团队的《资料分类方案 v1.6》组织：一级栏目 A 公共课 / B 专业课 / C 教材与参考书 / D 工具模板与校园服务，下面依次是课程组（或学院、学科）、课程、层次。A 类课程页按「01 真题与答案 / 02 提纲笔记 / 03 题库刷题 / 04 课件与拓展」分组展示。每份资料带一个 T1–T9 类型标签。上传者不需要自己起名，只要选择时间、类型、卷别、是否含答案，系统就会按 `课程_时间_类型(详情)` 生成规范文件名，同名的自动加 `_v2`。
 - **合规状态**：`published`（公开）/ `pending`（待审）/ `restricted`（仅内部可见，搜不到）/ `removed`（已下架）/ `rejected`（已驳回）。原始文件名、来源和上传者只对审核员可见。每个资料页都有投诉入口。
@@ -39,11 +41,11 @@
 ## 目录
 
 ```
-crates/xmuhub-core    领域逻辑：数据模型、redb、搜索、令牌、存储后端（GitHub / 本地）、镜像测速
+crates/xmuhub-core    领域逻辑：数据模型、redb、搜索、账号、分类树、存储后端（GitHub / 本地）、镜像测速
 crates/xmuhub-server  Axum 服务：API、页面路由、上传中转、后台任务、CLI
 web/                  前端静态文件
 worker/               Cloudflare 上传中转 Worker（可选）
-scripts/              编译（alinux3 容器）与部署脚本
+scripts/              编译（alinux3 容器）、部署与资料导入脚本
 ```
 
 ## 本地开发
@@ -65,19 +67,20 @@ XMUHUB_ADMINS=you@example.com XMUHUB_SECURE_COOKIE=0 cargo run -p xmuhub-server 
 | `UPLOAD_WORKER_URL` | 留空时由服务器中转上传；填 Worker 地址则改走 Worker |
 | `RELAY_DAILY_MB` / `RELAY_CONCURRENCY` | 服务器中转的每日流量上限、并发上限 |
 | `MIRRORS` | 下载镜像前缀列表，用逗号分隔 |
-| `XMUHUB_ADMINS` | 这些邮箱注册或登录后自动成为管理员 |
+| `XMUHUB_ADMINS_FILE` | 管理员名单文件（另可用 `XMUHUB_ADMINS` 以逗号分隔追加） |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | 验证码邮件的外发 SMTP |
 | `XMUHUB_SCRIPT_TOKEN` | 自动化脚本（导入工具）使用的管理员 Bearer 令牌 |
 
 ## 编译与部署
 
-密钥放在 `.secrets/` 下（已加入 gitignore）：`github.env`、`cloudflare.env`、`upload.env`。
+密钥放在 `.secrets/` 下（已加入 gitignore）：`github.env`、`cloudflare.env`、`upload.env`、`mail.env`，以及管理员名单 `admins.txt`。
 
 ```powershell
 pwsh scripts/build-alinux3.ps1     # 在 Alibaba Cloud Linux 3 容器里编译 → ./run（只依赖 glibc）
 pwsh scripts/deploy.ps1            # 上传 run 和 web/，安装 systemd 与 nginx 中转路由，重启并做健康检查
 pwsh scripts/deploy.ps1 -WebOnly   # 只更新网页文件
-pwsh scripts/deploy.ps1 -SetRole a@b.com -Level 3   # 命令行设置角色（也可以在 /admin 页面操作）
+pwsh scripts/deploy.ps1 -AdminsOnly   # 只同步管理员名单
+pwsh scripts/deploy.ps1 -SetRole a@b.com -Level 3   # 命令行设置 1–3 级角色（也可以在 /admin 页面操作）
 ```
 
 部署时数据目录 `data/` 永远不会被覆盖。每次部署都会保留 `run.bak` 和 `web.bak`，便于回滚。元数据每天导出一份，推送到私有仓库 `XMUHub-backup` 做异地备份。

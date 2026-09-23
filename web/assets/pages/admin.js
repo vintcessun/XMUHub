@@ -109,14 +109,15 @@ const panels = {
   },
   async users(box, q = '') {
     const list = await api(`/admin/users?q=${encodeURIComponent(q)}`);
-    const maxLevel = me.level === 4 ? 4 : 2;
-    const opts = (cur) => [1, 2, 3, 4].filter((l) => l <= maxLevel || l === cur).map((l) => `<option value="${l}"${l === cur ? ' selected' : ''}${l > maxLevel ? ' disabled' : ''}>${LEVELS[l]}</option>`).join('');
+    // Admins come only from the maintained admin list; the UI can grant up to reviewer.
+    const maxLevel = me.level === 4 ? 3 : 2;
+    const opts = (cur) => [1, 2, 3].filter((l) => l <= maxLevel || l === cur).map((l) => `<option value="${l}"${l === cur ? ' selected' : ''}${l > maxLevel ? ' disabled' : ''}>${LEVELS[l]}</option>`).join('');
     box.innerHTML = `<section class="card scroll-x">
       <form class="row" id="uq" style="margin-bottom:12px"><input class="input" id="uqv" value="${esc(q)}" placeholder="按邮箱或昵称搜索" style="max-width:280px"><button class="btn">搜索</button>
-        <span class="small muted">贡献者先审后发；可信贡献者先发后审。${me.level < 4 ? '审核员只能调整贡献者和可信贡献者。' : ''}</span></form>
+        <span class="small muted">贡献者先审后发；可信贡献者先发后审。管理员由服务器上的管理员名单维护，这里最多设为审核员。${me.level < 4 ? '审核员只能调整贡献者和可信贡献者。' : ''}</span></form>
       <table class="table"><thead><tr><th>昵称</th><th>邮箱</th><th>角色</th><th>上传</th><th>注册</th><th></th></tr></thead><tbody>
       ${list.map((u) => `<tr data-id="${u.id}"><td>${esc(u.nickname)}</td><td class="small">${esc(u.email)}${u.xmu ? ' <span class="badge published">厦大</span>' : ''}</td>
-        <td>${u.id === me.id ? LEVELS[u.level] : `<select class="input" data-f="level" style="min-height:30px;padding:2px 8px">${opts(u.level)}</select>`}</td>
+        <td>${u.id === me.id || u.level === 4 ? `${LEVELS[u.level]}${u.level === 4 ? ' <span class="small faint">（名单）</span>' : ''}` : `<select class="input" data-f="level" style="min-height:30px;padding:2px 8px">${opts(u.level)}</select>`}</td>
         <td>${u.uploads}</td><td class="small faint">${fmtDate(u.created_at)}</td>
         <td>${u.id === me.id ? '<span class="small faint">你自己</span>' : `<button class="btn sm ${u.banned ? '' : 'danger'}" data-a="ban">${u.banned ? '解除封禁' : '封禁'}</button>`}</td></tr>`).join('')}
       </tbody></table></section>`;

@@ -64,12 +64,21 @@ class Api:
         req = urllib.request.Request(self.base + '/api' + path, data=data, method=method, headers={
             'Authorization': 'Bearer ' + self.token, 'X-XMUHub': '1', 'Content-Type': 'application/json',
             'User-Agent': 'XMUHub-importer/1.0'})
-        try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read() or b'null')
-        except urllib.error.HTTPError as e:
-            msg = e.read().decode('utf8', 'replace')
-            raise RuntimeError(f'{method} {path} -> HTTP {e.code}: {msg[:300]}') from None
+        for attempt in range(6):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as r:
+                    return json.loads(r.read() or b'null')
+            except urllib.error.HTTPError as e:
+                msg = e.read().decode('utf8', 'replace')
+                # 502/503 while the server restarts (deploys) — wait and retry.
+                if e.code in (502, 503, 504) and attempt < 5:
+                    time.sleep(10)
+                    continue
+                raise RuntimeError(f'{method} {path} -> HTTP {e.code}: {msg[:300]}') from None
+            except (urllib.error.URLError, ConnectionError, TimeoutError):
+                if attempt == 5:
+                    raise
+                time.sleep(10)
 
 
 # ---------------------------------------------------------------- parsing

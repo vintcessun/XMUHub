@@ -86,7 +86,7 @@ fn valid_time(t: &str) -> bool {
 }
 
 impl Hub {
-    fn build_name(st: &State, input: &ResourceInput, extras: &AdminExtras, staff: bool, exclude: Option<Id>) -> Result<(NameParts, Tag)> {
+    pub(super) fn build_name(st: &State, input: &ResourceInput, extras: &AdminExtras, staff: bool, exclude: Option<Id>) -> Result<(NameParts, Tag)> {
         let node = st.resolve(input.node).ok_or(Error::NotFound("分类"))?;
         if node.kind == NodeKind::Section {
             return Err(bad("请选择具体的课程或分类"));

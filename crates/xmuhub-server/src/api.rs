@@ -13,7 +13,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use xmuhub_core::hub::{AdminExtras, CodePurpose, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SearchItem, Viewer};
-use xmuhub_core::model::{Id, Level, Node, NodeStatus, Report, Resource, Status, TYPE_WORDS, Tag, User};
+use xmuhub_core::model::{Id, Level, Node, NodeStatus, Report, Resource, Status, TYPE_WORDS, Tag, User, now};
 use xmuhub_core::search::{DocType, Filter};
 use xmuhub_core::storage::Receipt;
 use xmuhub_core::storage::local::LocalBackend;
@@ -38,6 +38,9 @@ pub struct App {
     pub mailer: Option<Mailer>,
     pub script_token: Option<String>,
     pub secure_cookie: bool,
+    pub github: Option<Arc<xmuhub_core::storage::github::GitHubBackend>>,
+    /// Repository scans awaiting the admin's mapping, by scan id.
+    pub scans: parking_lot::Mutex<std::collections::HashMap<String, xmuhub_core::storage::github::RepoScan>>,
 }
 
 type S = State<Arc<App>>;
@@ -266,6 +269,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/admin/users", get(users))
         .route("/admin/users/{id}", axum::routing::patch(update_user))
         .route("/admin/status", get(status))
+        .route("/admin/github/scan", post(gh_scan))
+        .route("/admin/github/import", post(gh_import))
+        .route("/admin/github/transfer", get(gh_transfer).post(gh_transfer_kick))
         .route("/relay/upload", post(crate::relay::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/upload", put(local_upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/file/{name}", get(local_file))
@@ -754,6 +760,111 @@ async fn status(State(app): S, auth: Auth) -> R<Json<Value>> {
         "version": env!("CARGO_PKG_VERSION"),
         "statuses": [Status::Pending.as_str(), Status::Restricted.as_str()],
     })))
+}
+
+// ------------------------------------------------------------------ GitHub repository import
+
+fn require_admin(auth: &Auth) -> R<()> {
+    match &auth.user {
+        Some(u) if u.level >= Level::Admin => Ok(()),
+        Some(_) => Err(ApiError(Error::Forbidden)),
+        None => Err(ApiError(Error::Unauthorized)),
+    }
+}
+
+#[derive(Deserialize)]
+struct ScanIn {
+    url: String,
+    #[serde(default)]
+    depth: Option<usize>,
+}
+
+/// Lists a public repository (API calls only), groups its documents by folder and suggests
+/// a category for each group.
+async fn gh_scan(State(app): S, auth: Auth, Json(b): Json<ScanIn>) -> R<Json<Value>> {
+    use xmuhub_core::hub::{group_of, is_doc};
+    require_admin(&auth)?;
+    let gh = app.github.as_ref().ok_or_else(|| bad("GitHub 存储未启用"))?;
+    let (owner, repo, branch) = xmuhub_core::storage::github::parse_repo_url(&b.url)?;
+    let scan = gh.scan_repo(&owner, &repo, branch.as_deref()).await?;
+    let docs: Vec<_> = scan.files.iter().filter(|f| is_doc(&f.path)).collect();
+    // Default grouping: two levels when the repo is organised as 学期/课程/…, else one.
+    let deep = docs.iter().filter(|f| f.path.matches('/').count() >= 2).count();
+    let depth = b.depth.unwrap_or(if deep * 2 > docs.len() { 2 } else { 1 }).clamp(1, 4);
+    let mut groups: std::collections::BTreeMap<String, (usize, u64, Vec<String>)> = Default::default();
+    for f in &docs {
+        let g = groups.entry(group_of(&f.path, depth)).or_default();
+        g.0 += 1;
+        g.1 += f.size;
+        if g.2.len() < 3 {
+            g.2.push(f.path.rsplit('/').next().unwrap_or(&f.path).to_string());
+        }
+    }
+    let groups: Vec<Value> = groups
+        .into_iter()
+        .map(|(key, (files, bytes, samples))| {
+            let leaf = key.rsplit('/').next().unwrap_or(&key).to_string();
+            let simplified: String = leaf.replace(['（', '('], " ").replace(['）', ')'], " ").split_whitespace().next().unwrap_or("").to_string();
+            let mut suggest = app.hub.suggest_nodes(&leaf, 5);
+            if suggest.is_empty() && !simplified.is_empty() {
+                suggest = app.hub.suggest_nodes(&simplified, 5);
+            }
+            json!({
+                "key": key, "files": files, "bytes": bytes, "samples": samples,
+                "suggest": suggest.iter().map(|(n, p)| json!({ "node": node_brief(n), "path": p.iter().map(node_brief).collect::<Vec<_>>() })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let id = format!("{}-{}", scan.commit.get(..8).unwrap_or(""), now());
+    let out = json!({
+        "scan_id": id, "owner": scan.owner, "repo": scan.repo, "branch": scan.branch, "commit": scan.commit,
+        "license": scan.license, "total_files": scan.files.len(), "doc_files": docs.len(),
+        "doc_bytes": docs.iter().map(|f| f.size).sum::<u64>(), "depth": depth, "groups": groups,
+        "doc_exts": xmuhub_core::hub::DOC_EXTS,
+    });
+    let mut scans = app.scans.lock();
+    if scans.len() > 8 {
+        scans.clear();
+    }
+    scans.insert(id, scan);
+    Ok(Json(out))
+}
+
+#[derive(Deserialize)]
+struct ImportIn {
+    scan_id: String,
+    depth: usize,
+    /// group key → node id
+    mappings: std::collections::HashMap<String, Id>,
+}
+
+async fn gh_import(State(app): S, auth: Auth, Json(b): Json<ImportIn>) -> R<Json<Value>> {
+    require_admin(&auth)?;
+    let scan = app.scans.lock().get(&b.scan_id).cloned().ok_or_else(|| bad("扫描结果已过期，请重新扫描"))?;
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let depth = b.depth.clamp(1, 4);
+    let report = blocking(move || {
+        let map = b.mappings;
+        hub.import_repo(Viewer { user: user.as_ref() }, &scan, depth, &|g: &str| map.get(g).copied())
+    })
+    .await?;
+    Ok(Json(json!(report)))
+}
+
+async fn gh_transfer(State(app): S, auth: Auth) -> R<Json<Value>> {
+    if !auth.viewer().staff() {
+        return Err(ApiError(Error::Forbidden));
+    }
+    let (refs, owned) = app.hub.transfer_counts();
+    Ok(Json(json!({ "referenced": refs, "owned": owned, "current": crate::transfer::current_job(&app.hub) })))
+}
+
+async fn gh_transfer_kick(State(app): S, auth: Auth) -> R<Json<Value>> {
+    require_admin(&auth)?;
+    let gh = app.github.as_ref().ok_or_else(|| bad("GitHub 存储未启用"))?;
+    crate::transfer::kick(&app.hub, gh).await.map_err(|e| ApiError(Error::Upstream(e.to_string())))?;
+    Ok(Json(json!({ "current": crate::transfer::current_job(&app.hub) })))
 }
 
 // ------------------------------------------------------------------ local backend (dev)

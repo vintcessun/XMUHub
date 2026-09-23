@@ -1,4 +1,4 @@
-import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, pathText, resourceItem, toast, $ } from '../app.js';
+import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, pathText, resourceItem, toast, tree, $ } from '../app.js';
 
 let me;
 
@@ -136,6 +136,102 @@ const panels = {
         b.textContent = banned ? '解除封禁' : '封禁';
         b.classList.toggle('danger', !banned);
       } catch (err) { toast(err.message, true); }
+    };
+  },
+  async github(box) {
+    if (me.level < 4) { box.innerHTML = '<div class="card empty"><b>仓库导入仅限管理员</b></div>'; return; }
+    const t = await tree();
+    const bSection = t.children(0).find((x) => x.code === 'B');
+    const colleges = bSection ? t.children(bSection.id) : [];
+    const tr = await api('/admin/github/transfer');
+    box.innerHTML = `<section class="card">
+        <h3>从 GitHub 仓库导入</h3>
+        <p class="small muted">只导入文档和压缩包（pdf、doc、ppt、xls、epub、zip、rar、7z），代码文件跳过。导入时直接引用原仓库的文件（固定到当前 commit，经国内镜像下载），随后后台用 GitHub Actions 在 GitHub 内部转存到我们的仓库，全程不经过服务器。导入的资料全部进「待核实」。</p>
+        <form class="row" id="gf"><input class="input grow" id="gurl" placeholder="https://github.com/owner/repo" style="min-width:260px">
+          <select class="input" id="gdepth" style="max-width:150px"><option value="">自动分组</option><option value="1">按第 1 层目录</option><option value="2">按第 2 层目录</option><option value="3">按第 3 层目录</option></select>
+          <button class="btn primary">扫描</button></form>
+        <div id="gres"></div></section>
+      <section class="card"><h3>后台转存</h3>
+        <p class="small">仅引用：<b>${tr.referenced}</b> 个文件 · 已有自己的副本：<b>${tr.owned}</b> 个${tr.current ? ` · 正在运行批次 ${esc(tr.current.id)}（${tr.current.files} 个文件，${ago(tr.current.dispatched_at)}开始）` : ''}</p>
+        <p class="small muted">每 5 分钟检查一次，每批最多 400 个文件、6GB。</p><button class="btn sm" id="gkick">立即检查</button></section>`;
+    box.querySelector('#gkick').onclick = async () => {
+      try { await api('/admin/github/transfer', { method: 'POST' }); toast('已触发'); show('github'); } catch (e) { toast(e.message, true); }
+    };
+    const ancestors = (n) => { const out = []; let p = n.parent; while (p) { const x = t.byId.get(p); if (!x) break; out.unshift(x); p = x.parent; } return out; };
+    const label = (id) => { const n = t.byId.get(id); return n ? `${n.name}（${pathText(ancestors(n))}）` : `#${id}`; };
+    // Preselect only confident matches; pick the 上/下 level when the folder names one.
+    const pick = (g) => {
+      const leaf = g.key.split('/').pop();
+      const top = g.suggest[0];
+      if (!top) return null;
+      const bare = leaf.replace(/[（(].*?[)）]/g, '').trim();
+      const exact = [top.node.name, top.node.label].some((n) => n === leaf || n === bare) || top.node.code === leaf;
+      if (!exact) return null;
+      const lv = /[（(]\s*([上下])\s*[)）]/.exec(leaf);
+      if (lv) { const child = t.children(top.node.id).find((c) => c.name === lv[1]); if (child) return child.id; }
+      return top.node.id;
+    };
+    box.querySelector('#gf').onsubmit = async (e) => {
+      e.preventDefault();
+      const res = box.querySelector('#gres');
+      res.innerHTML = '<p class="muted small">正在扫描仓库目录（大仓库需要十几秒）…</p>';
+      let scan;
+      try {
+        scan = await api('/admin/github/scan', { method: 'POST', body: { url: box.querySelector('#gurl').value, depth: Number(box.querySelector('#gdepth').value) || null } });
+      } catch (err) { res.innerHTML = `<div class="notice bad">${esc(err.message)}</div>`; return; }
+      res.innerHTML = `<p class="small" style="margin-top:12px"><b>${esc(scan.owner)}/${esc(scan.repo)}</b> · ${esc(scan.branch)} @ <span class="mono">${esc(scan.commit.slice(0, 10))}</span> · 许可证 ${esc(scan.license || '未声明')} ·
+          共 ${scan.total_files} 个文件，其中文档 <b>${scan.doc_files}</b> 个（${fmtSize(scan.doc_bytes)}），按第 ${scan.depth} 层目录分成 ${scan.groups.length} 组</p>
+        <div class="bulkbar"><span class="small">「新建课程」默认放在：</span><select class="input" id="gcol">${colleges.map((c) => `<option value="${c.id}"${c.name === '信息学院' ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
+          <span class="grow"></span><span class="small muted">没选分类的组不导入</span></div>
+        <div class="scroll-x"><table class="table"><thead><tr><th>目录</th><th>文件</th><th>导入到分类</th><th></th></tr></thead><tbody>
+        ${scan.groups.map((g, i) => {
+          const chosen = pick(g);
+          const opts = g.suggest.map((x) => `<option value="${x.node.id}"${x.node.id === chosen ? ' selected' : ''}>${esc(x.node.name)}（${esc(pathText(x.path))}）</option>`).join('');
+          const extra = chosen && !g.suggest.some((x) => x.node.id === chosen) ? `<option value="${chosen}" selected>${esc(label(chosen))}</option>` : '';
+          return `<tr data-i="${i}"><td><b>${esc(g.key || '（根目录）')}</b><div class="small faint">${g.samples.map(esc).join('、')}</div></td>
+            <td class="small">${g.files} · ${fmtSize(g.bytes)}</td>
+            <td><select class="input" data-f="node" style="min-height:30px;max-width:340px"><option value="">— 不导入 —</option>${extra}${opts}</select>
+              <input class="input" data-f="id" placeholder="或填分类 ID" style="min-height:30px;max-width:120px;margin-top:4px"></td>
+            <td><button class="btn sm" data-a="new" type="button">新建课程</button></td></tr>`;
+        }).join('')}</tbody></table></div>
+        <div class="row" style="margin-top:12px"><button class="btn primary" id="gimp" type="button">导入已选择的组</button><span class="small muted" id="gsum"></span></div>`;
+      const rows = [...res.querySelectorAll('tr[data-i]')];
+      const chosenOf = (row) => Number(row.querySelector('[data-f="id"]').value) || Number(row.querySelector('[data-f="node"]').value) || 0;
+      const sum = () => {
+        const sel = rows.filter((r) => chosenOf(r));
+        const files = sel.reduce((n, r) => n + scan.groups[Number(r.dataset.i)].files, 0);
+        res.querySelector('#gsum').textContent = `已选 ${sel.length} / ${rows.length} 组，${files} 个文件`;
+      };
+      sum();
+      res.onchange = sum;
+      res.oninput = sum;
+      res.onclick = async (ev) => {
+        const b = ev.target.closest('[data-a="new"]');
+        if (!b) return;
+        const row = b.closest('tr');
+        const g = scan.groups[Number(row.dataset.i)];
+        const name = prompt('新建课程名称（教务全称）：', g.key.split('/').pop().replace(/[（(].*?[)）]/g, '').trim());
+        if (!name) return;
+        try {
+          const n = await api('/nodes', { method: 'POST', body: { parent: Number(res.querySelector('#gcol').value), kind: 'course', name } });
+          row.querySelector('[data-f="id"]').value = n.id;
+          toast(`已新建「${n.name}」`);
+          sum();
+        } catch (err) { toast(err.message, true); }
+      };
+      res.querySelector('#gimp').onclick = async () => {
+        const mappings = {};
+        for (const r of rows) { const id = chosenOf(r); if (id) mappings[scan.groups[Number(r.dataset.i)].key] = id; }
+        if (!Object.keys(mappings).length) return toast('还没有选择任何分类', true);
+        const btn = res.querySelector('#gimp');
+        btn.disabled = true;
+        try {
+          const rep = await api('/admin/github/import', { method: 'POST', body: { scan_id: scan.scan_id, depth: scan.depth, mappings } });
+          res.querySelector('#gsum').textContent = `完成：新增 ${rep.created} 份资料（待核实），已存在跳过 ${rep.skipped_existing} 份，未选分类 ${rep.unmapped} 份`;
+          toast('导入完成');
+        } catch (err) { toast(err.message, true); }
+        btn.disabled = false;
+      };
     };
   },
   async status(box) {

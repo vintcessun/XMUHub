@@ -3,6 +3,7 @@ mod api;
 mod config;
 mod mailer;
 mod relay;
+mod transfer;
 mod web;
 
 use std::sync::Arc;
@@ -83,6 +84,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     let probe_http = reqwest::Client::builder().user_agent("XMUHub-probe/0.1").build()?;
 
     let local = Arc::new(LocalBackend { dir: cfg.data_dir.join("files"), secret: cfg.ticket_secret.clone() });
+    let repo_ref: Arc<dyn StorageBackend> = Arc::new(xmuhub_core::storage::repo_ref::RepoRefBackend { mirrors: mirrors.clone() });
     let (storage, github, local_opt) = match cfg.storage {
         StorageKind::GitHub => {
             let gh = Arc::new(GitHubBackend::new(
@@ -101,10 +103,10 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
                 mirrors.clone(),
             ));
             // Local stays registered so blobs stored during development remain readable.
-            let backends: Vec<Arc<dyn StorageBackend>> = vec![gh.clone(), local.clone()];
+            let backends: Vec<Arc<dyn StorageBackend>> = vec![gh.clone(), local.clone(), repo_ref.clone()];
             (Storage::new(backends), Some(gh), None)
         }
-        StorageKind::Local => (Storage::new(vec![local.clone() as Arc<dyn StorageBackend>]), None, Some(local.clone())),
+        StorageKind::Local => (Storage::new(vec![local.clone() as Arc<dyn StorageBackend>, repo_ref.clone()]), None, Some(local.clone())),
     };
     let admin_list = || {
         let mut v = cfg.admins.clone();
@@ -169,7 +171,12 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         },
         script_token: cfg.script_token.clone(),
         secure_cookie: cfg.secure_cookie,
+        github: github.clone(),
+        scans: Default::default(),
     });
+    if let Some(gh) = &github {
+        transfer::spawn(hub.clone(), gh.clone());
+    }
     spawn_jobs(app.clone(), github, probe_http);
 
     // Keep the admin list in sync with its file (edit + redeploy, or edit in place).

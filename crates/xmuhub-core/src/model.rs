@@ -392,6 +392,14 @@ pub enum Location {
         asset_id: u64,
         name: String,
     },
+    /// A file inside someone else's public repository, pinned to a commit (imports by
+    /// reference). Appended last so existing postcard records keep their variant indices.
+    GitHubRepo {
+        owner: String,
+        repo: String,
+        commit: String,
+        path: String,
+    },
 }
 
 impl Location {
@@ -399,7 +407,13 @@ impl Location {
         match self {
             Location::Local { .. } => "local",
             Location::GitHub { .. } => "github",
+            Location::GitHubRepo { .. } => "github-repo",
         }
+    }
+
+    /// Stored in our own storage (not merely referenced).
+    pub fn owned(&self) -> bool {
+        !matches!(self, Location::GitHubRepo { .. })
     }
 }
 

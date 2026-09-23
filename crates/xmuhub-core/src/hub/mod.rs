@@ -5,6 +5,7 @@
 //! `resources` (metadata, review, reports), `uploads` (storage slots and blobs).
 
 mod accounts;
+mod imports;
 mod resources;
 mod tree;
 mod uploads;
@@ -22,6 +23,7 @@ use crate::search::{DocType, Placement, Search};
 use crate::storage::Storage;
 
 pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
+pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};

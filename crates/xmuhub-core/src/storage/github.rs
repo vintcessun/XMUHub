@@ -28,6 +28,40 @@ const PROBE_TAG: &str = "probe";
 const PROBE_NAME: &str = "probe-256k.bin";
 pub const PROBE_SIZE: usize = 256 * 1024;
 
+/// One file of a scanned repository (git blob sha1, size in bytes).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFile {
+    pub path: String,
+    pub size: u64,
+    pub sha: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoScan {
+    pub owner: String,
+    pub repo: String,
+    pub branch: String,
+    /// Commit every imported file is pinned to.
+    pub commit: String,
+    /// SPDX id, empty when unknown.
+    pub license: String,
+    pub files: Vec<RepoFile>,
+}
+
+/// `https://github.com/owner/repo[/tree/branch/...]` or `owner/repo` → (owner, repo, branch).
+pub fn parse_repo_url(s: &str) -> Result<(String, String, Option<String>)> {
+    let s = s.trim().trim_end_matches('/').trim_end_matches(".git");
+    let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
+    let rest = rest.strip_prefix("github.com/").or_else(|| rest.strip_prefix("www.github.com/")).unwrap_or(rest);
+    let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
+    let ok = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    match parts.as_slice() {
+        [o, r] if ok(o) && ok(r) => Ok((o.to_string(), r.to_string(), None)),
+        [o, r, "tree", b, ..] if ok(o) && ok(r) => Ok((o.to_string(), r.to_string(), Some(b.to_string()))),
+        _ => Err(bad("请输入 GitHub 仓库地址，例如 https://github.com/owner/repo")),
+    }
+}
+
 pub struct GitHubConfig {
     pub owner: String,
     pub token: String,
@@ -114,7 +148,7 @@ impl GitHubBackend {
         }
     }
 
-    async fn ensure_repo(&self, name: &str, private: bool) -> Result<()> {
+    pub async fn ensure_repo(&self, name: &str, private: bool) -> Result<()> {
         let url = format!("{API}/repos/{}/{name}", self.cfg.owner);
         let (st, _) = self.call::<serde_json::Value>(self.req(reqwest::Method::GET, &url)).await?;
         if st.is_success() {
@@ -240,6 +274,170 @@ impl GitHubBackend {
 
     pub fn token(&self) -> &str {
         &self.cfg.token
+    }
+
+    // ------------------------------------------------------------ generic API helpers
+
+    /// GET an API path (relative to api.github.com) as JSON; `None` on 404.
+    pub async fn api_get(&self, path: &str) -> Result<Option<serde_json::Value>> {
+        let (st, v) = self.call::<serde_json::Value>(self.req(reqwest::Method::GET, &format!("{API}{path}"))).await?;
+        if st == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !st.is_success() {
+            return Err(Error::Upstream(format!("GET {path}: HTTP {st}")));
+        }
+        Ok(v)
+    }
+
+    /// Reads a file from one of the storage account's repos (contents API); `None` if absent.
+    pub async fn read_file(&self, repo: &str, path: &str) -> Result<Option<(Vec<u8>, String)>> {
+        use base64::Engine;
+        let Some(v) = self.api_get(&format!("/repos/{}/{repo}/contents/{}", self.cfg.owner, super::repo_ref::encode_path(path))).await? else {
+            return Ok(None);
+        };
+        let b64: String = v["content"].as_str().unwrap_or("").chars().filter(|c| !c.is_whitespace()).collect();
+        let bytes = if b64.is_empty() {
+            // Files over 1 MB come without inline content; fetch the blob instead.
+            let sha = v["sha"].as_str().unwrap_or("");
+            let blob = self.api_get(&format!("/repos/{}/{repo}/git/blobs/{sha}", self.cfg.owner)).await?.unwrap_or_default();
+            let b: String = blob["content"].as_str().unwrap_or("").chars().filter(|c| !c.is_whitespace()).collect();
+            base64::engine::general_purpose::STANDARD.decode(b).map_err(|e| Error::Upstream(e.to_string()))?
+        } else {
+            base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| Error::Upstream(e.to_string()))?
+        };
+        Ok(Some((bytes, v["sha"].as_str().unwrap_or("").to_string())))
+    }
+
+    /// Creates or replaces a file in one of the storage account's repos (one commit).
+    pub async fn write_file(&self, repo: &str, path: &str, bytes: &[u8], message: &str) -> Result<()> {
+        use base64::Engine;
+        let existing = self.read_file(repo, path).await?;
+        if existing.as_ref().is_some_and(|(b, _)| b == bytes) {
+            return Ok(());
+        }
+        let mut body = json!({ "message": message, "content": base64::engine::general_purpose::STANDARD.encode(bytes) });
+        if let Some((_, sha)) = existing {
+            body["sha"] = json!(sha);
+        }
+        let url = format!("{API}/repos/{}/{repo}/contents/{}", self.cfg.owner, super::repo_ref::encode_path(path));
+        let (st, _) = self.call::<serde_json::Value>(self.req(reqwest::Method::PUT, &url).json(&body)).await?;
+        if !st.is_success() {
+            return Err(Error::Upstream(format!("write {repo}/{path}: HTTP {st}")));
+        }
+        Ok(())
+    }
+
+    /// Triggers a `workflow_dispatch` run.
+    pub async fn dispatch(&self, repo: &str, workflow: &str, inputs: serde_json::Value) -> Result<()> {
+        let url = format!("{API}/repos/{}/{repo}/actions/workflows/{workflow}/dispatches", self.cfg.owner);
+        let (st, _) = self
+            .call::<serde_json::Value>(self.req(reqwest::Method::POST, &url).json(&json!({ "ref": "main", "inputs": inputs })))
+            .await?;
+        if !st.is_success() {
+            return Err(Error::Upstream(format!("dispatch {repo}/{workflow}: HTTP {st}")));
+        }
+        Ok(())
+    }
+
+    /// Assets of a release in one of our repos, by tag: (release id, [(asset id, name, size, digest)]).
+    pub async fn release_assets(&self, repo: &str, tag: &str) -> Result<Option<(u64, Vec<(u64, String, u64, String)>)>> {
+        let Some(rel) = self.api_get(&format!("/repos/{}/{repo}/releases/tags/{tag}", self.cfg.owner)).await? else {
+            return Ok(None);
+        };
+        let rid = rel["id"].as_u64().unwrap_or(0);
+        let mut out = Vec::new();
+        for page in 1..=20 {
+            let v = self
+                .api_get(&format!("/repos/{}/{repo}/releases/{rid}/assets?per_page=100&page={page}", self.cfg.owner))
+                .await?
+                .unwrap_or_default();
+            let arr = v.as_array().cloned().unwrap_or_default();
+            if arr.is_empty() {
+                break;
+            }
+            for a in arr {
+                if a["state"] == "uploaded" {
+                    out.push((
+                        a["id"].as_u64().unwrap_or(0),
+                        a["name"].as_str().unwrap_or("").to_string(),
+                        a["size"].as_u64().unwrap_or(0),
+                        a["digest"].as_str().unwrap_or("").to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(Some((rid, out)))
+    }
+
+    pub fn owner_login(&self) -> &str {
+        &self.cfg.owner
+    }
+
+    // ------------------------------------------------------------ repository import
+
+    /// Lists every file of a public repository at the head of `branch` (or the default branch).
+    /// Only API calls — no file contents are downloaded.
+    pub async fn scan_repo(&self, owner: &str, repo: &str, branch: Option<&str>) -> Result<RepoScan> {
+        let info = self.api_get(&format!("/repos/{owner}/{repo}")).await?.ok_or(Error::NotFound("GitHub 仓库"))?;
+        if info["private"].as_bool().unwrap_or(false) {
+            return Err(bad("只能导入公开仓库"));
+        }
+        let branch = branch.map(str::to_string).unwrap_or_else(|| info["default_branch"].as_str().unwrap_or("main").to_string());
+        let commit = self
+            .api_get(&format!("/repos/{owner}/{repo}/commits/{}", super::repo_ref::encode_path(&branch)))
+            .await?
+            .ok_or(Error::NotFound("分支"))?;
+        let sha = commit["sha"].as_str().unwrap_or("").to_string();
+        let tree = commit["commit"]["tree"]["sha"].as_str().unwrap_or("").to_string();
+        let mut files = Vec::new();
+        self.walk_tree(owner, repo, &tree, "", &mut files, 0).await?;
+        Ok(RepoScan {
+            owner: info["owner"]["login"].as_str().unwrap_or(owner).to_string(),
+            repo: info["name"].as_str().unwrap_or(repo).to_string(),
+            branch,
+            commit: sha,
+            license: info["license"]["spdx_id"].as_str().filter(|l| *l != "NOASSERTION").unwrap_or("").to_string(),
+            files,
+        })
+    }
+
+    fn walk_tree<'a>(
+        &'a self,
+        owner: &'a str,
+        repo: &'a str,
+        sha: &'a str,
+        prefix: &'a str,
+        out: &'a mut Vec<RepoFile>,
+        depth: u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            if depth > 12 {
+                return Ok(());
+            }
+            let t = self.api_get(&format!("/repos/{owner}/{repo}/git/trees/{sha}?recursive=1")).await?.unwrap_or_default();
+            if !t["truncated"].as_bool().unwrap_or(false) {
+                for e in t["tree"].as_array().into_iter().flatten().filter(|e| e["type"] == "blob") {
+                    out.push(RepoFile {
+                        path: format!("{prefix}{}", e["path"].as_str().unwrap_or("")),
+                        size: e["size"].as_u64().unwrap_or(0),
+                        sha: e["sha"].as_str().unwrap_or("").to_string(),
+                    });
+                }
+                return Ok(());
+            }
+            // Too big for one recursive listing: descend one level at a time.
+            let t = self.api_get(&format!("/repos/{owner}/{repo}/git/trees/{sha}")).await?.unwrap_or_default();
+            for e in t["tree"].as_array().cloned().unwrap_or_default() {
+                let path = format!("{prefix}{}", e["path"].as_str().unwrap_or(""));
+                if e["type"] == "tree" {
+                    self.walk_tree(owner, repo, e["sha"].as_str().unwrap_or(""), &format!("{path}/"), out, depth + 1).await?;
+                } else if e["type"] == "blob" {
+                    out.push(RepoFile { path, size: e["size"].as_u64().unwrap_or(0), sha: e["sha"].as_str().unwrap_or("").to_string() });
+                }
+            }
+            Ok(())
+        })
     }
 
     fn github_url(&self, repo: &str, tag: &str, name: &str) -> String {

@@ -7,6 +7,7 @@
 pub mod github;
 pub mod local;
 pub mod mirrors;
+pub mod repo_ref;
 
 use std::sync::Arc;
 
@@ -74,9 +75,12 @@ impl Storage {
     }
 
     /// URLs across every replica of a part, best first.
+    /// Our own copies come before references into other people's repositories.
     pub fn download_urls(&self, replicas: &[Location]) -> Vec<String> {
-        replicas
-            .iter()
+        let (owned, refs): (Vec<&Location>, Vec<&Location>) = replicas.iter().partition(|l| l.owned());
+        owned
+            .into_iter()
+            .chain(refs)
             .filter_map(|l| self.for_location(l).ok().map(|b| b.download_urls(l)))
             .flatten()
             .collect()

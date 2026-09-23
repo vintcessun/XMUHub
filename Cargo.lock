@@ -3049,6 +3049,7 @@ dependencies = [
  "postcard",
  "rand",
  "redb",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

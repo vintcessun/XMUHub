@@ -204,6 +204,29 @@ def main():
         save()
     print('nodes ready')
 
+    # Staff may have deleted or merged nodes since they were created (the site is live).
+    # Never resurrect them: files fall back to the nearest surviving ancestor and wait for review.
+    live = {}
+    for key, nid in state['nodes'].items():
+        if args.dry_run:
+            live[key] = True
+            continue
+        try:
+            api.call('GET', f'/nodes/{nid}')
+            live[key] = True
+        except RuntimeError as e:
+            if 'HTTP 404' not in str(e):
+                raise
+            live[key] = False
+            print('  node removed on the site, files will go to its parent:', key)
+
+    def place(node_parts):
+        for k in range(len(node_parts), 0, -1):
+            key = '/'.join(node_parts[:k])
+            if live.get(key):
+                return state['nodes'][key], k == len(node_parts)
+        raise RuntimeError(f'no surviving node for {node_parts}')
+
     # ------------------------------------------------------------ files
     opener = urllib.request.build_opener(*(
         [urllib.request.ProxyHandler({'https': args.proxy, 'http': args.proxy})] if args.proxy else [urllib.request.ProxyHandler({})]))
@@ -244,7 +267,11 @@ def main():
             tag = 'T8'
         if section == 'D' and p['type_word'] in ('模板', '工具'):
             tag = 'T9'
-        node_id = state['nodes']['/'.join(node_parts)]
+        node_id, exact = place(node_parts)
+        if not exact:
+            p['uncertain'] = True
+            if status == 'published':
+                status = 'pending'
         meta = dict(node=node_id, course=p['course'], time=p['time'], type_word=p['type_word'], tag=tag,
                     paper=p['paper'], with_answer=p['with_answer'], extra=p['extra'], note='',
                     admin=dict(status=status, original_name=(' | '.join(dict.fromkeys(origs)) or fname)[:200], uncertain=p['uncertain'],

@@ -45,6 +45,10 @@ pub struct AdminExtras {
     /// Verbatim type word outside the closed set (archive names).
     #[serde(default)]
     pub free_type: bool,
+    /// Keep a second resource with byte-identical content in the same node (archive imports
+    /// where the same file was filed under two names). Storage still holds one copy.
+    #[serde(default)]
+    pub allow_duplicate: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -171,7 +175,7 @@ impl Hub {
                 let r = &st.resources[id];
                 r.blob == up.key && !matches!(r.status, Status::Rejected)
             });
-            if dup {
+            if dup && !(staff && extras.allow_duplicate) {
                 return Err(Error::Conflict("这个分类下已经有完全相同的文件了".into()));
             }
             let ext = up

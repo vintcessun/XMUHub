@@ -143,6 +143,7 @@ def main():
     ap.add_argument('--base', default='https://xmu.vintces.icu')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--limit', type=int, default=0)
+    ap.add_argument('--restore', action='store_true', help='recreate nodes deleted on the site, move their files back, import skipped duplicates')
     ap.add_argument('--proxy', default='', help='proxy for GitHub uploads, e.g. http://127.0.0.1:7890')
     args = ap.parse_args()
 
@@ -205,7 +206,8 @@ def main():
     print('nodes ready')
 
     # Staff may have deleted or merged nodes since they were created (the site is live).
-    # Never resurrect them: files fall back to the nearest surviving ancestor and wait for review.
+    # By default files then wait in the nearest surviving parent; --restore recreates the
+    # nodes exactly where the archive puts them and moves those files back.
     live = {}
     for key, nid in state['nodes'].items():
         if args.dry_run:
@@ -218,7 +220,20 @@ def main():
             if 'HTTP 404' not in str(e):
                 raise
             live[key] = False
-            print('  node removed on the site, files will go to its parent:', key)
+            print('  node missing on the site:', key)
+    restored = set()
+    if args.restore and not args.dry_run:
+        for key in sorted((k for k, v in live.items() if not v), key=lambda k: (k.count('/'), k)):
+            d = tuple(key.split('/'))
+            kind, code, name, label, bucketed, sort = node_spec(d, None)
+            parent = state['nodes'].get('/'.join(d[:-1])) if len(d) > 1 else None
+            n = api.call('POST', '/nodes', dict(parent=parent, kind=kind, code=code, name=name, label=label,
+                                                bucketed=bucketed, sort=sort, aliases=ALIASES.get(code, [])))
+            state['nodes'][key] = n['id']
+            live[key] = True
+            restored.add(key)
+            save()
+            print(f'  restored node {key} -> {n["id"]}')
 
     def place(node_parts):
         for k in range(len(node_parts), 0, -1):
@@ -227,9 +242,6 @@ def main():
                 return state['nodes'][key], k == len(node_parts)
         raise RuntimeError(f'no surviving node for {node_parts}')
 
-    # ------------------------------------------------------------ files
-    opener = urllib.request.build_opener(*(
-        [urllib.request.ProxyHandler({'https': args.proxy, 'http': args.proxy})] if args.proxy else [urllib.request.ProxyHandler({})]))
     # Versions of one restricted file (e.g. several copies of an encrypted 题库) are all restricted,
     # even when the rename table lost track of some originals.
     def base_of(rel):
@@ -242,19 +254,13 @@ def main():
         if any(w in o for o in origs + [f] for w in RESTRICT_WORDS):
             restricted_bases.add(base_of(rel))
 
-    done = 0
-    stats = {'published': 0, 'pending': 0, 'restricted': 0, 'skipped': 0}
-    for rel, info, node_parts, bucket in sorted(files):
-        if args.limit and done >= args.limit:
-            break
-        if rel in state['files']:
-            continue
+    def describe(rel, node_parts, bucket):
+        """(metadata, status, upload file name) for one archive file."""
         fname = rel.split('/')[-1]
         p = parse_name(fname)
         clean_name = fname.replace('（不确定）', '')
         origs = originals.get(clean_name, []) + originals.get(fname, [])
-        restricted = base_of(rel) in restricted_bases
-        status = 'restricted' if restricted else ('pending' if p['uncertain'] else 'published')
+        status = 'restricted' if base_of(rel) in restricted_bases else ('pending' if p['uncertain'] else 'published')
         tag = TYPE_TAGS.get(p['type_word'], 'T5')
         if bucket == 1:
             tag = 'T2' if p['type_word'] == '答案' else 'T1'
@@ -268,16 +274,47 @@ def main():
         if section == 'D' and p['type_word'] in ('模板', '工具'):
             tag = 'T9'
         node_id, exact = place(node_parts)
+        uncertain = p['uncertain']
         if not exact:
-            p['uncertain'] = True
+            uncertain = True
             if status == 'published':
                 status = 'pending'
         meta = dict(node=node_id, course=p['course'], time=p['time'], type_word=p['type_word'], tag=tag,
                     paper=p['paper'], with_answer=p['with_answer'], extra=p['extra'], note='',
-                    admin=dict(status=status, original_name=(' | '.join(dict.fromkeys(origs)) or fname)[:200], uncertain=p['uncertain'],
-                               source='虾兵资料库归档（2026-09）', free_type=True))
+                    admin=dict(status=status, original_name=(' | '.join(dict.fromkeys(origs)) or fname)[:200], uncertain=uncertain,
+                               source='虾兵资料库归档（2026-09）', free_type=True, allow_duplicate=True))
+        return meta, status, clean_name
+
+    # ------------------------------------------------------------ repairs (--restore)
+    if args.restore and not args.dry_run:
+        # Files parked in a parent while their node was missing go back to it.
+        for rel, info, node_parts, bucket in sorted(files):
+            rid = state['files'].get(rel, 0)
+            if rid > 0 and '/'.join(node_parts) in restored:
+                meta, status, _ = describe(rel, node_parts, bucket)
+                api.call('PATCH', f'/resources/{rid}', meta)
+                action = {'published': 'approve', 'restricted': 'restrict'}.get(status)
+                if action:
+                    api.call('POST', f'/resources/{rid}/review', {'action': action, 'note': '导入：恢复原分类'})
+                print(f'  moved back: {rel} ({status})')
+        # Files skipped as byte-identical duplicates are imported too: nothing may be missing.
+        for rel in [r for r, v in state['files'].items() if v == 0]:
+            del state['files'][rel]
+        save()
+
+    # ------------------------------------------------------------ files
+    opener = urllib.request.build_opener(*(
+        [urllib.request.ProxyHandler({'https': args.proxy, 'http': args.proxy})] if args.proxy else [urllib.request.ProxyHandler({})]))
+    done = 0
+    stats = {'published': 0, 'pending': 0, 'restricted': 0, 'skipped': 0}
+    for rel, info, node_parts, bucket in sorted(files):
+        if args.limit and done >= args.limit:
+            break
+        if rel in state['files']:
+            continue
+        meta, status, clean_name = describe(rel, node_parts, bucket)
         if args.dry_run:
-            print(f'  {status:10} {tag} {rel}\n{"":13}→ {meta}')
+            print(f'  {status:10} {meta["tag"]} {rel}\n{"":13}-> {meta}')
             done += 1
             stats[status] += 1
             continue
@@ -332,6 +369,16 @@ def main():
         save()
         done += 1
     print('done', stats)
+
+    # ------------------------------------------------------------ verification
+    if not args.dry_run and not args.limit:
+        missing = [rel for rel, _, _, _ in files if state['files'].get(rel, 0) <= 0]
+        if missing:
+            print(f'MISSING {len(missing)} of {len(files)}:')
+            for m in missing:
+                print('  ', m)
+            sys.exit(1)
+        print(f'VERIFIED: all {len(files)} files have a resource on the site')
 
 
 if __name__ == '__main__':

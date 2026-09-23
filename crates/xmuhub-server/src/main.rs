@@ -1,6 +1,7 @@
 mod alloc;
 mod api;
 mod config;
+mod relay;
 mod web;
 
 use std::sync::Arc;
@@ -60,7 +61,13 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
-    let db = Arc::new(Db::open(&cfg.data_dir.join("xmuhub.redb"), cfg.db_cache_mb * 1024 * 1024)?);
+    let db = match Db::open(&cfg.data_dir.join("xmuhub.redb"), cfg.db_cache_mb * 1024 * 1024) {
+        Ok(db) => Arc::new(db),
+        Err(e) if e.to_string().contains("already open") => {
+            anyhow::bail!("数据库正被运行中的服务占用。请先 `systemctl stop xmuhub`，执行完再 `systemctl start xmuhub`（或用 deploy.ps1 -NewAdminToken）")
+        }
+        Err(e) => return Err(e.into()),
+    };
     let mirrors = Arc::new(Mirrors::new(cfg.mirrors.clone()));
 
     let mut http = reqwest::Client::builder()
@@ -115,6 +122,18 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         Cmd::Serve => {}
     }
 
+    let relay = match (&github, cfg.worker_url.is_empty()) {
+        (Some(gh), true) => Some(relay::Relay::new(
+            cfg.ticket_secret.clone(),
+            gh.owner().to_string(),
+            gh.token().to_string(),
+            cfg.relay_concurrency,
+            cfg.relay_daily_bytes,
+        )?),
+        _ => None,
+    };
+    tracing::info!(upload_via = if relay.is_some() { "server relay" } else if github.is_some() { "worker" } else { "local" });
+
     let site = Arc::new(web::Site::load(&cfg.web_dir)?);
     let app = Arc::new(api::App {
         hub: hub.clone(),
@@ -122,6 +141,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         mirrors: mirrors.clone(),
         local: local_opt,
         worker_url: cfg.worker_url.clone(),
+        relay,
         claims: Default::default(),
     });
     spawn_jobs(app.clone(), github, probe_http);
@@ -191,10 +211,10 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
                 }
             }
         };
-        let mut tick = tokio::time::interval(Duration::from_secs(20 * 60));
+        let mut tick = tokio::time::interval(Duration::from_secs(15 * 60));
         loop {
             tick.tick().await;
-            mirrors.probe(&probe_http, &probe).await;
+            mirrors.probe(&probe_http, &probe, xmuhub_core::storage::github::PROBE_SIZE).await;
         }
     });
 

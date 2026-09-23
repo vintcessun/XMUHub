@@ -23,7 +23,10 @@ const API: &str = "https://api.github.com";
 const UPLOADS: &str = "https://uploads.github.com";
 const CURSOR_KEY: &str = "github.cursor";
 const PROBE_TAG: &str = "probe";
-const PROBE_NAME: &str = "probe.txt";
+/// Mirrors are ranked by how fast they deliver this file, so it must be big enough to
+/// measure throughput yet cheap to fetch every few minutes through each mirror.
+const PROBE_NAME: &str = "probe-256k.bin";
+pub const PROBE_SIZE: usize = 256 * 1024;
 
 pub struct GitHubConfig {
     pub owner: String,
@@ -31,7 +34,8 @@ pub struct GitHubConfig {
     pub repo_prefix: String,
     pub assets_per_release: u32,
     pub releases_per_repo: u32,
-    /// Base URL of the upload Worker, e.g. `https://xmuhub-upload.example.workers.dev`.
+    /// Where browsers send part bytes: the Cloudflare Worker's base URL, or empty to use
+    /// the XMUHub server's own streaming relay (`/api/relay/upload`).
     pub worker_url: String,
     /// Shared with the Worker to sign upload tickets.
     pub ticket_secret: Vec<u8>,
@@ -181,8 +185,23 @@ impl GitHubBackend {
         let repo = self.repo_name(1);
         self.ensure_repo(&repo, false).await?;
         let rel = self.ensure_release(&repo, PROBE_TAG).await?;
-        if !rel.assets.iter().any(|a| a.name == PROBE_NAME && a.state == "uploaded") {
-            self.upload_small(&repo, rel.id, PROBE_NAME, b"xmuhub-probe\n".to_vec(), "text/plain").await?;
+        let good = rel.assets.iter().find(|a| a.name == PROBE_NAME && a.state == "uploaded" && a.size == PROBE_SIZE as u64);
+        if good.is_none() {
+            // Replace a missing, half-written or wrong-sized probe.
+            if let Some(bad) = rel.assets.iter().find(|a| a.name == PROBE_NAME) {
+                self.delete_asset(&repo, bad.id).await?;
+            }
+            // Deterministic, incompressible-looking bytes so mirrors can't shortcut the transfer.
+            let mut data = Vec::with_capacity(PROBE_SIZE);
+            let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+            while data.len() < PROBE_SIZE {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                data.extend_from_slice(&x.to_le_bytes());
+            }
+            data.truncate(PROBE_SIZE);
+            self.upload_small(&repo, rel.id, PROBE_NAME, data, "application/octet-stream").await?;
         }
         Ok(format!("https://github.com/{}/{repo}/releases/download/{PROBE_TAG}/{PROBE_NAME}", self.cfg.owner))
     }
@@ -213,6 +232,14 @@ impl GitHubBackend {
         } else {
             Err(Error::Upstream(format!("delete asset {id}: HTTP {st}")))
         }
+    }
+
+    pub fn owner(&self) -> &str {
+        &self.cfg.owner
+    }
+
+    pub fn token(&self) -> &str {
+        &self.cfg.token
     }
 
     fn github_url(&self, repo: &str, tag: &str, name: &str) -> String {
@@ -251,15 +278,22 @@ impl StorageBackend for GitHubBackend {
         cur.count += 1;
         self.save_cursor(&cur)?;
 
-        let nonce = hex::encode(rand::random::<[u8; 3]>());
-        let short = sha256.get(..12).ok_or_else(|| bad("bad sha256"))?;
+        // Readable name first (it becomes the saved filename when a mirror serves the file),
+        // then a hash + nonce suffix so names never collide within a bucket.
+        let short = sha256.get(..8).ok_or_else(|| bad("bad sha256"))?;
+        let suffix = format!("{short}{}", hex::encode(rand::random::<[u8; 2]>()));
+        let ascii = ascii_filename(display_name);
+        let name = match ascii.rsplit_once('.') {
+            Some((stem, ext)) => format!("{stem}-{suffix}.{ext}"),
+            None => format!("{ascii}-{suffix}"),
+        };
         Ok(Location::GitHub {
             owner: self.cfg.owner.clone(),
             repo: self.repo_name(cur.repo_no),
             release_id: cur.release_id,
             tag: Self::tag(cur.release_no),
             asset_id: 0,
-            name: format!("{short}-{nonce}-{}", ascii_filename(display_name)),
+            name,
         })
     }
 
@@ -269,11 +303,12 @@ impl StorageBackend for GitHubBackend {
         };
         let dest = format!("{UPLOADS}/repos/{owner}/{repo}/releases/{release_id}/assets?name={name}");
         let t = ticket::sign(&self.cfg.ticket_secret, &Ticket { u: dest, s: size, e: now() + 6 * 3600 });
-        Ok(UploadTarget {
-            url: format!("{}/upload?t={t}", self.cfg.worker_url.trim_end_matches('/')),
-            method: "POST",
-            headers: vec![],
-        })
+        let url = if self.cfg.worker_url.is_empty() {
+            format!("/api/relay/upload?t={t}")
+        } else {
+            format!("{}/upload?t={t}", self.cfg.worker_url.trim_end_matches('/'))
+        };
+        Ok(UploadTarget { url, method: "POST", headers: vec![] })
     }
 
     async fn confirm(&self, reserved: &Location, size: u64, sha256: &str, receipt: &Receipt) -> Result<Location> {

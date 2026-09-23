@@ -44,6 +44,9 @@ pub struct Config {
     pub ticket_secret: Vec<u8>,
     pub mirrors: Vec<String>,
     pub db_cache_mb: usize,
+    /// Cap on bytes the server relays to GitHub per day (only when no Worker is used).
+    pub relay_daily_bytes: u64,
+    pub relay_concurrency: usize,
 }
 
 impl Config {
@@ -55,7 +58,7 @@ impl Config {
         };
         let secret = var("UPLOAD_TICKET_SECRET").unwrap_or_default();
         if matches!(storage, StorageKind::GitHub) {
-            for k in ["GH_STORE_USER", "GH_STORE_TOKEN", "UPLOAD_WORKER_URL", "UPLOAD_TICKET_SECRET"] {
+            for k in ["GH_STORE_USER", "GH_STORE_TOKEN", "UPLOAD_TICKET_SECRET"] {
                 if var(k).is_none() {
                     anyhow::bail!("{k} is required when XMUHUB_STORAGE=github");
                 }
@@ -78,6 +81,8 @@ impl Config {
                 .map(|m| m.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
                 .unwrap_or_else(|| DEFAULT_MIRRORS.iter().map(|s| s.to_string()).collect()),
             db_cache_mb: var_or("XMUHUB_DB_CACHE_MB", "32").parse()?,
+            relay_daily_bytes: var_or("RELAY_DAILY_MB", "5120").parse::<u64>()? * 1024 * 1024,
+            relay_concurrency: var_or("RELAY_CONCURRENCY", "4").parse()?,
         })
     }
 }

@@ -117,10 +117,10 @@ const panels = {
         <dt>课程</dt><dd>${st.courses}</dd><dt>已发布资料</dt><dd>${st.resources}</dd><dt>待审</dt><dd>${st.pending}</dd>
         <dt>令牌</dt><dd>${st.tokens}</dd><dt>存储总量</dt><dd>${fmtSize(st.stored_bytes)}</dd><dt>下载次数</dt><dd>${st.downloads}</dd>
         <dt>内存占用</dt><dd>${s.rss_bytes ? fmtSize(s.rss_bytes) : '—'}</dd><dt>版本</dt><dd>${esc(s.version)}</dd></dl></section>
-      <section class="card scroll-x"><h3>下载镜像</h3><p class="small muted">每 20 分钟从服务器探测一次，下载时按延迟从低到高依次尝试；全部失败时直连 GitHub。</p>
-        ${s.mirrors.length ? `<table class="table"><thead><tr><th>镜像</th><th>状态</th><th>延迟</th><th>检测时间</th></tr></thead><tbody>
+      <section class="card scroll-x"><h3>下载镜像</h3><p class="small muted">每 15 分钟从服务器经各镜像下载一个 256KB 探针文件，按实际速度排序；下载时依次尝试，全部失败时直连 GitHub。</p>
+        ${s.mirrors.length ? `<table class="table"><thead><tr><th>镜像</th><th>状态</th><th>速度</th><th>检测时间</th></tr></thead><tbody>
         ${s.mirrors.map((m) => `<tr><td class="mono">${esc(m.prefix)}</td><td>${m.ok ? '<span class="badge published">可用</span>' : `<span class="badge rejected">不可用</span> <span class="small faint">${esc(m.error)}</span>`}</td>
-          <td>${m.latency_ms} ms</td><td class="small faint">${ago(m.checked_at)}</td></tr>`).join('')}</tbody></table>` : '<p class="faint">尚未探测（本地存储模式或刚启动）</p>'}
+          <td>${m.ok ? `${(m.speed_kbps / 1024).toFixed(2)} MB/s` : '—'}</td><td class="small faint">${ago(m.checked_at)}</td></tr>`).join('')}</tbody></table>` : '<p class="faint">尚未探测（本地存储模式或刚启动）</p>'}
       </section>`;
   },
 };

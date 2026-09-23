@@ -11,7 +11,10 @@ use serde::Serialize;
 pub struct MirrorStat {
     pub prefix: String,
     pub ok: bool,
+    /// Time to download the whole probe file.
     pub latency_ms: u64,
+    /// Measured throughput, KiB/s.
+    pub speed_kbps: u64,
     pub checked_at: i64,
     pub error: String,
 }
@@ -40,30 +43,28 @@ impl Mirrors {
         self.stats.read().clone()
     }
 
-    /// Fetches the first byte of `probe_url` through every candidate and re-ranks.
-    pub async fn probe(&self, client: &reqwest::Client, probe_url: &str) {
+    /// Downloads the probe file (`expected_len` bytes) through every candidate and ranks
+    /// healthy mirrors by total transfer time — throughput, not just time to first byte.
+    pub async fn probe(&self, client: &reqwest::Client, probe_url: &str, expected_len: usize) {
         let checks = self.candidates.iter().map(|prefix| async move {
             let start = Instant::now();
-            let res = client
-                .get(format!("{prefix}/{probe_url}"))
-                .header("Range", "bytes=0-0")
-                .timeout(Duration::from_secs(10))
-                .send()
-                .await;
+            let res = client.get(format!("{prefix}/{probe_url}")).timeout(Duration::from_secs(20)).send().await;
             let (ok, error) = match res {
                 Ok(r) if r.status().is_success() => match r.bytes().await {
                     // A mirror that answers with an HTML page instead of the file is broken.
-                    Ok(b) if b.len() <= 16 => (true, String::new()),
+                    Ok(b) if b.len() == expected_len => (true, String::new()),
                     Ok(b) => (false, format!("unexpected body ({} bytes)", b.len())),
                     Err(e) => (false, e.to_string()),
                 },
                 Ok(r) => (false, format!("HTTP {}", r.status())),
                 Err(e) => (false, e.to_string()),
             };
+            let ms = start.elapsed().as_millis().max(1) as u64;
             MirrorStat {
                 prefix: prefix.clone(),
                 ok,
-                latency_ms: start.elapsed().as_millis() as u64,
+                latency_ms: ms,
+                speed_kbps: if ok { expected_len as u64 * 1000 / 1024 / ms } else { 0 },
                 checked_at: crate::model::now(),
                 error,
             }
@@ -72,7 +73,11 @@ impl Mirrors {
         stats.sort_by_key(|s| (!s.ok, s.latency_ms));
         let ranked: Vec<String> = stats.iter().filter(|s| s.ok).map(|s| s.prefix.clone()).collect();
         tracing::info!(healthy = ranked.len(), total = stats.len(), "mirror probe finished");
-        *self.ranked.write() = ranked;
+        // If every probe failed the problem is more likely on our side (probe file, network)
+        // than all mirrors dying at once; keep the previous ranking rather than going direct-only.
+        if !ranked.is_empty() {
+            *self.ranked.write() = ranked;
+        }
         *self.stats.write() = stats;
     }
 }

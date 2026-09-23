@@ -29,6 +29,7 @@ pub struct App {
     pub mirrors: Arc<Mirrors>,
     pub local: Option<Arc<LocalBackend>>,
     pub worker_url: String,
+    pub relay: Option<crate::relay::Relay>,
     /// ip → (day, claims) for self-service token claims.
     pub claims: Mutex<HashMap<String, (i64, u32)>>,
 }
@@ -223,6 +224,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/admin/tokens", get(list_tokens).post(create_token))
         .route("/admin/tokens/{id}", axum::routing::patch(update_token))
         .route("/admin/status", get(status))
+        .route("/relay/upload", post(crate::relay::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/upload", put(local_upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/file/{name}", get(local_file))
         .fallback(|| async { ApiError(Error::NotFound("接口")) });
@@ -269,7 +271,7 @@ async fn meta(State(app): S) -> Json<Value> {
         "levels": ["访客","贡献者","可信贡献者","审核员","管理员"],
         "limits": { "max_file": l.max_file, "max_part": l.max_part },
         "stats": app.hub.stats(),
-        "upload_via_worker": !app.worker_url.is_empty(),
+        "upload_via": if app.worker_url.is_empty() { "relay" } else { "worker" },
     }))
 }
 
@@ -603,6 +605,7 @@ async fn status(State(app): S, auth: Auth) -> R<Json<Value>> {
         "stats": app.hub.stats(),
         "mirrors": app.mirrors.stats(),
         "rss_bytes": crate::alloc::rss_bytes(),
+        "relay_bytes_today": app.relay.as_ref().map(|r| r.used_today()),
         "version": env!("CARGO_PKG_VERSION"),
         "pending_statuses": [Status::Pending.as_str()],
     })))

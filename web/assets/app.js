@@ -163,7 +163,7 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>XMUHub · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/about">使用须知</a> · 资料由同学上传，仅供学习交流</span></div>`;
+    <span><a href="/about">使用须知</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
   const m = await me();
   if (m.level >= 3) top.querySelector('[data-k="admin"]').hidden = false;
   return m;
@@ -182,19 +182,23 @@ function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-/** Fetches one part, trying each mirror in turn. Returns a Blob or throws. */
-async function fetchPart(part, onBytes) {
+/**
+ * Fetches one part, trying each URL in turn. A mirror that is reachable but crawling
+ * (under ~150 KB/s after a few seconds) is abandoned for the next one.
+ */
+async function fetchPart(part, urls, onBytes) {
   let lastErr;
-  for (const url of part.urls) {
+  for (const [i, url] of urls.entries()) {
+    const hasNext = i < urls.length - 1;
+    const ctl = new AbortController();
     try {
-      const ctl = new AbortController();
-      // A mirror that doesn't even start responding in 15 s is skipped.
-      const t = setTimeout(() => ctl.abort(), 15_000);
+      const startTimer = setTimeout(() => ctl.abort(), 15_000);
       const res = await fetch(url, { signal: ctl.signal, mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' });
-      clearTimeout(t);
+      clearTimeout(startTimer);
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const chunks = [];
+      const t0 = performance.now();
       let got = 0;
       for (;;) {
         const { done, value } = await reader.read();
@@ -202,6 +206,8 @@ async function fetchPart(part, onBytes) {
         chunks.push(value);
         got += value.length;
         onBytes(got);
+        const secs = (performance.now() - t0) / 1000;
+        if (hasNext && secs > 6 && got / secs < 150 * 1024) { ctl.abort(); throw new Error('镜像太慢'); }
       }
       if (got !== part.size) throw new Error('大小不符');
       return new Blob(chunks);
@@ -214,24 +220,28 @@ async function fetchPart(part, onBytes) {
 }
 
 /**
- * Downloads a resource with its original (Chinese) filename by fetching through a mirror.
- * If mirrors refuse cross-origin fetches, falls back to a plain navigation to the file.
+ * Downloads a resource. Single files: try a cross-origin fetch through the fastest mirror
+ * (keeps the original Chinese filename); most mirrors send no CORS headers, in which case
+ * we navigate to that same fastest mirror (full speed, ASCII filename). Multi-part files
+ * must be fetched and joined in the browser, so every mirror is tried for each part.
  */
 export async function downloadResource(id, onProgress = () => {}) {
   const plan = await api(`/resources/${id}/download`);
   const total = plan.size;
+  const single = plan.parts.length === 1;
   let doneBytes = 0;
   try {
     const blobs = [];
     for (const part of plan.parts) {
-      const b = await fetchPart(part, (n) => onProgress(Math.min(1, (doneBytes + n) / total)));
+      const urls = single ? part.urls.slice(0, 1) : part.urls;
+      const b = await fetchPart(part, urls, (n) => onProgress(Math.min(1, (doneBytes + n) / total)));
       doneBytes += part.size;
       blobs.push(b);
     }
     saveBlob(new Blob(blobs, { type: plan.mime || 'application/octet-stream' }), plan.filename);
     return { ok: true };
   } catch (e) {
-    if (plan.parts.length === 1) {
+    if (single) {
       location.href = plan.parts[0].urls[0];
       return { ok: true, fallback: true };
     }

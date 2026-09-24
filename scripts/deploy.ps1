@@ -270,6 +270,21 @@ finally {
 
 Sync-Admins
 
+# ---- 记录部署的版本（scripts/sync.ps1 据此判断要不要重新部署）----
+function Get-Rev([string[]]$Paths) {
+    try {
+        $h = (git -C $Root rev-parse HEAD 2>$null)
+        if ($LASTEXITCODE -ne 0 -or -not $h) { return "unknown" }
+        $h = $h.Trim()
+        if (git -C $Root status --porcelain -- @Paths 2>$null) { $h += "-dirty" }
+        return $h
+    } catch { return "unknown" }
+}
+$WebRev = Get-Rev @("web")
+$RunCommit = Join-Path $Root "run.commit"
+$BinRev = if (Test-Path $RunCommit) { (Get-Content $RunCommit -Raw).Trim() } else { "unknown" }
+$markBin = if ($WebOnly) { "B=`$(sed -n 's/^bin=//p' DEPLOYED 2>/dev/null)" } else { "B='$BinRev'" }
+
 # ---- 替换并重启（停机只在这一小段）----
 $swapRun = if ($WebOnly) { "" } else { @"
 [ -f run ] && cp -f run run.bak || true
@@ -304,6 +319,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
   if [ `$i = 10 ]; then echo '[remote] 健康检查失败'; journalctl -u $Service -n 40 --no-pager; exit 1; fi
 done
+$markBin
+printf 'bin=%s\nweb=%s\nat=%s\n' "`${B:-unknown}" '$WebRev' "`$(date '+%F %T')" > DEPLOYED
 pid=`$(systemctl show -p MainPID --value $Service)
 echo "[remote] 内存 `$(grep VmRSS /proc/`$pid/status)"
 systemctl --no-pager --full status $Service 2>&1 | head -n 8

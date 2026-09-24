@@ -7,6 +7,7 @@
 /target/
 /run
 /run.new
+/run.commit
 /data/
 /dist/
 node_modules/

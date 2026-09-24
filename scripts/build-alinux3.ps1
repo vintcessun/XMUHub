@@ -90,6 +90,17 @@ echo "OK"
 $InnerPath = Join-Path $ScriptDir ".build_alinux3_inner.sh"
 [System.IO.File]::WriteAllText($InnerPath, ($Inner -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
+# Which commit this binary is built from (deploy.ps1 records it on the server, and
+# sync.ps1 compares against it); "-dirty" when the Rust sources have uncommitted edits.
+$BuildRev = "unknown"
+try {
+    $h = (git -C $Root rev-parse HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $h) {
+        $BuildRev = $h.Trim()
+        if (git -C $Root status --porcelain -- crates Cargo.toml Cargo.lock 2>$null) { $BuildRev += "-dirty" }
+    }
+} catch { }
+
 # ---- 3. run build ----
 Write-Host "===== 容器内编译 =====" -ForegroundColor Cyan
 $runArgs = @("run", "--rm",
@@ -106,6 +117,7 @@ if ($LASTEXITCODE -ne 0) { throw "容器内编译失败" }
 
 $Run = Join-Path $Root "run"
 if (-not (Test-Path $Run)) { throw "没有生成 run：$Run" }
+[System.IO.File]::WriteAllText((Join-Path $Root "run.commit"), $BuildRev)
 Write-Host ""
 Write-Host "===== 编译完成 =====" -ForegroundColor Green
 Write-Host ("run => {0} ({1:N1} MB)" -f $Run, ((Get-Item $Run).Length / 1MB))

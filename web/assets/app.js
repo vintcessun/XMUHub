@@ -64,7 +64,7 @@ export function tree() {
 /** Site slogan, shown big on the home page. */
 export const SLOGAN = '让每一份资料都被需要它的人找到';
 /** User group shown on the feedback page, e.g. 'QQ 群 123456789'; empty hides it. */
-export const COMMUNITY = 'QQ 群：902541466';
+export const COMMUNITY = 'QQ 群：1106047582';
 
 export const LEVELS = ['访客', '贡献者', '可信贡献者', '审核员', '管理员'];
 

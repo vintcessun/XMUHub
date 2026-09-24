@@ -64,7 +64,7 @@ export function tree() {
 /** Site slogan, shown big on the home page. */
 export const SLOGAN = '让每一份资料都被需要它的人找到';
 /** User group shown on the feedback page, e.g. 'QQ 群 123456789'; empty hides it. */
-export const COMMUNITY = '';
+export const COMMUNITY = 'QQ 群：902541466';
 
 export const LEVELS = ['访客', '贡献者', '可信贡献者', '审核员', '管理员'];
 
@@ -191,7 +191,7 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>XMUHub · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
+    <span><a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
   const user = await me();
   const navMe = top.querySelector('#nav-me');
   if (user) {

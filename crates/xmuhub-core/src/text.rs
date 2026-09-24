@@ -170,9 +170,54 @@ pub fn ascii_filename(name: &str) -> String {
     }
 }
 
+/// A subtitle derived from the original upload name, or empty when that name says nothing
+/// useful (camera / chat-app names, hashes, "新建文档", or just the generated name again)
+/// or looks private. Staff can always override it by hand.
+pub fn auto_subtitle(original: &str, generated_stem: &str) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static JUNK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(img|dsc|dcim|scan|screenshot|mmexport|wx_camera|photo|image|video|pxl|vid|微信图片|屏幕截图|截图|扫描全能王|新建|未命名|无标题|untitled|document|文档|副本|download|file)[\s_\-\d]*").unwrap()
+    });
+    static PRIVATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"勿外传|仅内部|内部资料|密码|(?:^|\D)1[3-9]\d{9}(?:\D|$)|@").unwrap());
+    let last = original.rsplit(['/', '\\']).next().unwrap_or(original);
+    let stem = match last.rsplit_once('.') {
+        Some((s, e)) if e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric()) => s,
+        _ => last,
+    };
+    let s: String = stem.replace(['_', '＿'], " ").replace("（不确定）", "").replace("(不确定)", "");
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let s = s.trim_matches(|c: char| c == '-' || c == '.' || c.is_whitespace()).to_string();
+    let meaningful = s.chars().filter(|c| c.is_alphabetic()).count();
+    let is_hash = s.len() >= 12 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    static BLANK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^(新建|未命名|无标题|untitled|new microsoft)").unwrap());
+    let junk = BLANK.is_match(&s) || JUNK.find(&s).is_some_and(|m| m.end() * 2 >= s.len());
+    // Adds nothing when every letter/digit of it already appears in the generated title.
+    let same = s.is_empty() || s.chars().filter(|c| c.is_alphanumeric()).all(|c| generated_stem.contains(c));
+    if meaningful < 2 || is_hash || junk || same || PRIVATE.is_match(&s) {
+        return String::new();
+    }
+    s.chars().take(80).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subtitles() {
+        assert_eq!(auto_subtitle("2023微积分期中卷及答案（王老师班）.pdf", "微积分I-1_2023_期中试卷"), "2023微积分期中卷及答案（王老师班）");
+        assert_eq!(auto_subtitle("资料库/公共课/数学/高数下复习（不确定）.pdf", "x"), "高数下复习");
+        assert_eq!(auto_subtitle("IMG_20230512_123456.jpg", "x"), "");
+        assert_eq!(auto_subtitle("微信图片_20240101.png", "x"), "");
+        assert_eq!(auto_subtitle("3f2a9c0d1e4b5a6c.pdf", "x"), "");
+        assert_eq!(auto_subtitle("新建 Microsoft Word 文档.docx", "x"), "");
+        assert_eq!(auto_subtitle("题库（勿外传）.pdf", "x"), "");
+        assert_eq!(auto_subtitle("大学物理B_期中试卷.pdf", "大学物理B_期中试卷"), "");
+        assert_eq!(auto_subtitle("CSAPP lab report.pdf", "x"), "CSAPP lab report");
+        assert_eq!(auto_subtitle("数据结构期末卷.pdf", "数据结构_期末试卷"), "");
+        assert_eq!(auto_subtitle("23期末.docx", "电路原理_期末试卷"), "23期末");
+    }
 
     #[test]
     fn tokens() {

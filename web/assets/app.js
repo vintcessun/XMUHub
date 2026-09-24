@@ -136,6 +136,7 @@ export function resourceItem(r, { showNode = true } = {}) {
   return `<div class="item">
     <div class="ficon ${esc(e)}">${esc(e.slice(0, 4))}</div>
     <div class="body"><a class="title" href="/r/${r.id}">${esc(r.title)}</a>
+      ${r.subtitle ? `<div class="subtitle">${esc(r.subtitle)}</div>` : ''}
       ${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
       <div class="meta">${bits.join('')}</div></div>
   </div>`;
@@ -371,4 +372,55 @@ export async function preview(id, box) {
     return;
   }
   fallback(plan.parts.length > 1 ? '分卷文件不支持在线预览，请下载后查看。' : `.${esc(ext || '未知')} 文件不支持在线预览，请下载后查看。`);
+}
+
+// ---------------------------------------------------------------- node picker
+
+/** Asks for a target category (search by name / code / pinyin). Resolves to the node or null. */
+export function pickNode(title = '选择分类') {
+  return new Promise((resolve) => {
+    const body = modal(title);
+    body.innerHTML = `<div class="field suggest"><input class="input" placeholder="课程名 / 代号 / 拼音首字母，或直接输入分类 ID" autocomplete="off"></div>
+      <ul class="picklist"></ul>`;
+    const input = body.querySelector('input');
+    const ul = body.querySelector('.picklist');
+    let list = [];
+    let seq = 0;
+    let done = false;
+    const finish = (n) => { if (done) return; done = true; body.close(); resolve(n); };
+    const observer = new MutationObserver(() => { if (!body.isConnected) { observer.disconnect(); if (!done) { done = true; resolve(null); } } });
+    observer.observe(document.body, { childList: true });
+    input.oninput = async () => {
+      const q = input.value.trim();
+      const my = ++seq;
+      if (!q) { ul.innerHTML = ''; return; }
+      if (/^\d+$/.test(q)) {
+        try { const d = await api(`/nodes/${q}`); if (my === seq) { list = [{ node: d.node, path: d.path }]; render(); } } catch { if (my === seq) ul.innerHTML = '<li class="faint">没有这个 ID</li>'; }
+        return;
+      }
+      const r = await api(`/nodes/suggest?q=${encodeURIComponent(q)}`).catch(() => []);
+      if (my !== seq) return;
+      list = r;
+      render();
+    };
+    function render() {
+      ul.innerHTML = list.length
+        ? list.map((x, i) => `<li data-i="${i}"><b>${esc(nodeTitle(x.node))}</b> <small class="faint">${esc(pathText(x.path))} · ID ${x.node.id}</small></li>`).join('')
+        : '<li class="faint">没有找到</li>';
+    }
+    ul.onclick = (e) => { const li = e.target.closest('li[data-i]'); if (li) finish(list[Number(li.dataset.i)].node); };
+    input.focus();
+  });
+}
+
+/** Moves resources after asking for the target; resolves to the number moved (0 if cancelled). */
+export async function moveResources(ids) {
+  if (!ids.length) { toast('先勾选资料', true); return 0; }
+  const n = await pickNode(`把 ${ids.length} 份资料移动到…`);
+  if (!n) return 0;
+  try {
+    const r = await api('/resources/move', { method: 'POST', body: { ids, node: n.id } });
+    toast(`已移动 ${r.moved} 份到「${n.name}」`);
+    return r.moved;
+  } catch (e) { toast(e.message, true); return 0; }
 }

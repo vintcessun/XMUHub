@@ -15,6 +15,8 @@ async function load() {
   document.title = `${r.title} · XMUHub`;
   $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...r.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`), `<a href="/n/${r.node.id}">${esc(r.node.name)}</a>`].join(' / ');
   $('#title').textContent = r.title;
+  $('#subtitle').textContent = r.subtitle || '';
+  $('#subtitle').hidden = !r.subtitle;
   $('#tags').innerHTML = `<span class="tag t-${esc(r.tag.code)}">${esc(r.tag.code)} ${esc(r.tag.label)}</span>${statusBadge(r)}<span>${r.downloads} 次下载</span>`;
   $('#note').textContent = r.note || '';
   $('#note').hidden = !r.note;
@@ -169,6 +171,7 @@ async function renderManage(r, me) {
     ${actions.length ? `<label class="field"><span>备注（驳回 / 下架原因）</span><input class="input" id="note"></label>
       <div class="row" style="margin-bottom:16px">${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-a="${a}">${l}</button>`).join('')}</div>` : ''}
     <details><summary class="small">编辑信息</summary><div style="margin-top:12px">
+      <label class="field"><span>小标题（公开显示，说明具体内容；默认取原文件名，看不懂就改掉，清空则不显示）</span><input class="input" id="f_sub" maxlength="80" value="${esc(r.subtitle || '')}"></label>
       <label class="field"><span>课程名（文件名第一段）</span><input class="input" id="f_course" value="${esc(n.course)}"></label>
       <div class="fields-2">
         <label class="field"><span>时间</span><input class="input" id="f_time" value="${esc(n.time)}" placeholder="2023-2024秋 / 2025春 / 202406"></label>
@@ -199,7 +202,7 @@ async function renderManage(r, me) {
         body: {
           node: staff ? Number($('#f_node').value) : r.node.id,
           course: $('#f_course').value, time: $('#f_time').value, type_word: $('#f_type').value, tag: $('#f_tag').value,
-          paper: $('#f_paper').value, with_answer: $('#f_ans').checked, extra: $('#f_extra').value, note: $('#f_note').value,
+          paper: $('#f_paper').value, with_answer: $('#f_ans').checked, extra: $('#f_extra').value, note: $('#f_note').value, subtitle: $('#f_sub').value,
           admin: staff ? { uncertain: $('#f_unc').checked, free_type: true } : null,
         },
       });

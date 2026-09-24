@@ -111,6 +111,7 @@ impl Hub {
                         with_answer: g.with_answer,
                         extra: g.extra,
                         note: note.clone(),
+                        subtitle: None,
                     };
                     let extras = AdminExtras { free_type: true, ..Default::default() };
                     let (name, tag) = Self::build_name(st, &input, &extras, true, None)?;

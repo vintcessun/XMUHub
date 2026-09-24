@@ -8,6 +8,7 @@ mod accounts;
 mod imports;
 mod resources;
 mod social;
+mod stats;
 mod tokens;
 mod tree;
 mod uploads;
@@ -26,6 +27,7 @@ use crate::storage::Storage;
 
 pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
+pub use stats::DayStats;
 pub use social::{CommentView, RatingSummary, ReviewView};
 pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
@@ -80,6 +82,8 @@ pub(crate) struct State {
     feedback: HashMap<Id, Feedback>,
     tokens: HashMap<Id, ApiToken>,
     token_by_hash: HashMap<[u8; 32], Id>,
+    /// Hand-edited subtitles; resources without one fall back to `auto_subtitle`.
+    subtitles: HashMap<Id, String>,
 }
 
 impl State {
@@ -128,6 +132,7 @@ impl State {
         for f in snap.feedback {
             st.feedback.insert(f.id, f);
         }
+        st.subtitles = snap.subtitles.into_iter().collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);
             st.tokens.insert(t.id, t);
@@ -190,6 +195,14 @@ impl State {
         }
         self.resources.insert(r.id, r);
         Ok(())
+    }
+
+    /// The public subtitle: the hand-edited one, else one derived from the original file name.
+    pub(crate) fn subtitle(&self, r: &Resource) -> String {
+        match self.subtitles.get(&r.id) {
+            Some(s) => s.clone(),
+            None => crate::text::auto_subtitle(&r.original_name, &r.name.stem()),
+        }
     }
 
     fn put_node(&mut self, tx: &Tx, n: Node) -> Result<()> {
@@ -379,7 +392,7 @@ impl Hub {
         for r in st.resources.values() {
             if r.status == Status::Published {
                 let (anc, path, aliases) = Self::placement_parts(&st, r.node);
-                self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases })?;
+                self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases }, &st.subtitle(r))?;
             }
         }
         self.search.commit()
@@ -426,7 +439,7 @@ impl Hub {
             };
             if r.status == Status::Published {
                 let (anc, path, aliases) = Self::placement_parts(&st, r.node);
-                let _ = self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases });
+                let _ = self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases }, &st.subtitle(r));
             } else {
                 self.search.remove(DocType::Resource, *rid);
             }

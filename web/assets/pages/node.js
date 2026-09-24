@@ -1,4 +1,4 @@
-import { api, esc, layout, nodeCard, nodeTitle, pathId, resourceItem, toast, $ } from '../app.js';
+import { api, esc, layout, moveResources, nodeCard, nodeTitle, pathId, resourceItem, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -8,11 +8,18 @@ const BUCKETS = [[1, '01 真题与答案'], [2, '02 提纲笔记'], [3, '03 题�
 let data = null;
 let bucket = 0;
 
+let staff = false;
+
 function renderList() {
   const time = $('#time').value;
   const rs = data.resources.filter((r) => (!bucket || r.tag.bucket === bucket) && (!time || r.name.time === time));
+  const bar = staff && rs.length ? `<div class="selbar"><label class="small"><input type="checkbox" id="selall"> 全选</label>
+    <button class="btn sm" id="mvsel" type="button">移动选中到其他分类</button><span class="small faint" id="selcount"></span></div>` : '';
   $('#list').innerHTML = rs.length
-    ? rs.map((r) => resourceItem(r, { showNode: false })).join('')
+    ? bar + rs.map((r) => {
+      const item = resourceItem(r, { showNode: false });
+      return staff ? item.replace('<div class="item">', `<div class="item"><input type="checkbox" class="rsel" data-id="${r.id}" aria-label="选择">`) : item;
+    }).join('')
     : `<div class="empty"><b>这里还没有资料</b><a href="/upload?node=${data.node.id}">上传第一份</a></div>`;
 }
 
@@ -60,7 +67,10 @@ async function load() {
   renderList();
 
   const me = await mePromise;
-  if (me && me.level >= 3) renderEditor(n);
+  if (me && me.level >= 3) {
+    renderEditor(n);
+    if (!staff) { staff = true; renderList(); }
+  }
 }
 
 $('#buckets').onclick = (e) => {
@@ -71,6 +81,17 @@ $('#buckets').onclick = (e) => {
   renderList();
 };
 $('#time').onchange = renderList;
+$('#list').addEventListener('change', (e) => {
+  if (e.target.id === 'selall') document.querySelectorAll('#list .rsel').forEach((c) => { c.checked = e.target.checked; });
+  const n = document.querySelectorAll('#list .rsel:checked').length;
+  const c = $('#selcount');
+  if (c) c.textContent = n ? `已选 ${n} 份` : '';
+});
+$('#list').addEventListener('click', async (e) => {
+  if (!e.target.closest('#mvsel')) return;
+  const ids = [...document.querySelectorAll('#list .rsel:checked')].map((c) => Number(c.dataset.id));
+  if (await moveResources(ids)) load();
+});
 
 function renderEditor(n) {
   const box = $('#editor');

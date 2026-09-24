@@ -119,7 +119,7 @@ impl Search {
         Ok(())
     }
 
-    pub fn put_resource(&self, r: &Resource, at: &Placement) -> Result<()> {
+    pub fn put_resource(&self, r: &Resource, at: &Placement, subtitle: &str) -> Result<()> {
         let f = &self.f;
         let stem = r.name.stem();
         let tag_idx = crate::model::Tag::ALL.iter().position(|t| *t == r.tag).unwrap_or(0) as u64;
@@ -127,7 +127,7 @@ impl Search {
             f.key => key(DocType::Resource, r.id),
             f.ty => DocType::Resource as u64,
             f.tag => tag_idx,
-            f.main => joined(&format!("{stem} {}", at.aliases_text)),
+            f.main => joined(&format!("{stem} {subtitle} {}", at.aliases_text)),
             f.py => joined(&pinyin_forms(&format!("{} {}", r.name.course, at.aliases_text))),
             f.sub => joined(&format!("{} {} {}", at.path_text, r.tag.label(), r.note)),
             f.w => 100u64,

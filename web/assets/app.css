@@ -350,3 +350,21 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
 .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .stack > .card + .card { margin-top: 0; }
 pre.code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-size: 12.5px; white-space: pre; }
+.item .subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.picklist { list-style: none; margin: 10px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
+.picklist li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.picklist li:hover { background: var(--surface-2); }
+.chart { width: 100%; height: auto; display: block; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .bar-a { fill: var(--navy-2); }
+.chart .bar-b { fill: var(--gold); }
+.chart .line { fill: none; stroke: var(--navy); stroke-width: 2; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.kpi { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; }
+.kpi b { display: block; font-size: 22px; color: var(--navy); }
+.kpi span { font-size: 12px; color: var(--muted); }
+.selbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.item .rsel { margin: 4px 8px 0 0; flex: none; }

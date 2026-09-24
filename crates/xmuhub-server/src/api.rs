@@ -200,6 +200,7 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
     let mut v = json!({
         "id": r.id,
         "title": r.name.stem(),
+        "subtitle": app.hub.subtitle(r),
         "filename": r.filename(),
         "ext": r.ext,
         "name": {
@@ -263,6 +264,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/mine", get(mine))
         .route("/resources", post(create_resource))
         .route("/resources/preview-name", post(preview_name))
+        .route("/resources/move", post(move_resources))
         .route("/resources/{id}", get(resource).patch(patch_resource))
         .route("/resources/{id}/review", post(review))
         .route("/resources/{id}/report", post(report))
@@ -284,6 +286,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/admin/feedback", get(feedback_list))
         .route("/admin/feedback/{id}/handle", post(handle_feedback))
         .route("/admin/reviews", get(review_log))
+        .route("/admin/daily", get(daily))
         .route("/admin/users", get(users))
         .route("/admin/users/{id}", axum::routing::patch(update_user))
         .route("/admin/status", get(status))
@@ -750,6 +753,28 @@ async fn handle_feedback(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b):
     Ok(Json(json!({ "ok": true })))
 }
 
+#[derive(Deserialize)]
+struct MoveIn {
+    ids: Vec<Id>,
+    node: Id,
+}
+
+async fn move_resources(State(app): S, auth: Auth, Json(b): Json<MoveIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let moved = blocking(move || hub.move_resources(Viewer { user: user.as_ref() }, &b.ids, b.node)).await?;
+    Ok(Json(json!({ "moved": moved })))
+}
+
+#[derive(Deserialize)]
+struct DaysQ {
+    days: Option<usize>,
+}
+
+async fn daily(State(app): S, auth: Auth, Query(q): Query<DaysQ>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.daily_stats(auth.viewer(), q.days.unwrap_or(30))?)))
+}
+
 async fn review_log(State(app): S, auth: Auth) -> R<Json<Value>> {
     Ok(Json(json!(app.hub.review_log(auth.viewer(), None, 300)?)))
 }
@@ -857,6 +882,7 @@ fn report_view(app: &App, r: &Report, res: &Option<(Resource, Node)>, v: Viewer)
     json!({
         "id": r.id, "reason": r.reason, "contact": r.contact, "created_at": r.created_at, "handled": r.handled,
         "handled_note": r.handled_note,
+        "handled_by": r.handled_by.map(|u| app.hub.uploader_name(u)),
         "resource": res.as_ref().map(|(x, n)| resource_view(app, x, n, &[], v)),
     })
 }

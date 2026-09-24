@@ -1,4 +1,4 @@
-import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, pathText, preview, resourceItem, toast, tree, $ } from '../app.js';
+import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, moveResources, pathText, preview, resourceItem, toast, tree, $ } from '../app.js';
 
 let me;
 
@@ -37,6 +37,7 @@ async function queueUI(box, items, intro, actions) {
   box.innerHTML = `<section class="card"><p class="small muted">${intro}</p>
     <div class="bulkbar"><label class="small"><input type="checkbox" id="qall"> 全选</label>
       ${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-bulk="${a}">批量${l}</button>`).join('')}
+      <button class="btn sm" data-move type="button">批量移动分类</button>
       <span class="grow"></span><span class="small muted">共 ${items.length} 份</span></div>
     <div class="list">${items.map((r) => `<div data-id="${r.id}">${resourceItem(r)}
       <div class="row small" style="padding:0 4px 14px 58px;gap:8px">
@@ -75,6 +76,11 @@ async function queueUI(box, items, intro, actions) {
       preview(r.id, modal(r.title, { wide: true }));
       return;
     }
+    if (e.target.closest('[data-move]')) {
+      const picked = [...box.querySelectorAll('.qsel:checked')].map((c) => c.closest('[data-id]'));
+      if (await moveResources(picked.map((w) => Number(w.dataset.id)))) show(current);
+      return;
+    }
     const one = e.target.closest('[data-a]');
     const bulk = e.target.closest('[data-bulk]');
     try {
@@ -92,7 +98,61 @@ async function queueUI(box, items, intro, actions) {
   box.querySelector('#qall').onchange = (e) => box.querySelectorAll('.qsel').forEach((c) => { c.checked = e.target.checked; });
 }
 
+/** Bar + line chart as inline SVG: bars for daily counts, a line for the running total. */
+function chart(days, bars, line) {
+  const W = 760, H = 240, L = 40, R = 46, T = 12, B = 28;
+  const w = (W - L - R) / days.length;
+  const maxBar = Math.max(1, ...days.flatMap((d) => bars.map(([k]) => d[k])));
+  const maxLine = line ? Math.max(1, ...days.map((d) => d[line[0]])) : 1;
+  const minLine = line ? Math.min(...days.map((d) => d[line[0]])) : 0;
+  const y = (v) => T + (H - T - B) * (1 - v / maxBar);
+  const yl = (v) => T + (H - T - B) * (1 - (v - minLine * 0.9) / Math.max(1, maxLine - minLine * 0.9));
+  const ticks = [0, 0.5, 1].map((f) => Math.round(maxBar * f));
+  const bw = Math.max(1, (w - 2) / bars.length);
+  let svg = ticks.map((t) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/>${bars.length ? `<text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>` : ''}`).join('');
+  days.forEach((d, i) => {
+    bars.forEach(([k, cls], j) => {
+      const v = d[k];
+      if (v) svg += `<rect class="${cls}" x="${L + i * w + 1 + j * bw}" y="${y(v)}" width="${bw}" height="${H - B - y(v)}"><title>${d.day} ${v}</title></rect>`;
+    });
+    if (i % Math.ceil(days.length / 8) === 0) svg += `<text x="${L + i * w + w / 2}" y="${H - 8}" text-anchor="middle">${d.day.slice(5)}</text>`;
+  });
+  if (line) {
+    svg += `<polyline class="line" points="${days.map((d, i) => `${L + i * w + w / 2},${yl(d[line[0]])}`).join(' ')}"/>`;
+    svg += `<text x="${W - R + 4}" y="${yl(maxLine) + 4}">${maxLine}</text><text x="${W - R + 4}" y="${yl(minLine) + 4}">${minLine}</text>`;
+  }
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">${svg}</svg>`;
+}
+
+let current = 'dash';
+
 const panels = {
+  async dash(box, days = 30) {
+    const [list, s] = await Promise.all([api(`/admin/daily?days=${days}`), api('/admin/status')]);
+    const sum = (k) => list.reduce((n, d) => n + d[k], 0);
+    const last = list[list.length - 1];
+    const st = s.stats;
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:12px"><h3 style="margin:0">概览</h3><span class="grow"></span>
+        <select class="input" id="ddays" style="max-width:120px">${[14, 30, 90, 180].map((d) => `<option value="${d}"${d === days ? ' selected' : ''}>最近 ${d} 天</option>`).join('')}</select></div>
+      <div class="kpis">
+        <div class="kpi"><b>${st.resources}</b><span>已发布资料（总文件量）</span></div>
+        <div class="kpi"><b>${st.pending}</b><span>待审 / 待复核</span></div>
+        <div class="kpi"><b>${last.submitted}</b><span>今日提交</span></div>
+        <div class="kpi"><b>${last.reviewed}</b><span>今日审核</span></div>
+        <div class="kpi"><b>${sum('submitted')}</b><span>${days} 天提交</span></div>
+        <div class="kpi"><b>${sum('reviewed')}</b><span>${days} 天审核</span></div>
+        <div class="kpi"><b>${st.users}</b><span>注册用户</span></div>
+        <div class="kpi"><b>${fmtSize(st.stored_bytes)}</b><span>存储总量</span></div>
+      </div></section>
+      <section class="card"><h3>每日提交量与审核量</h3>
+        <div class="legend"><span><i style="background:var(--navy-2)"></i>提交</span><span><i style="background:var(--gold)"></i>审核</span></div>
+        ${chart(list, [['submitted', 'bar-a'], ['reviewed', 'bar-b']])}</section>
+      <section class="card"><h3>总文件量（已发布）</h3>${chart(list, [], ['total'])}
+        <p class="small faint" style="margin:6px 0 0">审核量从审核记录上线（9 月 24 日）起统计；总文件量按资料的创建日期累计当前已发布的资料。</p></section>
+      <section class="card scroll-x"><h3>明细</h3><table class="table"><thead><tr><th>日期</th><th>提交</th><th>审核</th><th>总文件量</th></tr></thead><tbody>
+        ${list.slice().reverse().map((d) => `<tr><td>${d.day}</td><td>${d.submitted}</td><td>${d.reviewed}</td><td>${d.total}</td></tr>`).join('')}</tbody></table></section>`;
+    box.querySelector('#ddays').onchange = (e) => panels.dash(box, Number(e.target.value));
+  },
   async queue(box) {
     await queueUI(box, await api('/review'), '「待审核」来自贡献者，通过后才会公开；「待复核」来自可信贡献者，已公开。',
       [['approve', '通过', 'ok'], ['reject', '驳回', 'danger']]);
@@ -105,25 +165,29 @@ const panels = {
     await queueUI(box, await api('/review?status=restricted'), '「仅内部」资料不公开、不可搜索（勿外传、加密题库等）。确认获得授权后可以恢复发布。',
       [['restore', '恢复发布', 'ok']]);
   },
-  async reports(box) {
-    const list = await api('/admin/reports');
-    if (!list.length) { box.innerHTML = '<div class="card empty"><b>没有待处理的投诉</b></div>'; return; }
-    box.innerHTML = `<section class="card"><p class="small muted">请在 48 小时内处理。需要下架的，先点「下架」再标记已处理。</p>${list.map((r) => `
+  async reports(box, all = false) {
+    const list = await api(`/admin/reports${all ? '?all=true' : ''}`);
+    const STATUS = { pending: '待审核', published: '已发布', rejected: '未通过', removed: '已下架', restricted: '仅内部' };
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。需要下架的，先点「下架」再标记已处理。</p><span class="grow"></span>
+        <label class="small"><input type="checkbox" id="rpall"${all ? ' checked' : ''}> 显示已处理</label></div>
+      ${list.length ? list.map((r) => `
       <div class="item" data-id="${r.id}" data-res="${r.resource ? r.resource.id : ''}"><div class="body">
         <div><b>${esc(r.reason)}</b></div>
         <div class="meta"><span>${ago(r.created_at)}</span>${r.contact ? `<span>联系：${esc(r.contact)}</span>` : ''}
-          ${r.resource ? `<a href="/r/${r.resource.id}" target="_blank">${esc(r.resource.title)}</a><span class="badge ${esc(r.resource.status)}">${esc(r.resource.status)}</span>` : '<span>资料已不存在</span>'}</div>
-        <div class="row" style="margin-top:8px"><input class="input" placeholder="处理说明" style="max-width:260px;min-height:30px;padding:3px 8px">
-          ${r.resource ? '<button class="btn sm danger" data-a="remove">下架</button>' : ''}<button class="btn sm ok" data-a="done">标记已处理</button></div>
-      </div></div>`).join('')}</section>`;
+          ${r.resource ? `<a href="/r/${r.resource.id}" target="_blank">${esc(r.resource.title)}</a><span class="badge ${esc(r.resource.status)}">${STATUS[r.resource.status] || esc(r.resource.status)}</span>` : '<span>资料已不存在</span>'}
+          ${r.handled ? `<span class="badge published">已处理${r.handled_by ? ` · ${esc(r.handled_by)}` : ''}</span>${r.handled_note ? `<span>${esc(r.handled_note)}</span>` : ''}` : ''}</div>
+        ${r.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="处理说明" style="max-width:260px;min-height:30px;padding:3px 8px">
+          ${r.resource && r.resource.status !== 'removed' ? '<button class="btn sm danger" data-a="remove">下架</button>' : ''}<button class="btn sm ok" data-a="done">标记已处理</button></div>`}
+      </div></div>`).join('') : `<div class="empty"><b>${all ? '还没有投诉' : '没有待处理的投诉'}</b>${all ? '' : '勾选右上角「显示已处理」可查看历史'}</div>`}</section>`;
+    box.querySelector('#rpall').onchange = (e) => panels.reports(box, e.target.checked);
     box.onclick = async (e) => {
       const b = e.target.closest('[data-a]');
       if (!b) return;
       const it = b.closest('[data-id]');
       const note = it.querySelector('input').value;
       try {
-        if (b.dataset.a === 'remove') { await api(`/resources/${it.dataset.res}/review`, { method: 'POST', body: { action: 'remove', note: note || '收到投诉，已下架' } }); toast('已下架'); }
-        else { await api(`/admin/reports/${it.dataset.id}/handle`, { method: 'POST', body: { note } }); it.remove(); toast('已处理'); }
+        if (b.dataset.a === 'remove') { await api(`/resources/${it.dataset.res}/review`, { method: 'POST', body: { action: 'remove', note: note || '收到投诉，已下架' } }); toast('已下架'); panels.reports(box, all); }
+        else { await api(`/admin/reports/${it.dataset.id}/handle`, { method: 'POST', body: { note } }); toast('已处理，可在「显示已处理」中查看'); panels.reports(box, all); }
       } catch (err) { toast(err.message, true); }
     };
   },
@@ -328,6 +392,7 @@ const panels = {
 };
 
 async function show(name) {
+  current = name;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === name));
   const box = $('#panel');
   box.onclick = box.onchange = null;
@@ -349,5 +414,5 @@ async function show(name) {
   }
   $('#who').textContent = `${LEVELS[me.level]} · ${me.nickname}`;
   $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) show(b.dataset.t); };
-  show('queue');
+  show('dash');
 })();

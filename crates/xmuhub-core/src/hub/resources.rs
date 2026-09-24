@@ -28,6 +28,9 @@ pub struct ResourceInput {
     pub extra: String,
     #[serde(default)]
     pub note: String,
+    /// Public subtitle describing the content; `None` keeps the current / automatic one.
+    #[serde(default)]
+    pub subtitle: Option<String>,
 }
 
 /// Fields only staff (and the importer) may set.
@@ -207,6 +210,9 @@ impl Hub {
                 updated_at: now(),
                 downloads: 0,
             };
+            if let Some(sub) = &input.subtitle {
+                Self::set_subtitle(st, tx, &r, sub)?;
+            }
             st.put_resource(tx, r.clone())?;
             up.consumed = true;
             tx.put_upload(&up)?;
@@ -243,11 +249,80 @@ impl Hub {
                 r.uncertain = extras.uncertain;
             }
             r.updated_at = now();
+            if let Some(sub) = &input.subtitle {
+                Self::set_subtitle(st, tx, &r, sub)?;
+            }
             st.put_resource(tx, r.clone())?;
             Ok(r)
         })?;
         self.reindex(&[], &[r.id]);
         Ok(r)
+    }
+
+    /// Stores a hand-edited subtitle. Matching the automatic one stores nothing, so later
+    /// improvements to the automatic rule still apply.
+    fn set_subtitle(st: &mut State, tx: &Tx, r: &Resource, sub: &str) -> Result<()> {
+        let sub = clean(sub, 80);
+        if sub == crate::text::auto_subtitle(&r.original_name, &r.name.stem()) && !st.subtitles.contains_key(&r.id) {
+            return Ok(());
+        }
+        tx.put_subtitle(r.id, &sub)?;
+        st.subtitles.insert(r.id, sub);
+        Ok(())
+    }
+
+    pub fn subtitle(&self, r: &Resource) -> String {
+        self.st.read().subtitle(r)
+    }
+
+    /// Moves resources to another node (批量修改所属目录). A name whose course segment was
+    /// the old node's label takes the new node's label; versions are renumbered as needed.
+    pub fn move_resources(&self, actor: Viewer, ids: &[Id], to: Id) -> Result<usize> {
+        actor.at_least(Level::Reviewer)?;
+        if ids.len() > 500 {
+            return Err(bad("一次最多移动 500 份"));
+        }
+        let moved = self.mutate(|st, tx| {
+            let target = st.resolve(to).cloned().ok_or(Error::NotFound("目标分类"))?;
+            if target.kind == NodeKind::Section {
+                return Err(bad("请选择具体的课程或分类，不能直接放在栏目下"));
+            }
+            let mut moved = Vec::new();
+            for id in ids {
+                let Some(mut r) = st.resources.get(id).cloned() else { continue };
+                if r.node == target.id {
+                    continue;
+                }
+                let old_label = st.nodes.get(&r.node).map(|n| n.label.clone()).unwrap_or_default();
+                let mut name = r.name.clone();
+                if name.course == old_label || name.course.is_empty() {
+                    name.course = target.label.clone();
+                }
+                // Lowest free version for this base name in the target node (moving back restores v1).
+                let base = name.base();
+                let taken: Vec<u16> = st
+                    .by_node
+                    .get(&target.id)
+                    .into_iter()
+                    .flatten()
+                    .map(|x| &st.resources[x])
+                    .filter(|x| x.name.base() == base && !matches!(x.status, Status::Rejected))
+                    .map(|x| x.name.version)
+                    .collect();
+                name.version = (1..).find(|v| !taken.contains(v)).unwrap_or(1);
+                let old_node = r.node;
+                r.name = name;
+                r.node = target.id;
+                r.updated_at = now();
+                st.put_resource(tx, r)?;
+                moved.push((*id, old_node));
+            }
+            Ok(moved)
+        })?;
+        let nodes: Vec<Id> = moved.iter().map(|(_, n)| *n).chain(std::iter::once(to)).collect();
+        let ids: Vec<Id> = moved.iter().map(|(i, _)| *i).collect();
+        self.reindex(&nodes, &ids);
+        Ok(ids.len())
     }
 
     /// approve / reject / remove / restore / restrict. Returns storage locations that became

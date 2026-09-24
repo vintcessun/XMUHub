@@ -51,7 +51,9 @@ impl Mirrors {
     /// Of `urls` (as produced by `wrap`), the ones a page can fetch cross-origin.
     pub fn cors_urls(&self, urls: &[String]) -> Vec<String> {
         let cors = self.cors.read();
-        cors.iter().filter_map(|p| urls.iter().find(|u| u.starts_with(p.as_str()) && u[p.len()..].starts_with('/'))).cloned().collect()
+        let mut out: Vec<String> = urls.iter().filter(|u| u.starts_with("/api/local/file/")).cloned().collect();
+        out.extend(cors.iter().filter_map(|p| urls.iter().find(|u| u.starts_with(p.as_str()) && u[p.len()..].starts_with('/'))).cloned());
+        out
     }
 
     pub fn stats(&self) -> Vec<MirrorStat> {
@@ -102,5 +104,17 @@ impl Mirrors {
             *self.cors.write() = stats.iter().filter(|s| s.cors).map(|s| s.prefix.clone()).collect();
         }
         *self.stats.write() = stats;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Mirrors;
+
+    #[test]
+    fn local_files_are_readable_by_same_origin_previews() {
+        let mirrors = Mirrors::new(vec![]);
+        let urls = vec!["/api/local/file/abc123".to_string()];
+        assert_eq!(mirrors.cors_urls(&urls), urls);
     }
 }

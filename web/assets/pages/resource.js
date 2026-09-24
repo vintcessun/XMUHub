@@ -46,10 +46,10 @@ async function load() {
   $('#notice').innerHTML = (note ? `<div class="notice ${note[0]}">${note[1]}</div>` : '')
     + (r.uncertain ? '<div class="notice">这份资料的分类或内容尚未核实，欢迎审核员确认。</div>' : '');
   $('#dl').disabled = r.status === 'rejected';
-  // Small previewable files load their preview right away (through mirrors, not our server).
+  // Small previewable files load their preview right away.
   const ext = (r.ext || '').toLowerCase();
   const previewable = !['caj', 'kdh', 'nh', 'exe', 'msi', 'apk', 'dmg'].includes(ext);
-  $('#pvcard').hidden = !previewable || r.status === 'rejected';
+  $('#pvcard').hidden = r.status === 'rejected';
   if (previewable && r.size <= 8 * 1024 * 1024 && !$('#pvgo').hidden) { $('#pvgo').hidden = true; preview(id, $('#pv')); }
   $('#dl').textContent = `下载 · ${fmtSize(r.size)}`;
 

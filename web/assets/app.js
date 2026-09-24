@@ -260,10 +260,13 @@ export async function fetchPart(part, urls, onBytes) {
   for (const [i, url] of urls.entries()) {
     const hasNext = i < urls.length - 1;
     const ctl = new AbortController();
+    let timer;
     try {
-      const startTimer = setTimeout(() => ctl.abort(), 15_000);
-      const res = await fetch(url, { signal: ctl.signal, mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' });
-      clearTimeout(startTimer);
+      // The same-origin fallback buffers and verifies a whole part before replying.
+      const idleLimit = url.startsWith('/api/resources/') ? 210_000 : 30_000;
+      const resetTimeout = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), idleLimit); };
+      resetTimeout();
+      const res = await fetch(url, { signal: ctl.signal, mode: 'cors', credentials: url.startsWith('/') ? 'same-origin' : 'omit', referrerPolicy: 'no-referrer' });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const chunks = [];
@@ -275,6 +278,7 @@ export async function fetchPart(part, urls, onBytes) {
         chunks.push(value);
         got += value.length;
         onBytes(got);
+        resetTimeout();
         const secs = (performance.now() - t0) / 1000;
         if (hasNext && secs > 6 && got / secs < 150 * 1024) { ctl.abort(); throw new Error('镜像太慢'); }
       }
@@ -283,6 +287,8 @@ export async function fetchPart(part, urls, onBytes) {
     } catch (e) {
       lastErr = e;
       onBytes(0);
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw lastErr || new Error('没有可用的下载地址');

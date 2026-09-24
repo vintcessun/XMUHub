@@ -1,8 +1,5 @@
-// In-page previews for every kind of file. The bytes come straight from a download mirror
-// that allows cross-origin reads (never through our server) and are rendered in the
-// browser: pdf.js, docx-preview, SheetJS, pptx-preview, epub.js and libarchive (archives,
-// whose entries can be previewed in turn). Only legacy .doc/.ppt fall back to Microsoft's
-// online viewer. Loaded on demand from app.js; previews don't count as downloads.
+// In-page previews. Files are fetched from readable mirrors, with a bounded same-origin
+// fallback, then rendered in the browser. Loaded on demand; previews don't count as downloads.
 
 import { api, esc, fetchPart, fmtSize } from './app.js';
 
@@ -10,13 +7,14 @@ const V = '/vendor';
 const MAX = 80 * 1024 * 1024;
 const TEXT_MAX = 2 * 1024 * 1024;
 
-const IMAGE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon' };
+const IMAGE = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', apng: 'image/apng', bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon' };
 const AUDIO = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac' };
 const VIDEO = { mp4: 'video/mp4', webm: 'video/webm', m4v: 'video/mp4', mov: 'video/mp4', ogv: 'video/ogg' };
 const TEXT = new Set(['txt', 'md', 'markdown', 'json', 'xml', 'html', 'htm', 'css', 'js', 'ts', 'py', 'c', 'h', 'cpp', 'cc', 'hpp', 'java', 'kt', 'go', 'rs', 'rb', 'php', 'cs', 'swift', 'm', 'r', 'sql', 'sh', 'bat', 'ps1', 'tex', 'bib', 'log', 'ini', 'cfg', 'conf', 'yaml', 'yml', 'toml', 'srt', 'asm', 'v', 'vhd', 'mat', 'ipynb']);
 const WORD = new Set(['docx', 'docm', 'dotx']);
 const SHEET = new Set(['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'tsv', 'et']);
 const SLIDES = new Set(['pptx', 'ppsx', 'pptm']);
+const OPEN_DOCUMENT = new Set(['odt', 'ott', 'odp', 'otp']);
 const ARCHIVE = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'cab', 'iso']);
 /** Binary Office 97–2003 formats: text is extracted in the browser; Microsoft's viewer
  * (size limit in MB) is offered for the full layout. */
@@ -52,26 +50,30 @@ const note = (box, msg) => { box.innerHTML = `<div class="notice">${msg}</div>`;
 // ---------------------------------------------------------------- entry point
 
 export async function preview(id, box) {
+  const ticket = Symbol('preview');
+  box.previewTicket = ticket;
   box.innerHTML = '<p class="small muted">正在加载预览…</p>';
   let plan;
   try { plan = await api(`/resources/${id}/download?peek=1`); } catch (e) { note(box, esc(e.message)); return; }
+  if (!box.isConnected || box.previewTicket !== ticket) return;
   const ext = extOf(plan.filename);
   if (NOPE[ext]) return note(box, NOPE[ext]);
   if (plan.size > MAX) return note(box, `文件较大（${fmtSize(plan.size)}），在线预览最多 ${fmtSize(MAX)}，请下载后查看。`);
   if (plan.parts.some((p) => !(p.preview_urls || []).length)) return note(box, '暂时没有支持在线预览的下载线路，请稍后再试或直接下载。');
-  box.innerHTML = '<p class="small muted">正在通过镜像加载预览…</p><div class="progress"><i></i></div>';
+  box.innerHTML = '<p class="small muted">正在加载预览…</p><div class="progress"><i></i></div>';
   const bar = box.querySelector('.progress i');
   const blobs = [];
   let done = 0;
   try {
     for (const part of plan.parts) {
-      blobs.push(await fetchPart(part, part.preview_urls, (n) => { bar.style.width = `${Math.round(((done + n) / plan.size) * 100)}%`; }));
+      blobs.push(await fetchPart(part, part.preview_urls, (n) => { if (bar.isConnected) bar.style.width = `${Math.round(((done + n) / (plan.size || 1)) * 100)}%`; }));
       done += part.size;
+      if (!box.isConnected || box.previewTicket !== ticket) return;
     }
   } catch (e) {
     return note(box, `预览加载失败（${esc(e.message)}），请稍后再试或直接下载。`);
   }
-  if (!box.isConnected) return;
+  if (!box.isConnected || box.previewTicket !== ticket) return;
   await renderBlob(box, new Blob(blobs), ext, plan.filename, plan);
 }
 
@@ -86,9 +88,11 @@ export async function renderBlob(box, blob, ext, name, plan = null) {
     if (WORD.has(ext)) return await word(box, blob);
     if (SHEET.has(ext)) return await sheet(box, blob, ext);
     if (SLIDES.has(ext)) return await slides(box, blob);
+    if (OPEN_DOCUMENT.has(ext)) return await openDocument(box, blob, ext);
     if (ext === 'epub') return await epub(box, blob);
     if (ARCHIVE.has(ext)) return await archive(box, blob, name);
     if (TEXT.has(ext) || ext === 'text') return await text(box, blob, ext);
+    if (ext === 'rtf') return await richText(box, blob);
     if (ext === 'doc' || ext === 'dot') return await legacyText(box, blob, 'doc', plan);
     if (ext === 'ppt' || ext === 'pps') return await legacyText(box, blob, 'ppt', plan);
     if (NOPE[ext]) return note(box, NOPE[ext]);
@@ -100,7 +104,7 @@ export async function renderBlob(box, blob, ext, name, plan = null) {
 }
 
 function knows(ext) {
-  return ext === 'pdf' || ext === 'epub' || IMAGE[ext] || AUDIO[ext] || VIDEO[ext] || TEXT.has(ext) || WORD.has(ext) || SHEET.has(ext) || SLIDES.has(ext) || ARCHIVE.has(ext) || NOPE[ext] || LEGACY_OFFICE[ext];
+  return ext === 'pdf' || ext === 'epub' || ext === 'rtf' || IMAGE[ext] || AUDIO[ext] || VIDEO[ext] || TEXT.has(ext) || WORD.has(ext) || SHEET.has(ext) || SLIDES.has(ext) || OPEN_DOCUMENT.has(ext) || ARCHIVE.has(ext) || NOPE[ext] || LEGACY_OFFICE[ext];
 }
 
 /** Guesses a type from the first bytes when the extension is missing or unknown. */
@@ -108,7 +112,21 @@ async function sniff(blob) {
   const b = new Uint8Array(await blob.slice(0, 4096).arrayBuffer());
   const s = String.fromCharCode(...b.slice(0, 8));
   if (s.startsWith('%PDF')) return 'pdf';
-  if (s.startsWith('PK')) return 'zip';
+  if (s.startsWith('PK')) {
+    await script(`${V}/jszip-3.10.2/jszip.min.js`);
+    try {
+      const zip = await window.JSZip.loadAsync(blob);
+      if (zip.file('word/document.xml')) return 'docx';
+      if (zip.file('xl/workbook.xml')) return 'xlsx';
+      if (zip.file('ppt/presentation.xml')) return 'pptx';
+      const mime = await zip.file('mimetype')?.async('string');
+      if (mime === 'application/epub+zip') return 'epub';
+      if (mime?.includes('opendocument.text')) return 'odt';
+      if (mime?.includes('opendocument.presentation')) return 'odp';
+      if (mime?.includes('opendocument.spreadsheet')) return 'ods';
+    } catch { /* fall through to archive preview */ }
+    return 'zip';
+  }
   if (s.startsWith('Rar!')) return 'rar';
   if (b[0] === 0x37 && b[1] === 0x7a && b[2] === 0xbc) return '7z';
   if (b[0] === 0x89 && s.slice(1, 4) === 'PNG') return 'png';
@@ -228,6 +246,59 @@ async function sheet(box, blob, ext) {
 async function textOf(blob) {
   const buf = await blob.arrayBuffer();
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return new TextDecoder('gb18030').decode(buf); }
+}
+
+/** OpenDocument files are ZIP packages; show their text when a layout renderer is unavailable. */
+async function openDocument(box, blob, ext) {
+  await script(`${V}/jszip-3.10.2/jszip.min.js`);
+  const zip = await window.JSZip.loadAsync(blob);
+  const content = zip.file('content.xml');
+  if (!content) throw new Error('OpenDocument 文件缺少正文');
+  const xml = new DOMParser().parseFromString(await content.async('string'), 'application/xml');
+  if (xml.querySelector('parsererror')) throw new Error('OpenDocument 正文无法解析');
+  const paragraphs = [...xml.getElementsByTagName('text:p'), ...xml.getElementsByTagName('text:h')]
+    .sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
+    .map((el) => el.textContent.trim()).filter(Boolean);
+  box.innerHTML = `<p class="small muted" style="margin:0 0 8px">.${esc(ext)} 在线显示文字内容，完整排版请下载查看。</p><pre class="textview"></pre>`;
+  box.querySelector('pre').textContent = paragraphs.join('\n\n') || '没有可显示的文字（可能只包含图片或图表）。';
+}
+
+/** Extract readable text from common RTF control words without injecting its markup. */
+async function richText(box, blob) {
+  const source = await textOf(blob.slice(0, TEXT_MAX));
+  const tokens = source.match(/\\[a-zA-Z]+-?\d* ?|\\'[0-9a-fA-F]{2}|\\[^a-zA-Z]|[{}]|[^{}\\]+/g) || [];
+  const destinations = new Set(['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'object', 'header', 'footer', 'headerl', 'headerr', 'footerl', 'footerr']);
+  const stack = [{ skip: false, uc: 1 }];
+  let output = '';
+  let fallback = 0;
+  for (const token of tokens) {
+    if (output.length >= TEXT_MAX) break;
+    if (token === '{') { stack.push({ ...stack.at(-1) }); continue; }
+    if (token === '}') { if (stack.length > 1) stack.pop(); continue; }
+    const state = stack.at(-1);
+    if (token.startsWith('\\')) {
+      const word = /^\\([a-zA-Z]+)(-?\d+)? ?$/.exec(token);
+      if (word) {
+        const [, command, value] = word;
+        if (destinations.has(command)) state.skip = true;
+        else if (command === 'uc') state.uc = Number(value) || 0;
+        else if (command === 'u' && !state.skip) {
+          output += String.fromCharCode((Number(value) + 65536) % 65536);
+          fallback = state.uc;
+        } else if (!state.skip && (command === 'par' || command === 'line')) output += '\n';
+        else if (!state.skip && command === 'tab') output += '\t';
+      } else if (token === '\\*') state.skip = true;
+      else if (!state.skip && fallback) fallback--;
+      else if (!state.skip && /^\\'[0-9a-fA-F]{2}$/.test(token)) output += new TextDecoder('windows-1252').decode(Uint8Array.of(parseInt(token.slice(2), 16)));
+      else if (!state.skip && ['\\\\', '\\{', '\\}'].includes(token)) output += token[1];
+    } else if (!state.skip) {
+      const visible = fallback ? token.slice(fallback) : token;
+      fallback = Math.max(0, fallback - token.length);
+      output += visible;
+    }
+  }
+  box.innerHTML = `<p class="small muted" style="margin:0 0 8px">RTF 在线显示文字内容，完整排版请下载查看。</p><pre class="textview"></pre>${blob.size > TEXT_MAX ? `<p class="small faint">只显示了前 ${fmtSize(TEXT_MAX)}。</p>` : ''}`;
+  box.querySelector('pre').textContent = output.trim() || '没有可显示的文字。';
 }
 
 async function slides(box, blob) {
@@ -384,6 +455,7 @@ async function archive(box, blob, name) {
     e.preventDefault();
     const entry = shown[Number(link.dataset.i)];
     box.querySelectorAll('.archive-list a').forEach((x) => x.classList.toggle('on', x === link));
+    if (entry.size > MAX) return note(view, `压缩包中的这个文件超过 ${fmtSize(MAX)}，请下载后查看。`);
     view.innerHTML = `<p class="small muted">正在解压 ${esc(entry.path)}…</p>`;
     view.scrollIntoView({ block: 'nearest' });
     try {

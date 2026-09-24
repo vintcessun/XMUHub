@@ -283,6 +283,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/review", post(review))
         .route("/resources/{id}/report", post(report))
         .route("/resources/{id}/download", get(download_plan))
+        .route("/resources/{id}/preview/{index}", get(preview_part))
         .route("/resources/{id}/social", get(social))
         .route("/resources/{id}/rating", put(rate))
         .route("/resources/{id}/comments", post(add_comment))
@@ -675,18 +676,65 @@ struct PlanQ {
     peek: Option<String>,
 }
 
-/// `?peek=1` is for in-page previews: not counted as a download, and each part lists the
-/// mirrors that allow cross-origin reads.
+/// `?peek=1` is for in-page previews: not counted as a download. Try readable
+/// mirrors first, then a bounded same-origin route if the browser cannot read them.
 async fn download_plan(State(app): S, auth: Auth, Path(id): Path<Id>, Query(q): Query<PlanQ>) -> R<Json<Value>> {
     let peek = matches!(q.peek.as_deref(), Some("1" | "true"));
     let plan = app.hub.download(auth.viewer(), id, !peek)?;
     let mut v = json!(plan);
     if peek {
         for (i, p) in plan.parts.iter().enumerate() {
-            v["parts"][i]["preview_urls"] = json!(app.mirrors.cors_urls(&p.urls));
+            let mut urls = app.mirrors.cors_urls(&p.urls);
+            if plan.size <= 80 * 1024 * 1024 && !p.urls.iter().any(|u| u.starts_with("/api/local/file/")) {
+                urls.push(format!("/api/resources/{id}/preview/{i}"));
+            }
+            v["parts"][i]["preview_urls"] = json!(urls);
         }
     }
     Ok(Json(v))
+}
+
+/// Fetches only a part belonging to a resource the caller can see. This is a last
+/// resort for browsers when every cross-origin mirror fails, capped at 80 MiB.
+async fn preview_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>) -> R<Response> {
+    use futures_util::StreamExt;
+
+    const LIMIT: u64 = 80 * 1024 * 1024;
+    let plan = app.hub.download(auth.viewer(), id, false)?;
+    if plan.size > LIMIT {
+        return Err(bad("文件超过在线预览大小限制"));
+    }
+    let part = plan.parts.get(index).ok_or(Error::NotFound("文件分卷"))?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(45))
+        .build()
+        .map_err(|e| Error::Upstream(e.to_string()))?;
+    let mut last_error = String::from("没有可用的预览线路");
+    for url in part.urls.iter().take(3).chain(part.urls.last()) {
+        if !url.starts_with("https://") { continue; }
+        match client.get(url.as_str()).send().await {
+            Ok(res) if res.status().is_success() => {
+                let mut bytes = Vec::with_capacity(part.size as usize);
+                let stream = res.bytes_stream();
+                futures_util::pin_mut!(stream);
+                let mut failed = false;
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(chunk) if bytes.len() + chunk.len() <= part.size as usize => bytes.extend_from_slice(&chunk),
+                        _ => { failed = true; break; }
+                    }
+                }
+                if !failed && bytes.len() == part.size as usize {
+                    return Ok(([(header::CONTENT_TYPE, "application/octet-stream"),
+                                (header::CACHE_CONTROL, "private, no-store")], bytes).into_response());
+                }
+                last_error = format!("预览分卷大小不符：{url}");
+            }
+            Ok(res) => last_error = format!("预览线路返回 HTTP {}", res.status()),
+            Err(e) => last_error = e.to_string(),
+        }
+    }
+    Err(ApiError(Error::Upstream(last_error)))
 }
 
 // ------------------------------------------------------------------ ratings, comments, feedback

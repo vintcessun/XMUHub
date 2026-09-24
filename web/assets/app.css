@@ -600,6 +600,113 @@ pre.code, pre.textview, .secret { background: var(--surface-2); }
   .auth-card { margin-block: 20px; }
 }
 
+/* ---------- campus photograph and frosted glass ---------- */
+:root, :root:not([data-theme="light"]), :root[data-theme="dark"] {
+  --navy: #f0b39f;
+  --navy-2: #ffd4c3;
+  --navy-soft: rgba(240, 179, 159, .19);
+  --on-navy: #291d21;
+  --gold: #f2c58c;
+  --bg: #101d2d;
+  --surface: rgba(17, 29, 45, .62);
+  --surface-2: rgba(24, 40, 57, .48);
+  --line: rgba(255, 255, 255, .26);
+  --text: #fffaf5;
+  --muted: #eee9e4;
+  --faint: #d2d5d9;
+  --ok: #b9ebce;
+  --ok-soft: rgba(78, 164, 113, .2);
+  --warn: #ffe0a9;
+  --warn-soft: rgba(198, 136, 52, .22);
+  --bad: #ffb4aa;
+  --bad-soft: rgba(189, 73, 66, .25);
+  --shadow: 0 12px 35px rgba(5, 12, 23, .19), inset 0 1px rgba(255, 255, 255, .12);
+  color-scheme: dark;
+}
+body {
+  background: #101d2d url('/assets/xmu-campus-background.jpg') center center / cover fixed no-repeat;
+  min-height: 100vh;
+}
+.top, .foot, .card, .hero, .page-head, .tabs, .drop, .modal-box,
+.suggest ul, .picked, .bulkbar, .frow, .kpi, .notice, .oss {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  backdrop-filter: blur(20px) saturate(1.35);
+  box-shadow: var(--shadow);
+}
+.top { background: rgba(16, 29, 45, .66); border-width: 0 0 1px; }
+.foot { background: rgba(16, 29, 45, .66); border-width: 1px 0 0; }
+.hero {
+  max-width: 940px;
+  margin: 44px auto 42px;
+  padding: 48px 28px 43px;
+  border-radius: 24px;
+  background: rgba(16, 29, 45, .52);
+  text-shadow: 0 1px 5px rgba(0, 0, 0, .15);
+}
+.page-head { padding: 18px 22px; border-radius: var(--radius); }
+.tabs { padding: 0 12px; border-radius: 12px; }
+.card, .oss, .drop, .frow, .modal-box { border-color: rgba(255, 255, 255, .3); }
+.card:hover, .oss:hover { border-color: rgba(255, 255, 255, .48); }
+.oss, .help-toc { background: var(--surface); }
+.oss .btn { text-shadow: none; }
+.btn, .input, select.input, textarea.input, .top form input, .bigsearch input,
+.chip, .toolbar select, .steps span, .secret, pre.code, pre.textview {
+  background: rgba(20, 35, 52, .4);
+  border-color: rgba(255, 255, 255, .32);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+}
+.btn:hover, .chip:hover, .tabs button:hover { background: rgba(255, 255, 255, .16); }
+.btn.primary, .nav .up, .fbfab { background: var(--navy); border-color: rgba(255, 255, 255, .3); }
+.btn.primary:hover, .nav .up:hover, .fbfab:hover { background: var(--navy-2); }
+.top form input:focus, .input:focus, .bigsearch input:focus { background: rgba(17, 29, 45, .74); }
+.input::placeholder, .top input::placeholder, .bigsearch input::placeholder { color: #dedfe1; }
+.nav a { color: var(--text); }
+.nav a:hover { background: rgba(255, 255, 255, .16); }
+.nav a.on, .chip.on, .tabs button.on { background: var(--navy-soft); color: #ffe0d3; }
+.tag[class*="t-T"], .badge.uncertain { background: rgba(255, 255, 255, .15); color: var(--text); border: 1px solid var(--line); filter: none; }
+.item:hover, .tree .row-n:hover, .picklist li:hover, .table tbody tr:hover { background: rgba(255, 255, 255, .09); }
+.table th, .kpi, .drop, .picked, .bulkbar { background: rgba(25, 42, 59, .48); }
+.modal { background: rgba(7, 15, 27, .45); }
+.modal-box { background: rgba(16, 29, 45, .82); }
+.auth-card { background: rgba(17, 29, 45, .72); }
+.notice { border-left-width: 3px; }
+.fbfab { -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px); }
+
+/* On the landing page the photograph is visible first; existing content then
+   appears inside its glass panels without changing the page structure. */
+body[data-page="home"] .top { animation: glass-reveal .8s ease-out .5s both; }
+body[data-page="home"] .hero { animation: glass-reveal 1s cubic-bezier(.2, .7, .2, 1) .85s both; }
+body[data-page="home"] .oss { animation: glass-reveal .8s ease-out 1.2s both; }
+body[data-page="home"] .sections { animation: glass-reveal .8s ease-out 1.35s both; }
+body[data-page="home"] .layout-side { animation: glass-reveal .8s ease-out 1.5s both; }
+body[data-page="home"] .foot, body[data-page="home"] .fbfab { animation: glass-reveal .8s ease-out 1.5s both; }
+@keyframes glass-reveal {
+  from { opacity: 0; transform: translateY(16px); filter: blur(6px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+@media (max-width: 720px) {
+  .hero { margin: 24px auto 28px; padding: 36px 18px 30px; border-radius: 18px; }
+  .page-head { padding: 16px 18px; }
+}
+@media print {
+  :root, :root:not([data-theme="light"]), :root[data-theme="dark"] {
+    --text: #111;
+    --muted: #333;
+    --faint: #555;
+    --surface: #fff;
+    --surface-2: #f5f5f5;
+    --line: #ddd;
+    --navy: #93432f;
+    --on-navy: #fff;
+    color-scheme: light;
+  }
+  body { background: #fff; color: #111; }
+  .top, .foot, .card, .hero, .page-head { -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+}
+
 /* ---------- motion: page switches, content and dialogs ease in instead of popping */
 @view-transition { navigation: auto; }
 .top { view-transition-name: top; }

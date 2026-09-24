@@ -3,6 +3,7 @@ mod api;
 mod config;
 mod mailer;
 mod mcp;
+mod ratelimit;
 mod relay;
 mod thumbs;
 mod transfer;

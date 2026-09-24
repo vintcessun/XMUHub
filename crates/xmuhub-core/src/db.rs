@@ -157,10 +157,16 @@ impl Db {
 
     /// Runs `f` inside one write transaction and commits it.
     pub fn write<R>(&self, f: impl FnOnce(&Tx<'_>) -> Result<R>) -> Result<R> {
-        let txn = self.inner.begin_write()?;
-        let r = f(&Tx { txn: &txn })?;
+        let txn = self.begin()?;
+        let r = f(&txn.tx())?;
         txn.commit()?;
         Ok(r)
+    }
+
+    /// Opens a write transaction whose commit (the slow, fsync-ing part) the caller does
+    /// separately — so it can happen outside any in-memory lock.
+    pub fn begin(&self) -> Result<WriteTxn> {
+        Ok(WriteTxn(self.inner.begin_write()?))
     }
 
     /// Dumps every table into one self-describing blob for off-site backup.
@@ -178,6 +184,9 @@ impl Db {
             ratings: snap.ratings,
             comments: snap.comments,
             feedback: snap.feedback,
+            tokens: snap.tokens,
+            subtitles: snap.subtitles,
+            thumbs: snap.thumbs,
         };
         Ok(serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))?)
     }
@@ -200,6 +209,25 @@ pub struct Dump {
     pub comments: Vec<Comment>,
     #[serde(default)]
     pub feedback: Vec<Feedback>,
+    #[serde(default)]
+    pub tokens: Vec<ApiToken>,
+    #[serde(default)]
+    pub subtitles: Vec<(Id, String)>,
+    #[serde(default)]
+    pub thumbs: Vec<Thumb>,
+}
+
+/// An open write transaction; dropping it without `commit` aborts it.
+pub struct WriteTxn(redb::WriteTransaction);
+
+impl WriteTxn {
+    pub fn tx(&self) -> Tx<'_> {
+        Tx { txn: &self.0 }
+    }
+    pub fn commit(self) -> Result<()> {
+        self.0.commit()?;
+        Ok(())
+    }
 }
 
 pub struct Tx<'a> {

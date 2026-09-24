@@ -407,11 +407,18 @@ impl Hub {
     /// On failure memory is reloaded from disk so the two never diverge.
     fn mutate<R>(&self, f: impl FnOnce(&mut State, &Tx) -> Result<R>) -> Result<R> {
         let _w = self.writer.lock();
-        let mut st = self.st.write();
-        let res = self.db.write(|tx| f(&mut st, tx));
+        // The in-memory update is quick; the commit waits for the disk. Readers only wait
+        // for the former — holding the state lock through the fsync stalled every page
+        // (and, on the server's two async threads, every request) behind each write.
+        let res = self.db.begin().and_then(|txn| {
+            let r = f(&mut self.st.write(), &txn.tx())?;
+            txn.commit()?;
+            Ok(r)
+        });
         if res.is_err() {
+            // Memory may hold changes the database never got: start over from the database.
             match State::from_db(&self.db) {
-                Ok(fresh) => *st = fresh,
+                Ok(fresh) => *self.st.write() = fresh,
                 Err(e) => tracing::error!("reload after failed write: {e}"),
             }
         }
@@ -511,14 +518,10 @@ impl Hub {
             return Ok(());
         }
         let _w = self.writer.lock();
-        let st = self.st.read();
-        self.db.write(|tx| {
-            for id in &ids {
-                if let Some(r) = st.resources.get(id) {
-                    tx.put_resource(r)?;
-                }
-            }
-            Ok(())
-        })
+        let rows: Vec<Resource> = {
+            let st = self.st.read();
+            ids.iter().filter_map(|id| st.resources.get(id).cloned()).collect()
+        };
+        self.db.write(|tx| rows.iter().try_for_each(|r| tx.put_resource(r)))
     }
 }

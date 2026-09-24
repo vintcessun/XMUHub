@@ -392,7 +392,10 @@ const panels = {
 };
 
 async function show(name) {
+  if (!panels[name]) name = 'dash';
   current = name;
+  // Keep the tab in the address bar so a refresh (or a shared link) stays here.
+  if (location.hash.slice(1) !== name) history.replaceState(null, '', `#${name}`);
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === name));
   const box = $('#panel');
   box.onclick = box.onchange = null;
@@ -414,5 +417,6 @@ async function show(name) {
   }
   $('#who').textContent = `${LEVELS[me.level]} · ${me.nickname}`;
   $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) show(b.dataset.t); };
-  show('dash');
+  show(location.hash.slice(1) || 'dash');
+  window.addEventListener('hashchange', () => { if (location.hash.slice(1) !== current) show(location.hash.slice(1)); });
 })();

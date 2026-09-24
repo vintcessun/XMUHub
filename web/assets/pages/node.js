@@ -6,7 +6,17 @@ const mePromise = layout('browse');
 // A 公共课 courses keep the four fixed folders of the scheme.
 const BUCKETS = [[1, '01 真题与答案'], [2, '02 提纲笔记'], [3, '03 题库刷题'], [4, '04 课件与拓展']];
 let data = null;
-let bucket = 0;
+const params = new URLSearchParams(location.search);
+let bucket = Number(params.get('b')) || 0;
+
+/** Keeps the bucket / time filters in the address bar so a refresh keeps them. */
+function syncUrl() {
+  const u = new URLSearchParams();
+  if (bucket) u.set('b', bucket);
+  if ($('#time').value) u.set('t', $('#time').value);
+  const qs = u.toString();
+  history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}`);
+}
 
 let staff = false;
 
@@ -32,7 +42,7 @@ async function load() {
     return;
   }
   const n = data.node;
-  if (n.id !== id) history.replaceState(null, '', `/n/${n.id}`);
+  if (n.id !== id) history.replaceState(null, '', `/n/${n.id}${location.search}`);
   document.title = `${n.name} · XMUHub`;
   $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
   $('#name').textContent = nodeTitle(n);
@@ -61,7 +71,8 @@ async function load() {
       : [];
     $('#buckets').innerHTML = chips.map(([b, l]) => `<button class="chip${b === bucket ? ' on' : ''}" data-b="${b}">${l}${b ? ` ${counts.get(b)}` : ''}</button>`).join('');
     const times = [...new Set(data.resources.map((r) => r.name.time).filter(Boolean))].sort().reverse();
-    $('#time').innerHTML = '<option value="">全部时间</option>' + times.map((t) => `<option>${esc(t)}</option>`).join('');
+    const wantTime = $('#time').value || params.get('t') || '';
+    $('#time').innerHTML = '<option value="">全部时间</option>' + times.map((t) => `<option${t === wantTime ? ' selected' : ''}>${esc(t)}</option>`).join('');
     $('#time').hidden = !times.length;
   }
   renderList();
@@ -78,9 +89,10 @@ $('#buckets').onclick = (e) => {
   if (!b) return;
   bucket = Number(b.dataset.b);
   document.querySelectorAll('#buckets .chip').forEach((x) => x.classList.toggle('on', x === b));
+  syncUrl();
   renderList();
 };
-$('#time').onchange = renderList;
+$('#time').onchange = () => { syncUrl(); renderList(); };
 $('#list').addEventListener('change', (e) => {
   if (e.target.id === 'selall') document.querySelectorAll('#list .rsel').forEach((c) => { c.checked = e.target.checked; });
   const n = document.querySelectorAll('#list .rsel:checked').length;

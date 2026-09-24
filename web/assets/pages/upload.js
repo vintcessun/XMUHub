@@ -1,7 +1,63 @@
-import { api, esc, fmtSize, layout, loginUrl, meta, pathText, qs, toast, tree, $ } from '../app.js';
+import { api, esc, fmtSize, layout, loginUrl, meta, pathText, qs, store, toast, tree, $ } from '../app.js';
 
 const state = { node: null, path: [], rows: [], busy: false };
 let M = null; // meta
+
+// ---------------------------------------------------------------- draft (survives a refresh)
+//
+// Browsers never let a page keep the chosen files across a reload, so the draft keeps
+// everything else: the category, each file's filled-in fields, its hashes and its server
+// upload id. Choosing the same files again restores the fields and resumes the upload
+// from the first part that hadn't finished.
+
+const DRAFT_KEY = 'xmuhub.upload.draft';
+const DRAFT_TTL = 20 * 3600 * 1000; // the server drops unfinished uploads after 24 h
+const FIELDS = ['type_word', 'year', 'term', 'paper', 'with_answer', 'extra', 'note', 'subtitle'];
+
+const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+
+function readDraft() {
+  try {
+    const d = JSON.parse(store.get(DRAFT_KEY) || 'null');
+    if (d && Date.now() - d.at < DRAFT_TTL) return d;
+  } catch { /* corrupt */ }
+  return { at: Date.now(), node: null, files: {} };
+}
+let draft = readDraft();
+
+function saveDraft() {
+  draft.at = Date.now();
+  draft.node = state.node ? state.node.id : null;
+  const files = {};
+  for (const r of state.rows) {
+    if (r.done) continue;
+    const e = { name: r.file.name, size: r.file.size };
+    for (const k of FIELDS) e[k] = r[k];
+    if (r.parts) e.parts = r.parts;
+    if (r.upload_id) e.upload_id = r.upload_id;
+    files[fileKey(r.file)] = e;
+  }
+  // Files from before the refresh that haven't been chosen again yet stay in the draft.
+  for (const [k, v] of Object.entries(draft.files || {})) if (!(k in files) && !state.rows.some((r) => fileKey(r.file) === k)) files[k] = v;
+  draft.files = files;
+  store.set(DRAFT_KEY, Object.keys(files).length || draft.node ? JSON.stringify(draft) : null);
+}
+
+function showDraftNotice() {
+  const waiting = Object.entries(draft.files || {}).filter(([k]) => !state.rows.some((r) => fileKey(r.file) === k));
+  const box = $('#draftnote');
+  if (!waiting.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<div class="notice warn"><b>上次还有 ${waiting.length} 个文件没有提交</b>（页面刷新或关闭了）。重新选择这些文件，填过的信息会自动恢复，已传完的部分不用重传：
+    <div class="small" style="margin-top:6px">${waiting.slice(0, 8).map(([, v]) => `${esc(v.name)} · ${fmtSize(v.size)}`).join('<br>')}${waiting.length > 8 ? `<br>… 等 ${waiting.length} 个` : ''}</div>
+    <div style="margin-top:8px"><a href="#" id="draftclear" class="small">不用了，清除记录</a></div></div>`;
+  $('#draftclear').onclick = (e) => { e.preventDefault(); draft.files = {}; saveDraft(); showDraftNotice(); };
+}
+
+// Warn before leaving with files that haven't been submitted.
+window.addEventListener('beforeunload', (e) => {
+  if (state.busy || state.rows.some((r) => !r.done)) { e.preventDefault(); e.returnValue = ''; }
+});
 
 // ---------------------------------------------------------------- gate
 
@@ -17,9 +73,11 @@ let M = null; // meta
   $('#droptip').textContent = `单个文件最大 ${fmtSize(M.limits.max_file)}，大文件会自动分卷上传`;
   $('#b_type').innerHTML += M.type_words.map((t) => `<option>${t.word}</option>`).join('');
   $('#b_year').innerHTML += yearOptions('');
-  if (qs.get('node')) {
-    try { const d = await api(`/nodes/${Number(qs.get('node'))}`); pick(d.node, d.path); } catch { /* ignore */ }
+  const startNode = Number(qs.get('node')) || draft.node;
+  if (startNode) {
+    try { const d = await api(`/nodes/${startNode}`); pick(d.node, d.path); } catch { /* ignore */ }
   }
+  showDraftNotice();
   if (me.level < 2) $('#hint').textContent = '你的上传会在审核通过后公开。';
 })();
 
@@ -43,7 +101,8 @@ function pick(node, path) {
   $('#picked').hidden = false;
   $('#picked').innerHTML = `<div><b>${esc(node.name)}</b> <span class="small muted">${esc(pathText(state.path))}</span>
     <div class="small faint">文件名将以「${esc(node.label || node.name)}」开头</div></div><span class="grow"></span><a href="#" id="unpick">更换</a>`;
-  $('#unpick').onclick = (e) => { e.preventDefault(); state.node = null; $('#picked').hidden = true; $('#nodepick').hidden = false; $('#nq').focus(); };
+  $('#unpick').onclick = (e) => { e.preventDefault(); state.node = null; saveDraft(); $('#picked').hidden = true; $('#nodepick').hidden = false; $('#nq').focus(); };
+  saveDraft();
   renderRows();
 }
 
@@ -156,8 +215,18 @@ function addFiles(files) {
     if (f.size > M.limits.max_file) { toast(`${f.name} 太大了`, true); continue; }
     if (state.rows.some((r) => r.file.name === f.name && r.file.size === f.size)) continue;
     const g = guess(f.name);
-    state.rows.push({ file: f, sel: true, parts: null, hashing: 0, status: '', err: false, done: false, note: '', ...g });
+    const row = { file: f, sel: true, parts: null, hashing: 0, status: '', err: false, done: false, note: '', subtitle: '', ...g };
+    const saved = draft.files && draft.files[fileKey(f)];
+    if (saved) {
+      for (const k of FIELDS) if (k in saved) row[k] = saved[k];
+      if (Array.isArray(saved.parts)) row.parts = saved.parts;
+      if (saved.upload_id) row.upload_id = saved.upload_id;
+      row.status = saved.upload_id ? '已恢复上次填写的信息，上传会从断点继续' : '已恢复上次填写的信息';
+    }
+    state.rows.push(row);
   }
+  saveDraft();
+  showDraftNotice();
   renderRows();
   hashQueue();
 }
@@ -202,6 +271,7 @@ $('#rows').addEventListener('change', (e) => {
   if (!row || !f) return;
   const r = state.rows[Number(row.dataset.i)];
   r[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+  saveDraft();
   if (f !== 'note' && f !== 'sel' && f !== 'subtitle') row.querySelector('.gen').textContent = `→ ${genName(r)}`;
 });
 $('#rows').addEventListener('input', (e) => {
@@ -210,12 +280,15 @@ $('#rows').addEventListener('input', (e) => {
   if (!row || (f !== 'extra' && f !== 'note' && f !== 'subtitle')) return;
   const r = state.rows[Number(row.dataset.i)];
   r[f] = e.target.value;
+  saveDraft();
   if (f === 'extra') row.querySelector('.gen').textContent = `→ ${genName(r)}`;
 });
 $('#rows').addEventListener('click', (e) => {
   const b = e.target.closest('[data-x="del"]');
   if (!b || state.busy) return;
-  state.rows.splice(Number(b.closest('.frow').dataset.i), 1);
+  const [gone] = state.rows.splice(Number(b.closest('.frow').dataset.i), 1);
+  if (draft.files) delete draft.files[fileKey(gone.file)];
+  saveDraft();
   renderRows();
 });
 
@@ -226,6 +299,7 @@ $('#b_apply').onclick = () => {
     for (const [k, x] of Object.entries(v)) if (x) r[k] = x;
     if ($('#b_ans').checked) r.with_answer = true;
   }
+  saveDraft();
   renderRows();
 };
 $('#b_all').onchange = (e) => { for (const r of state.rows) if (!r.done) r.sel = e.target.checked; renderRows(); };
@@ -280,6 +354,7 @@ async function hashQueue() {
         parts.push({ start, end, size: end - start, sha256: h.digest('hex') });
       }
       r.parts = parts;
+      saveDraft();
       updateRow(state.rows.indexOf(r));
     }
   } catch (e) {
@@ -315,7 +390,17 @@ async function uploadRow(r, bar, base, total) {
   const f = r.file;
   r.status = '正在准备…';
   updateRow(state.rows.indexOf(r));
-  const plan = await api('/uploads', { method: 'POST', body: { filename: f.name, mime: f.type, parts: r.parts.map((p) => ({ size: p.size, sha256: p.sha256 })) } });
+  // Resume the upload from before a refresh when the server still has it.
+  let plan = null;
+  if (r.upload_id) {
+    plan = await api(`/uploads/${r.upload_id}`).catch(() => null);
+    if (!plan || plan.parts.length !== r.parts.length) plan = null;
+  }
+  if (!plan) {
+    plan = await api('/uploads', { method: 'POST', body: { filename: f.name, mime: f.type, parts: r.parts.map((p) => ({ size: p.size, sha256: p.sha256 })) } });
+  }
+  r.upload_id = plan.upload_id;
+  saveDraft();
   if (!plan.dedup) {
     let sent = 0;
     for (const pp of plan.parts) {
@@ -341,16 +426,24 @@ async function uploadRow(r, bar, base, total) {
       sent += pp.size;
     }
   }
-  const res = await api('/resources', {
-    method: 'POST',
-    body: {
-      upload_id: plan.upload_id, node: state.node.id, time: timeOf(r), type_word: r.type_word,
-      paper: r.paper, with_answer: r.with_answer, extra: r.extra, note: r.note,
-      ...(r.subtitle && r.subtitle.trim() ? { subtitle: r.subtitle } : {}),
-    },
-  });
+  const body = {
+    upload_id: plan.upload_id, node: state.node.id, time: timeOf(r), type_word: r.type_word,
+    paper: r.paper, with_answer: r.with_answer, extra: r.extra, note: r.note,
+    ...(r.subtitle && r.subtitle.trim() ? { subtitle: r.subtitle } : {}),
+  };
+  let res;
+  try {
+    res = await api('/resources', { method: 'POST', body });
+  } catch (err) {
+    // A resumed upload that the server has expired or already used: start it over once.
+    if (err.status === 404 || err.status === 409) { r.upload_id = null; saveDraft(); throw new Error(`${err.message}，请再点一次上传重试`); }
+    throw err;
+  }
   r.done = true;
   r.sel = false;
+  r.upload_id = null;
+  if (draft.files) delete draft.files[fileKey(r.file)];
+  saveDraft();
   r.status = res.status === 'published'
     ? `✓ 已发布：<a href="/r/${res.id}">${esc(res.filename)}</a>`
     : `✓ 已提交，等待审核：<a href="/r/${res.id}">${esc(res.filename)}</a>`;

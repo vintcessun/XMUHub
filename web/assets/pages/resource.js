@@ -1,4 +1,4 @@
-import { ago, api, downloadResource, esc, fmtDate, fmtSize, layout, loginUrl, meta, pathId, preview, stars, statusBadge, toast, $ } from '../app.js';
+import { ago, api, downloadResource, esc, fmtDate, fmtSize, layout, loginUrl, meta, pathId, preview, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -90,6 +90,10 @@ async function loadSocial(me) {
     } catch (err) { toast(err.message, true); }
   };
   $('#cf').hidden = !me;
+  // Unsent comment survives a refresh.
+  const DK = `xmuhub.comment.${id}`;
+  if (!$('#cbody').value) $('#cbody').value = store.get(DK) || '';
+  $('#cbody').oninput = () => store.set(DK, $('#cbody').value.trim() ? $('#cbody').value : null);
   $('#chint').textContent = '';
   $('#clist').innerHTML = (!me ? `<p class="small muted"><a href="${loginUrl()}">登录</a>后可以发表评论</p>` : '') +
     (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who"><b>${esc(c.nickname)}</b><span class="faint">${ago(c.created_at)}</span>
@@ -108,6 +112,7 @@ async function loadSocial(me) {
     try {
       await api(`/resources/${id}/comments`, { method: 'POST', body: { body } });
       $('#cbody').value = '';
+      store.set(`xmuhub.comment.${id}`, null);
       loadSocial(me);
     } catch (err) { toast(err.message, true); }
   };

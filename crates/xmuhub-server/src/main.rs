@@ -24,7 +24,7 @@ use xmuhub_core::storage::{Storage, StorageBackend};
 use crate::config::{Config, StorageKind};
 
 #[derive(Parser)]
-#[command(name = "xmuhub", about = "XMUHub — 厦门大学学生资料共享平台")]
+#[command(name = "xmuhub", about = "鹭岛书阁 — 厦门大学学生资料共享平台")]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,

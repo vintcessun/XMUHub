@@ -1,4 +1,4 @@
-# XMUHub
+# 鹭岛书阁
 
 厦门大学学生资料共享平台。同学们可以按课程浏览、搜索、下载往年试卷、笔记和课件，也可以上传资料分享给大家。
 
@@ -108,7 +108,7 @@ python scripts/import_archive.py 资料库备份.zip --base https://xmu.vintces.
 - **REST API**：同一令牌可直接调用 `/api/…`（带 Bearer 的请求免 `X-XMUHub` 头）。令牌不能再创建令牌。
 
 ```sh
-claude mcp add --transport http xmuhub https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_…"
+claude mcp add --transport http ludao-shuge https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_…"
 ```
 
 ## 许可证

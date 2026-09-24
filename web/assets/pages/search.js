@@ -14,7 +14,7 @@ function url(p) {
   return `/search?${u}`;
 }
 
-document.title = q ? `${q} · 搜索 · XMUHub` : '搜索 · XMUHub';
+document.title = q ? `${q} · 搜索 · 鹭岛书阁` : '搜索 · 鹭岛书阁';
 $('#title').textContent = q ? `“${q}”的搜索结果` : '搜索';
 $('#sq').value = q;
 $('#types').innerHTML = [['', '全部'], ['node', '只看课程与分类'], ['resource', '只看资料']]

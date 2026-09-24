@@ -43,7 +43,7 @@ async function load() {
   }
   const n = data.node;
   if (n.id !== id) history.replaceState(null, '', `/n/${n.id}${location.search}`);
-  document.title = `${n.name} · XMUHub`;
+  document.title = `${n.name} · 鹭岛书阁`;
   $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
   $('#name').textContent = nodeTitle(n);
   $('#info').innerHTML = [

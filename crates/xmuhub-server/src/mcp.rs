@@ -20,7 +20,7 @@ use crate::api::{App, Auth, client_ip, node_view, resource_view};
 
 const SUPPORTED: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "XMUHub 是厦门大学学生资料共享站（往年试卷、笔记、课件、题库）。\
+const INSTRUCTIONS: &str = "鹭岛书阁是厦门大学学生资料共享站（往年试卷、笔记、课件、题库）。\
 先用 search 找课程或资料（支持中文、课程代号和拼音首字母，如 wjf=微积分），\
 用 get_category 浏览课程下的资料，用 get_download_links 取下载地址（国内镜像，按速度排序，依次尝试即可）。\
 资料 id 和分类 id 都是数字。写操作（评论、评分、审核）需要个人令牌。";
@@ -205,7 +205,7 @@ async fn handle_one(app: &Arc<App>, auth: &Auth, ip: &str, msg: &Value) -> Optio
             Ok(json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "xmuhub", "title": "XMUHub 厦大资料库", "version": env!("CARGO_PKG_VERSION") },
+                "serverInfo": { "name": "ludao-shuge", "title": "鹭岛书阁 · 厦大资料库", "version": env!("CARGO_PKG_VERSION") },
                 "instructions": INSTRUCTIONS,
             }))
         }

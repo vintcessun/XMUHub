@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>我的 · XMUHub</title>
-<meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<title>我的 · 鹭岛书阁</title>
+<meta name="description" content="鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。">
 <meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
@@ -13,7 +13,7 @@
 </head>
 <body data-page="me">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('xmuhub.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
 <main><div class="wrap">
   <div class="page-head"><div><h1>我的</h1><div class="muted small" id="who"></div></div><button class="btn" id="logout">退出登录</button></div>
   <div class="layout-side">
@@ -40,11 +40,11 @@
       <div class="small" style="margin-top:10px">
         <p>MCP 地址：<span class="mono">https://xmu.vintces.icu/mcp</span>（Streamable HTTP）。请求头 <span class="mono">Authorization: Bearer 你的令牌</span>。不带令牌也能搜索和下载公开资料。</p>
         <p><b>Claude Code</b>：</p>
-        <pre class="code">claude mcp add --transport http xmuhub https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_你的令牌"</pre>
+        <pre class="code">claude mcp add --transport http ludao-shuge https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_你的令牌"</pre>
         <p><b>其他客户端</b>（mcp.json / claude_desktop_config.json 等）：</p>
         <pre class="code">{
   "mcpServers": {
-    "xmuhub": {
+    "ludao-shuge": {
       "type": "http",
       "url": "https://xmu.vintces.icu/mcp",
       "headers": { "Authorization": "Bearer xmh_你的令牌" }
@@ -57,7 +57,7 @@
   </section>
 </div></main>
 <footer id="foot" class="foot"></footer>
-<script>try{var f=sessionStorage.getItem('xmuhub.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>
+<script>try{var f=sessionStorage.getItem('ludao.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>
 <script type="module" src="/assets/pages/me.js"></script>
 </body>
 </html>

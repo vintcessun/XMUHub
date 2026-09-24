@@ -1,4 +1,4 @@
-// XMUHub shared front-end helpers: API client, session, layout, formatting, downloads.
+// 鹭岛书阁 shared front-end helpers: API client, session, layout, formatting, downloads.
 // Plain ES modules, no build step — edit and redeploy.
 
 export const store = {
@@ -37,7 +37,7 @@ export function me() {
 }
 export function forgetMe() {
   meCache = null;
-  try { sessionStorage.removeItem('xmuhub.top'); } catch { /* storage blocked */ }
+  try { sessionStorage.removeItem('ludao.top'); } catch { /* storage blocked */ }
 }
 
 let metaCache = null;
@@ -189,7 +189,7 @@ export async function layout(active) {
   const q = qs.get('q') || '';
   top.className = 'top';
   top.innerHTML = `<div class="wrap">
-    <a class="brand" href="/"><img class="logo" src="/assets/logo.svg" alt=""><span><b>XMU</b>Hub<small>厦大资料库</small></span></a>
+    <a class="brand" href="/"><img class="logo" src="/assets/logo.svg" alt=""><span><b>鹭岛书阁</b><small>厦大资料库</small></span></a>
     ${active === 'home' || active === 'search' ? '<span class="grow"></span>' : `<form action="/search" role="search"><input name="q" value="${esc(q)}" placeholder="搜索课程、资料…" aria-label="搜索"></form>`}
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>
@@ -203,7 +203,7 @@ export async function layout(active) {
   const foot = document.getElementById('foot');
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
-    <span>XMUHub · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
+    <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
     <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
   if (active !== 'feedback') feedbackButton();
   const user = await me();
@@ -217,8 +217,8 @@ export async function layout(active) {
   // The next page paints this header/footer before its scripts run, so switching pages
   // doesn't flash an empty bar (see the inline script after <header id="top">).
   try {
-    sessionStorage.setItem('xmuhub.top', top.innerHTML);
-    sessionStorage.setItem('xmuhub.foot', foot.innerHTML);
+    sessionStorage.setItem('ludao.top', top.innerHTML);
+    sessionStorage.setItem('ludao.foot', foot.innerHTML);
   } catch { /* storage blocked */ }
   speculate();
   return user;

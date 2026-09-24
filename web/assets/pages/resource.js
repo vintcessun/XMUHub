@@ -12,7 +12,7 @@ async function load() {
     $('#dl').disabled = true;
     return;
   }
-  document.title = `${r.title} · XMUHub`;
+  document.title = `${r.title} · 鹭岛书阁`;
   $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...r.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`), `<a href="/n/${r.node.id}">${esc(r.node.name)}</a>`].join(' / ');
   $('#title').textContent = r.title;
   $('#subtitle').textContent = r.subtitle || '';

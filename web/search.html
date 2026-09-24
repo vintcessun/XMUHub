@@ -11,6 +11,7 @@
 </head>
 <body data-page="search">
 <header id="top" class="top"></header>
+<script>try{var t=sessionStorage.getItem('xmuhub.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
 <main><div class="wrap">
   <form class="bigsearch" action="/search" role="search" style="margin:8px 0 18px;max-width:none"><input name="q" id="sq" placeholder="课程名、老师、年份或拼音首字母" aria-label="搜索"><button class="btn primary">搜索</button></form>
   <div class="page-head"><div><h1 id="title">搜索</h1><div class="muted small"><span id="summary"></span> <span id="scope"></span></div></div></div>
@@ -21,6 +22,7 @@
   <div class="row" style="justify-content:center;margin-top:16px" id="pager"></div>
 </div></main>
 <footer id="foot" class="foot"></footer>
+<script>try{var f=sessionStorage.getItem('xmuhub.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>
 <script type="module" src="/assets/pages/search.js"></script>
 </body>
 </html>

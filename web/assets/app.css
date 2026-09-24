@@ -411,3 +411,27 @@ pre.textview { max-height: min(75vh, 900px); overflow: auto; background: var(--s
 .oss-text { flex: 1; font-size: 14px; line-height: 1.6; }
 .oss .btn { flex: none; }
 @media (max-width: 640px) { .oss { flex-wrap: wrap; } .oss .btn { width: 100%; justify-content: center; } }
+
+/* ---------- motion: page switches, content and dialogs ease in instead of popping */
+@view-transition { navigation: auto; }
+.top { view-transition-name: top; }
+@media (min-width: 721px) { .top { min-height: 61px; } }
+::view-transition-group(top) { animation-duration: 0s; }
+::view-transition-old(root) { animation: .12s ease-out both vt-out; }
+::view-transition-new(root) { animation: .22s cubic-bezier(.2, .7, .3, 1) both vt-in; }
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes fade-up { from { opacity: 0; transform: translateY(4px); } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.98); } }
+.list > .item, .tree > li, .sections > * { animation: fade-up .2s ease-out both; }
+.modal { animation: fade .15s ease-out both; }
+.modal-box { animation: pop .2s cubic-bezier(.2, .7, .3, 1) both; }
+.toast { animation: fade-up .18s ease-out both; }
+.btn, .nav a, .item { transition: background-color .15s, color .15s, border-color .15s, transform .1s; }
+.btn:active:not(:disabled) { transform: scale(.97); }
+a, button { -webkit-tap-highlight-color: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

@@ -35,7 +35,10 @@ export function me() {
   if (!meCache) meCache = api('/me').then((r) => r.user).catch(() => null);
   return meCache;
 }
-export function forgetMe() { meCache = null; }
+export function forgetMe() {
+  meCache = null;
+  try { sessionStorage.removeItem('xmuhub.top'); } catch { /* storage blocked */ }
+}
 
 let metaCache = null;
 export function meta() {
@@ -211,7 +214,28 @@ export async function layout(active) {
   } else {
     navMe.href = loginUrl();
   }
+  // The next page paints this header/footer before its scripts run, so switching pages
+  // doesn't flash an empty bar (see the inline script after <header id="top">).
+  try {
+    sessionStorage.setItem('xmuhub.top', top.innerHTML);
+    sessionStorage.setItem('xmuhub.foot', foot.innerHTML);
+  } catch { /* storage blocked */ }
+  speculate();
   return user;
+}
+
+/** Lets the browser load a page while the pointer rests on its link (Chrome/Edge), so the
+ * click opens it at once. Browse-type pages are prerendered; resource pages (which may
+ * start a preview download), upload and account pages are only prefetched. */
+function speculate() {
+  if (document.querySelector('script[type="speculationrules"]') || !HTMLScriptElement.supports?.('speculationrules')) return;
+  const s = document.createElement('script');
+  s.type = 'speculationrules';
+  s.textContent = JSON.stringify({
+    prerender: [{ where: { or: [{ href_matches: '/' }, { href_matches: '/browse' }, { href_matches: '/help' }, { href_matches: '/about' }, { href_matches: '/n/*' }, { href_matches: '/search?*' }] }, eagerness: 'moderate' }],
+    prefetch: [{ where: { or: [{ href_matches: '/r/*' }, { href_matches: '/me' }, { href_matches: '/feedback' }, { href_matches: '/upload' }, { href_matches: '/upload?*' }] }, eagerness: 'moderate' }],
+  });
+  document.head.append(s);
 }
 
 // ---------------------------------------------------------------- downloads

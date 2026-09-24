@@ -1,6 +1,7 @@
-import { api, esc, layout, meta, resourceItem, tree, $ } from '../app.js';
+import { api, esc, layout, meta, resourceItem, SLOGAN, tree, $ } from '../app.js';
 
 layout('home');
+$('#slogan').textContent = SLOGAN;
 
 meta().then((m) => {
   const s = m.stats;

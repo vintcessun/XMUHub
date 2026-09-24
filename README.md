@@ -99,6 +99,18 @@ python scripts/import_archive.py 资料库备份.zip --base https://xmu.vintces.
 
 导入进度保存在压缩包旁边，中断后重新运行会从断点继续。
 
+## MCP 与个人令牌
+
+登录后在「我的」页面创建个人令牌（`xmh_…`，只显示一次，可随时删除）。令牌以本人身份和权限访问：
+
+- **MCP**：`https://xmu.vintces.icu/mcp`（Streamable HTTP，JSON 响应），请求头 `Authorization: Bearer xmh_…`；不带令牌也能搜索、浏览和取下载地址。
+  工具：`search`、`get_tree`、`get_category`、`get_resource`、`get_download_links`、`list_recent`、`list_popular`、`get_comments`、`post_comment`、`rate_resource`、`submit_feedback`、`whoami`，审核员另有 `review_queue`、`review_resource`。
+- **REST API**：同一令牌可直接调用 `/api/…`（带 Bearer 的请求免 `X-XMUHub` 头）。令牌不能再创建令牌。
+
+```sh
+claude mcp add --transport http xmuhub https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_…"
+```
+
 ## 许可证
 
 [GNU AGPL-3.0](LICENSE)。如果你修改后以网站形式对外提供服务，需要向使用者公开修改后的源代码。

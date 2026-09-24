@@ -18,6 +18,7 @@ pub const DEFAULT_MIRRORS: &[&str] = &[
     "https://gh.llkk.cc",
     "https://ghproxy.cc",
     "https://gh.ddlc.top",
+    "https://gh.idayer.com",
     "https://github.moeyy.xyz",
     "https://gh-proxy.org",
     "https://hk.gh-proxy.com",

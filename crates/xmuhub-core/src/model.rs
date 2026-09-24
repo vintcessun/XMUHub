@@ -458,3 +458,65 @@ pub struct Upload {
     /// Set once a resource was created from this upload.
     pub consumed: bool,
 }
+
+/// One review decision, kept as an audit trail (who approved / rejected what, and when).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewEvent {
+    pub id: Id,
+    pub resource: Id,
+    pub actor: Id,
+    /// approve / reject / remove / restrict / restore
+    pub action: String,
+    pub note: String,
+    pub at: i64,
+}
+
+/// A signed-in user's 1–5 star rating of a resource (one per user and resource).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Rating {
+    pub resource: Id,
+    pub user: Id,
+    pub stars: u8,
+    pub at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: Id,
+    pub resource: Id,
+    pub user: Id,
+    pub body: String,
+    pub created_at: i64,
+    /// Soft-deleted by its author or staff; kept for moderation history.
+    pub deleted_by: Option<Id>,
+}
+
+/// Site feedback (意见反馈), read by staff in the admin panel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Feedback {
+    pub id: Id,
+    pub user: Option<Id>,
+    pub body: String,
+    pub contact: String,
+    /// Page the sender came from.
+    pub page: String,
+    pub ip: String,
+    pub created_at: i64,
+    pub handled: bool,
+    pub handled_by: Option<Id>,
+    pub handled_note: String,
+}
+
+/// A personal access token for scripts and AI agents (API and MCP). Only its hash is kept.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiToken {
+    pub id: Id,
+    pub user: Id,
+    pub name: String,
+    /// sha256 of the secret.
+    pub hash: [u8; 32],
+    /// First characters of the secret, to tell tokens apart.
+    pub prefix: String,
+    pub created_at: i64,
+    pub last_used: i64,
+}

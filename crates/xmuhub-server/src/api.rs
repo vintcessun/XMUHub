@@ -90,7 +90,10 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> xmuhub_core::Result<T> 
 
 pub async fn csrf_guard(req: Request, next: Next) -> Response {
     let safe = matches!(*req.method(), Method::GET | Method::HEAD | Method::OPTIONS);
-    if !safe && req.uri().path().starts_with("/api/") && !req.headers().contains_key(CSRF_HEADER) {
+    // Bearer-token clients (scripts, agents) can't be driven cross-site: browsers never attach
+    // an Authorization header to a cross-site request without a CORS preflight we don't allow.
+    let bearer = req.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("Bearer "));
+    if !safe && !bearer && req.uri().path().starts_with("/api/") && !req.headers().contains_key(CSRF_HEADER) {
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "缺少请求头，请刷新页面后重试" }))).into_response();
     }
     next.run(req).await
@@ -127,13 +130,13 @@ impl FromRequestParts<Arc<App>> for Auth {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, Self::Rejection> {
-        if let (Some(expected), Some(given)) = (
-            app.script_token.as_deref(),
-            parts.headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")),
-        ) {
-            if constant_eq(expected.as_bytes(), given.trim().as_bytes()) {
+        // A bearer token, when present, is the only credential considered (never the cookie).
+        if let Some(given) = parts.headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")) {
+            let given = given.trim();
+            if app.script_token.as_deref().is_some_and(|t| constant_eq(t.as_bytes(), given.as_bytes())) {
                 return Ok(Auth { user: app.hub.system_user().ok(), session: None });
             }
+            return Ok(Auth { user: app.hub.token_user(given), session: None });
         }
         let session = cookie_value(&parts.headers, SESSION_COOKIE).map(str::to_string);
         let user = session.as_deref().and_then(|s| app.hub.session_user(s));
@@ -172,7 +175,7 @@ fn node_brief(n: &Node) -> Value {
     json!({ "id": n.id, "name": n.name, "code": n.code, "label": n.label, "kind": n.kind.as_str() })
 }
 
-fn node_view(n: &Node, count: usize) -> Value {
+pub(crate) fn node_view(n: &Node, count: usize) -> Value {
     json!({
         "id": n.id, "parent": n.parent, "kind": n.kind.as_str(), "code": n.code, "name": n.name,
         "label": n.label, "aliases": n.aliases, "bucketed": n.bucketed, "sort": n.sort, "count": count,
@@ -191,7 +194,7 @@ fn user_view(u: &User) -> Value {
     })
 }
 
-fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node], viewer: Viewer) -> Value {
+pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node], viewer: Viewer) -> Value {
     let mine = viewer.id() == Some(r.uploader);
     let staff = viewer.staff();
     let mut v = json!({
@@ -216,6 +219,7 @@ fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node], viewer: Vi
         "created_at": r.created_at,
         "updated_at": r.updated_at,
         "downloads": r.downloads,
+        "rating": app.hub.rating(r.id),
         "mine": mine,
     });
     if staff {
@@ -224,6 +228,9 @@ fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node], viewer: Vi
         v["source"] = json!(r.source);
         v["uncertain"] = json!(r.uncertain);
         v["uploader"] = json!({ "id": r.uploader, "nickname": app.hub.uploader_name(r.uploader) });
+        if let Some(by) = r.reviewed_by {
+            v["reviewer"] = json!({ "id": by, "nickname": app.hub.uploader_name(by) });
+        }
     }
     v
 }
@@ -238,6 +245,8 @@ pub fn router(app: Arc<App>) -> Router {
     let api = Router::new()
         .route("/meta", get(meta))
         .route("/me", get(me).patch(update_me))
+        .route("/me/tokens", get(list_tokens).post(create_token))
+        .route("/me/tokens/{id}", axum::routing::delete(revoke_token))
         .route("/auth/code", post(send_code))
         .route("/auth/register", post(register))
         .route("/auth/login", post(login))
@@ -258,6 +267,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/review", post(review))
         .route("/resources/{id}/report", post(report))
         .route("/resources/{id}/download", get(download_plan))
+        .route("/resources/{id}/social", get(social))
+        .route("/resources/{id}/rating", put(rate))
+        .route("/resources/{id}/comments", post(add_comment))
+        .route("/resources/{id}/reviews", get(resource_reviews))
+        .route("/comments/{id}", axum::routing::delete(delete_comment))
+        .route("/feedback", post(feedback))
         .route("/uploads", post(begin_upload))
         .route("/uploads/{id}", get(upload_plan))
         .route("/uploads/{id}/parts/{index}", post(confirm_part))
@@ -266,6 +281,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/review/nodes", get(pending_nodes))
         .route("/admin/reports", get(reports))
         .route("/admin/reports/{id}/handle", post(handle_report))
+        .route("/admin/feedback", get(feedback_list))
+        .route("/admin/feedback/{id}/handle", post(handle_feedback))
+        .route("/admin/reviews", get(review_log))
         .route("/admin/users", get(users))
         .route("/admin/users/{id}", axum::routing::patch(update_user))
         .route("/admin/status", get(status))
@@ -280,6 +298,7 @@ pub fn router(app: Arc<App>) -> Router {
     Router::new()
         .nest("/api", api)
         .route("/d/{id}", get(download_redirect))
+        .route("/mcp", post(crate::mcp::post).get(crate::mcp::get))
         .route("/", get(|s: S, h: HeaderMap| async move { page(s, "index.html", h) }))
         .route("/n/{id}", get(|s: S, h: HeaderMap| async move { page(s, "node.html", h) }))
         .route("/r/{id}", get(|s: S, h: HeaderMap| async move { page(s, "resource.html", h) }))
@@ -404,6 +423,36 @@ async fn update_me(State(app): S, auth: Auth, Json(b): Json<MeIn>) -> R<Json<Val
     Ok(Json(json!({ "user": user_view(&u) })))
 }
 
+// ------------------------------------------------------------------ personal access tokens
+
+async fn list_tokens(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.tokens(auth.viewer())?)))
+}
+
+#[derive(Deserialize)]
+struct TokenIn {
+    #[serde(default)]
+    name: String,
+}
+
+async fn create_token(State(app): S, auth: Auth, Json(b): Json<TokenIn>) -> R<Json<Value>> {
+    // Tokens can't mint tokens: creating one needs a signed-in browser session.
+    if auth.session.is_none() {
+        return Err(ApiError(Error::Forbidden));
+    }
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let (secret, t) = blocking(move || hub.create_token(Viewer { user: user.as_ref() }, &b.name)).await?;
+    Ok(Json(json!({ "secret": secret, "token": t })))
+}
+
+async fn revoke_token(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.revoke_token(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 // ------------------------------------------------------------------ tree
 
 async fn tree(State(app): S) -> Json<Value> {
@@ -477,8 +526,9 @@ struct SearchQ {
     #[serde(rename = "type")]
     ty: Option<String>,
     tag: Option<String>,
-    within: Option<Id>,
-    page: Option<usize>,
+    // Strings, so an empty `within=` / `page=` from a form means "unset" instead of a 400.
+    within: Option<String>,
+    page: Option<String>,
 }
 
 async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<Value>> {
@@ -489,10 +539,10 @@ async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<V
             Some("resource") => Some(DocType::Resource),
             _ => None,
         },
-        within: q.within,
+        within: q.within.as_deref().and_then(|w| w.trim().parse().ok()),
         tag: q.tag.as_deref().and_then(Tag::parse).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
     };
-    let page = q.page.unwrap_or(1).clamp(1, 50);
+    let page = q.page.as_deref().and_then(|p| p.trim().parse::<usize>().ok()).unwrap_or(1).clamp(1, 50);
     let v = auth.viewer();
     let (items, total) = app.hub.search(v, q.q.as_deref().unwrap_or(""), filter, PAGE, (page - 1) * PAGE)?;
     let items: Vec<Value> = items
@@ -601,13 +651,116 @@ async fn report(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<Id>, Jso
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn download_plan(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
-    Ok(Json(json!(app.hub.download(auth.viewer(), id)?)))
+#[derive(Deserialize)]
+struct PlanQ {
+    #[serde(default)]
+    peek: Option<String>,
+}
+
+/// `?peek=1` is for in-page previews: not counted as a download, and each part lists the
+/// mirrors that allow cross-origin reads.
+async fn download_plan(State(app): S, auth: Auth, Path(id): Path<Id>, Query(q): Query<PlanQ>) -> R<Json<Value>> {
+    let peek = matches!(q.peek.as_deref(), Some("1" | "true"));
+    let plan = app.hub.download(auth.viewer(), id, !peek)?;
+    let mut v = json!(plan);
+    if peek {
+        for (i, p) in plan.parts.iter().enumerate() {
+            v["parts"][i]["preview_urls"] = json!(app.mirrors.cors_urls(&p.urls));
+        }
+    }
+    Ok(Json(v))
+}
+
+// ------------------------------------------------------------------ ratings, comments, feedback
+
+async fn social(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let v = auth.viewer();
+    let comments = app.hub.comments(v, id)?;
+    Ok(Json(json!({ "rating": app.hub.rating(id), "my_rating": app.hub.my_rating(v, id), "comments": comments })))
+}
+
+#[derive(Deserialize)]
+struct RateIn {
+    stars: u8,
+}
+
+async fn rate(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<RateIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let sum = blocking(move || hub.rate(Viewer { user: user.as_ref() }, id, b.stars)).await?;
+    Ok(Json(json!({ "rating": sum, "my_rating": b.stars })))
+}
+
+#[derive(Deserialize)]
+struct CommentIn {
+    body: String,
+}
+
+async fn add_comment(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<CommentIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let c = blocking(move || hub.add_comment(Viewer { user: user.as_ref() }, id, &b.body)).await?;
+    Ok(Json(json!({ "id": c.id })))
+}
+
+async fn delete_comment(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_comment(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct FeedbackIn {
+    body: String,
+    #[serde(default)]
+    contact: String,
+    #[serde(default)]
+    page: String,
+}
+
+async fn feedback(State(app): S, auth: Auth, h: HeaderMap, Json(b): Json<FeedbackIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let ip = client_ip(&h);
+    blocking(move || hub.submit_feedback(Viewer { user: user.as_ref() }, &b.body, &b.contact, &b.page, &ip)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn feedback_list(State(app): S, auth: Auth, Query(q): Query<ReportsQ>) -> R<Json<Value>> {
+    let items: Vec<Value> = app
+        .hub
+        .feedback(auth.viewer(), q.all)?
+        .into_iter()
+        .map(|(f, nick)| {
+            json!({
+                "id": f.id, "body": f.body, "contact": f.contact, "page": f.page, "nickname": nick,
+                "created_at": f.created_at, "handled": f.handled, "handled_note": f.handled_note,
+                "handled_by": f.handled_by.map(|u| app.hub.uploader_name(u)),
+            })
+        })
+        .collect();
+    Ok(Json(json!(items)))
+}
+
+async fn handle_feedback(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<HandleIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.handle_feedback(Viewer { user: user.as_ref() }, id, &b.note)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn review_log(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.review_log(auth.viewer(), None, 300)?)))
+}
+
+async fn resource_reviews(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.review_log(auth.viewer(), Some(id), 50)?)))
 }
 
 /// Plain link for sharing / wget: 302 to the best mirror of a single-part file.
 async fn download_redirect(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Response> {
-    let plan = app.hub.download(auth.viewer(), id)?;
+    let plan = app.hub.download(auth.viewer(), id, true)?;
     if plan.parts.len() != 1 {
         // Multi-part files need the page to stitch them together.
         return Ok(Redirect::to(&format!("/r/{id}")).into_response());

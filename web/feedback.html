@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>意见反馈 · XMUHub</title>
+<meta name="description" content="XMUHub 厦门大学学生资料共享平台：按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<meta name="theme-color" content="#122e66">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="feedback">
+<header id="top" class="top"></header>
+<main><div class="wrap" style="max-width:760px">
+  <div class="page-head"><div><h1>意见反馈</h1><div class="muted small">发现 bug、想要新功能、分类不对，或者有资料想补充，都可以告诉我们。</div></div></div>
+  <section class="card" id="group" hidden></section>
+  <section class="card">
+    <form id="f">
+      <label class="field"><span>反馈内容 <em>*</em></span><textarea class="input" id="body" rows="6" maxlength="2000" required placeholder="尽量写清楚：在哪个页面、做了什么、看到了什么。"></textarea></label>
+      <label class="field"><span>联系方式（选填：邮箱 / QQ，方便我们回复你）</span><input class="input" id="contact" maxlength="100"></label>
+      <div id="msg"></div>
+      <button class="btn primary">提交反馈</button>
+    </form>
+  </section>
+  <section class="card"><h3>其他渠道</h3><p class="small muted" style="margin:0">资料侵权或需要下架：在资料页点「投诉 / 申请下架」，48 小时内处理。<br>源代码与问题追踪：<a href="https://github.com/vintcessun/XMUHub/issues" rel="noopener">GitHub Issues</a></p></section>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script type="module" src="/assets/pages/feedback.js"></script>
+</body>
+</html>

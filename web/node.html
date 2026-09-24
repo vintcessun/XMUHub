@@ -14,7 +14,8 @@
 <main><div class="wrap">
   <div class="page-head">
     <div><div class="crumbs" id="crumbs"></div><h1 id="name">加载中…</h1><div class="muted small" id="info"></div></div>
-    <div class="row"><a class="btn primary" id="upload" href="/upload">上传到这里</a></div>
+    <div class="row"><form class="row" action="/search" role="search" id="scoped" style="flex-wrap:nowrap"><input type="hidden" name="within" id="within"><input class="input" name="q" id="sq" placeholder="在这里搜索…" style="max-width:200px" aria-label="在本分类中搜索"></form>
+      <a class="btn primary" id="upload" href="/upload">上传到这里</a></div>
   </div>
   <div id="editor" hidden></div>
   <div class="grid" id="children" style="margin-bottom:16px"></div>

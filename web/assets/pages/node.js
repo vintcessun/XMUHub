@@ -1,4 +1,4 @@
-import { api, esc, layout, nodeCard, pathId, resourceItem, toast, $ } from '../app.js';
+import { api, esc, layout, nodeCard, nodeTitle, pathId, resourceItem, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -28,7 +28,7 @@ async function load() {
   if (n.id !== id) history.replaceState(null, '', `/n/${n.id}`);
   document.title = `${n.name} · XMUHub`;
   $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
-  $('#name').textContent = n.name;
+  $('#name').textContent = nodeTitle(n);
   $('#info').innerHTML = [
     n.code && `<span class="mono">${esc(n.code)}</span>`,
     `${n.count} 份资料`,
@@ -36,6 +36,8 @@ async function load() {
     n.status === 'pending' && '<span class="badge pending">待确认</span>',
   ].filter(Boolean).join(' · ');
   $('#upload').href = `/upload?node=${n.id}`;
+  $('#within').value = n.id;
+  $('#sq').placeholder = `在「${n.name}」中搜索…`;
   $('#upload').hidden = n.kind === 'section';
 
   $('#children').innerHTML = data.children.map((c) => nodeCard(c).replace('class="card node-card"', `class="card node-card${c.count ? '' : ' empty-node'}"`)).join('');

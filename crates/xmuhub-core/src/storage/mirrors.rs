@@ -17,6 +17,8 @@ pub struct MirrorStat {
     pub speed_kbps: u64,
     pub checked_at: i64,
     pub error: String,
+    /// Sends `Access-Control-Allow-Origin`, so pages can fetch through it (previews).
+    pub cors: bool,
 }
 
 pub struct Mirrors {
@@ -24,12 +26,14 @@ pub struct Mirrors {
     /// Healthy prefixes, fastest first.
     ranked: RwLock<Vec<String>>,
     stats: RwLock<Vec<MirrorStat>>,
+    /// Healthy prefixes that allow cross-origin reads, fastest first.
+    cors: RwLock<Vec<String>>,
 }
 
 impl Mirrors {
     pub fn new(candidates: Vec<String>) -> Mirrors {
         let candidates: Vec<String> = candidates.into_iter().map(|c| c.trim_end_matches('/').to_string()).collect();
-        Mirrors { ranked: RwLock::new(candidates.clone()), candidates, stats: RwLock::new(Vec::new()) }
+        Mirrors { ranked: RwLock::new(candidates.clone()), candidates, stats: RwLock::new(Vec::new()), cors: RwLock::new(Vec::new()) }
     }
 
     /// `url` rewritten through each healthy mirror, then the original.
@@ -37,6 +41,12 @@ impl Mirrors {
         let mut out: Vec<String> = self.ranked.read().iter().map(|p| format!("{p}/{url}")).collect();
         out.push(url.to_string());
         out
+    }
+
+    /// Of `urls` (as produced by `wrap`), the ones a page can fetch cross-origin.
+    pub fn cors_urls(&self, urls: &[String]) -> Vec<String> {
+        let cors = self.cors.read();
+        cors.iter().filter_map(|p| urls.iter().find(|u| u.starts_with(p.as_str()) && u[p.len()..].starts_with('/'))).cloned().collect()
     }
 
     pub fn stats(&self) -> Vec<MirrorStat> {
@@ -48,7 +58,13 @@ impl Mirrors {
     pub async fn probe(&self, client: &reqwest::Client, probe_url: &str, expected_len: usize) {
         let checks = self.candidates.iter().map(|prefix| async move {
             let start = Instant::now();
-            let res = client.get(format!("{prefix}/{probe_url}")).timeout(Duration::from_secs(20)).send().await;
+            let res = client
+                .get(format!("{prefix}/{probe_url}"))
+                .header(reqwest::header::ORIGIN, "https://xmuhub.invalid")
+                .timeout(Duration::from_secs(20))
+                .send()
+                .await;
+            let cors = res.as_ref().is_ok_and(|r| r.headers().contains_key(reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN));
             let (ok, error) = match res {
                 Ok(r) if r.status().is_success() => match r.bytes().await {
                     // A mirror that answers with an HTML page instead of the file is broken.
@@ -67,6 +83,7 @@ impl Mirrors {
                 speed_kbps: if ok { expected_len as u64 * 1000 / 1024 / ms } else { 0 },
                 checked_at: crate::model::now(),
                 error,
+                cors: cors && ok,
             }
         });
         let mut stats = futures_util::future::join_all(checks).await;
@@ -77,6 +94,7 @@ impl Mirrors {
         // than all mirrors dying at once; keep the previous ranking rather than going direct-only.
         if !ranked.is_empty() {
             *self.ranked.write() = ranked;
+            *self.cors.write() = stats.iter().filter(|s| s.cors).map(|s| s.prefix.clone()).collect();
         }
         *self.stats.write() = stats;
     }

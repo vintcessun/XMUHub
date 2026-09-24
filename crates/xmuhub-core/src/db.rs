@@ -18,6 +18,12 @@ pub const SESSIONS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("sessio
 pub const REPORTS: TableDefinition<u64, &[u8]> = TableDefinition::new("reports");
 pub const UPLOADS: TableDefinition<u64, &[u8]> = TableDefinition::new("uploads.v2");
 pub const BLOBS: TableDefinition<&str, &[u8]> = TableDefinition::new("blobs");
+pub const REVIEWS: TableDefinition<u64, &[u8]> = TableDefinition::new("reviews");
+/// Key: resource id ++ user id, both big-endian.
+pub const RATINGS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("ratings");
+pub const COMMENTS: TableDefinition<u64, &[u8]> = TableDefinition::new("comments");
+pub const FEEDBACK: TableDefinition<u64, &[u8]> = TableDefinition::new("feedback");
+pub const TOKENS: TableDefinition<u64, &[u8]> = TableDefinition::new("tokens");
 /// Free-form small state: id sequences, storage bucket cursors, settings.
 pub const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
@@ -50,6 +56,18 @@ pub struct Snapshot {
     pub uploads: Vec<Upload>,
     pub blobs: Vec<Blob>,
     pub meta: Vec<(String, Vec<u8>)>,
+    pub reviews: Vec<ReviewEvent>,
+    pub ratings: Vec<Rating>,
+    pub comments: Vec<Comment>,
+    pub feedback: Vec<Feedback>,
+    pub tokens: Vec<ApiToken>,
+}
+
+fn rating_key(resource: Id, user: Id) -> [u8; 16] {
+    let mut k = [0u8; 16];
+    k[..8].copy_from_slice(&resource.to_be_bytes());
+    k[8..].copy_from_slice(&user.to_be_bytes());
+    k
 }
 
 impl Db {
@@ -68,6 +86,11 @@ impl Db {
         txn.open_table(UPLOADS)?;
         txn.open_table(BLOBS)?;
         txn.open_table(META)?;
+        txn.open_table(REVIEWS)?;
+        txn.open_table(RATINGS)?;
+        txn.open_table(COMMENTS)?;
+        txn.open_table(FEEDBACK)?;
+        txn.open_table(TOKENS)?;
         txn.commit()?;
         Ok(Db { inner })
     }
@@ -100,6 +123,21 @@ impl Db {
             let (k, v) = row?;
             snap.meta.push((k.value().to_string(), v.value().to_vec()));
         }
+        for row in txn.open_table(REVIEWS)?.iter()? {
+            snap.reviews.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(RATINGS)?.iter()? {
+            snap.ratings.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(COMMENTS)?.iter()? {
+            snap.comments.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(FEEDBACK)?.iter()? {
+            snap.feedback.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(TOKENS)?.iter()? {
+            snap.tokens.push(decode(row?.1.value())?);
+        }
         Ok(snap)
     }
 
@@ -122,6 +160,10 @@ impl Db {
             reports: snap.reports,
             blobs: snap.blobs,
             meta: snap.meta,
+            reviews: snap.reviews,
+            ratings: snap.ratings,
+            comments: snap.comments,
+            feedback: snap.feedback,
         };
         Ok(serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))?)
     }
@@ -136,6 +178,14 @@ pub struct Dump {
     pub reports: Vec<Report>,
     pub blobs: Vec<Blob>,
     pub meta: Vec<(String, Vec<u8>)>,
+    #[serde(default)]
+    pub reviews: Vec<ReviewEvent>,
+    #[serde(default)]
+    pub ratings: Vec<Rating>,
+    #[serde(default)]
+    pub comments: Vec<Comment>,
+    #[serde(default)]
+    pub feedback: Vec<Feedback>,
 }
 
 pub struct Tx<'a> {
@@ -189,6 +239,34 @@ impl Tx<'_> {
     }
     pub fn put_meta(&self, key: &str, value: &[u8]) -> Result<()> {
         self.txn.open_table(META)?.insert(key, value)?;
+        Ok(())
+    }
+    pub fn put_review(&self, e: &ReviewEvent) -> Result<()> {
+        self.txn.open_table(REVIEWS)?.insert(e.id, encode(e).as_slice())?;
+        Ok(())
+    }
+    pub fn put_rating(&self, r: &Rating) -> Result<()> {
+        self.txn.open_table(RATINGS)?.insert(rating_key(r.resource, r.user).as_slice(), encode(r).as_slice())?;
+        Ok(())
+    }
+    pub fn del_rating(&self, resource: Id, user: Id) -> Result<()> {
+        self.txn.open_table(RATINGS)?.remove(rating_key(resource, user).as_slice())?;
+        Ok(())
+    }
+    pub fn put_comment(&self, c: &Comment) -> Result<()> {
+        self.txn.open_table(COMMENTS)?.insert(c.id, encode(c).as_slice())?;
+        Ok(())
+    }
+    pub fn put_feedback(&self, f: &Feedback) -> Result<()> {
+        self.txn.open_table(FEEDBACK)?.insert(f.id, encode(f).as_slice())?;
+        Ok(())
+    }
+    pub fn put_token(&self, t: &ApiToken) -> Result<()> {
+        self.txn.open_table(TOKENS)?.insert(t.id, encode(t).as_slice())?;
+        Ok(())
+    }
+    pub fn del_token(&self, id: Id) -> Result<()> {
+        self.txn.open_table(TOKENS)?.remove(id)?;
         Ok(())
     }
 }

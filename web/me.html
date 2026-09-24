@@ -14,15 +14,44 @@
 <main><div class="wrap">
   <div class="page-head"><div><h1>我的</h1><div class="muted small" id="who"></div></div><button class="btn" id="logout">退出登录</button></div>
   <div class="layout-side">
-    <section class="card"><h2>我上传的资料</h2><div class="list" id="mine"><div class="skeleton"></div></div></section>
+    <section class="card"><div class="row" style="margin-bottom:10px"><h2 style="margin:0">我上传的资料</h2><span class="grow"></span>
+      <input class="input" id="mq" placeholder="在我的上传里搜索" style="max-width:220px" autocomplete="off">
+      <select class="input" id="ms" style="max-width:130px"><option value="">全部状态</option><option value="published">已发布</option><option value="pending">待审核</option><option value="rejected">未通过</option><option value="removed">已下架</option><option value="restricted">仅内部</option></select></div>
+      <div class="small muted" id="mcount"></div><div class="list" id="mine"><div class="skeleton"></div></div></section>
     <aside>
       <section class="card"><h3>修改昵称</h3><form id="nickf" class="row"><input class="input grow" id="nick" maxlength="20"><button class="btn">保存</button></form></section>
       <section class="card"><h3>修改密码</h3><form id="pwf">
         <label class="field"><span>原密码</span><input class="input" id="oldpw" type="password" autocomplete="current-password"></label>
         <label class="field"><span>新密码（至少 8 位）</span><input class="input" id="newpw" type="password" autocomplete="new-password"></label>
+        <label class="field"><span>再次输入新密码</span><input class="input" id="newpw2" type="password" autocomplete="new-password"></label>
         <button class="btn">修改</button></form></section>
     </aside>
   </div>
+  <section class="card" id="tokens" style="margin-top:20px">
+    <h2>个人令牌 · MCP / API</h2>
+    <p class="small muted">给 AI 助手（Claude、Cursor 等支持 MCP 的客户端）或自己的脚本使用。令牌以你的身份和权限访问本站，只在创建时显示一次，请像密码一样保管；不用了随时删除。</p>
+    <form class="row" id="tf"><input class="input" id="tname" maxlength="40" placeholder="令牌用途，如 “Claude 桌面版”" style="max-width:280px"><button class="btn primary">创建令牌</button></form>
+    <div id="tnew"></div>
+    <div id="tlist" style="margin-top:12px"></div>
+    <details style="margin-top:14px"><summary class="small"><b>如何连接</b></summary>
+      <div class="small" style="margin-top:10px">
+        <p>MCP 地址：<span class="mono">https://xmu.vintces.icu/mcp</span>（Streamable HTTP）。请求头 <span class="mono">Authorization: Bearer 你的令牌</span>。不带令牌也能搜索和下载公开资料。</p>
+        <p><b>Claude Code</b>：</p>
+        <pre class="code">claude mcp add --transport http xmuhub https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_你的令牌"</pre>
+        <p><b>其他客户端</b>（mcp.json / claude_desktop_config.json 等）：</p>
+        <pre class="code">{
+  "mcpServers": {
+    "xmuhub": {
+      "type": "http",
+      "url": "https://xmu.vintces.icu/mcp",
+      "headers": { "Authorization": "Bearer xmh_你的令牌" }
+    }
+  }
+}</pre>
+        <p>提供的工具：search（搜索）、get_tree / get_category（浏览分类）、get_resource、get_download_links（下载地址）、list_recent / list_popular、get_comments、post_comment、rate_resource、submit_feedback、whoami；审核员另有 review_queue、review_resource。</p>
+        <p><b>REST API</b>：同一个令牌也可以调用网站的 <span class="mono">/api/…</span> 接口，例如 <span class="mono">curl -H "Authorization: Bearer xmh_…" "https://xmu.vintces.icu/api/search?q=微积分"</span>。</p>
+      </div></details>
+  </section>
 </div></main>
 <footer id="foot" class="foot"></footer>
 <script type="module" src="/assets/pages/me.js"></script>

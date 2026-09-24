@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtDate, fmtSize, layout, meta, pathId, statusBadge, toast, $ } from '../app.js';
+import { ago, api, downloadResource, esc, fmtDate, fmtSize, layout, loginUrl, meta, pathId, preview, stars, statusBadge, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -31,6 +31,7 @@ async function load() {
     r.original_name && ['原文件名', `<span class="faint">${esc(r.original_name)}</span>`],
     r.source && ['来源', `<span class="faint">${esc(r.source)}</span>`],
     r.uploader && ['上传者', `<span class="faint">${esc(r.uploader.nickname)}</span>`],
+    r.reviewer && ['审核人', `<span class="faint">${esc(r.reviewer.nickname)}</span>`],
   ].filter((x) => x && x[1]);
   $('#kv').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   const notes = {
@@ -47,6 +48,67 @@ async function load() {
 
   const me = await mePromise;
   if (me && (me.level >= 3 || (r.mine && r.status === 'pending'))) renderManage(r, me);
+  if (me && me.level >= 3) loadHistory();
+  loadSocial(me);
+}
+
+// ---------------------------------------------------------------- preview
+
+$('#pvgo').onclick = () => { $('#pvgo').hidden = true; preview(id, $('#pv')); };
+
+// ---------------------------------------------------------------- ratings & comments
+
+const ACTIONS = { approve: '通过', reject: '驳回', remove: '下架', restrict: '设为仅内部', restore: '恢复发布' };
+
+async function loadHistory() {
+  try {
+    const list = await api(`/resources/${id}/reviews`);
+    if (!list.length) return;
+    $('#history').hidden = false;
+    $('#hlist').innerHTML = list.map((e) => `<div style="padding:4px 0"><b>${esc(e.actor)}</b> ${ACTIONS[e.action] || esc(e.action)}
+      <span class="faint">· ${fmtDate(e.at, true)}</span>${e.note ? ` <span class="muted">· ${esc(e.note)}</span>` : ''}</div>`).join('');
+  } catch { /* staff only */ }
+}
+
+let social = null;
+async function loadSocial(me) {
+  try { social = await api(`/resources/${id}/social`); } catch { $('#social').hidden = true; return; }
+  const s = social;
+  $('#ravg').innerHTML = s.rating.count ? `${stars(s.rating.avg)} <b>${s.rating.avg}</b> · ${s.rating.count} 人评分` : '还没有评分';
+  $('#rate').innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" data-s="${n}" class="${n <= s.my_rating ? 'on' : ''}" aria-label="${n} 星">★</button>`).join('');
+  $('#ratehint').innerHTML = !me ? `<a href="${loginUrl()}">登录</a>后评分` : s.my_rating ? '再点一次同一颗星可取消' : '';
+  $('#rate').onclick = async (e) => {
+    const b = e.target.closest('[data-s]');
+    if (!b) return;
+    if (!me) { location.href = loginUrl(); return; }
+    const n = Number(b.dataset.s);
+    try {
+      await api(`/resources/${id}/rating`, { method: 'PUT', body: { stars: n === s.my_rating ? 0 : n } });
+      loadSocial(me);
+    } catch (err) { toast(err.message, true); }
+  };
+  $('#cf').hidden = !me;
+  $('#chint').textContent = '';
+  $('#clist').innerHTML = (!me ? `<p class="small muted"><a href="${loginUrl()}">登录</a>后可以发表评论</p>` : '') +
+    (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who"><b>${esc(c.nickname)}</b><span class="faint">${ago(c.created_at)}</span>
+        <span class="grow"></span>${c.can_delete ? '<a href="#" data-del class="small">删除</a>' : ''}</div><div class="text">${esc(c.body)}</div></div>`).join('')
+      : '<p class="small faint">还没有评论</p>');
+  $('#clist').onclick = async (e) => {
+    const d = e.target.closest('[data-del]');
+    if (!d) return;
+    e.preventDefault();
+    try { await api(`/comments/${d.closest('[data-id]').dataset.id}`, { method: 'DELETE' }); loadSocial(me); } catch (err) { toast(err.message, true); }
+  };
+  $('#cf').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = $('#cbody').value.trim();
+    if (!body) return;
+    try {
+      await api(`/resources/${id}/comments`, { method: 'POST', body: { body } });
+      $('#cbody').value = '';
+      loadSocial(me);
+    } catch (err) { toast(err.message, true); }
+  };
 }
 
 $('#dl').onclick = async () => {

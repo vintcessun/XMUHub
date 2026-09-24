@@ -98,7 +98,7 @@ pub struct Registration {
     pub nickname: String,
 }
 
-fn sha(s: &str) -> [u8; 32] {
+pub(super) fn sha(s: &str) -> [u8; 32] {
     Sha256::digest(s.as_bytes()).into()
 }
 
@@ -139,8 +139,9 @@ fn verify_password(p: &str, phc: &str) -> bool {
 
 fn clean_nickname(n: &str) -> Result<String> {
     let n = clean(n, 20);
-    if n.chars().count() < 2 {
-        return Err(bad("昵称至少两个字"));
+    // Single-character nicknames are fine (澈); only whitespace-only is rejected.
+    if n.is_empty() {
+        return Err(bad("请填写昵称"));
     }
     Ok(n)
 }
@@ -445,6 +446,11 @@ impl Hub {
             // Admins are defined by the maintained list only, never by clicks.
             if level == Some(Level::Admin) || (u.level == Level::Admin && level.is_some()) {
                 return Err(bad("管理员由名单统一维护，请修改管理员名单"));
+            }
+            // Peers are equals: nobody bans or re-ranks an account at or above their own level
+            // (admins can't ban admins, reviewers can't touch reviewers).
+            if u.level >= me.level {
+                return Err(bad("不能修改同级或更高级别的账号"));
             }
             if me.level < Level::Admin {
                 // Reviewers manage contributors only, and cannot mint more reviewers.

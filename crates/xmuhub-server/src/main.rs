@@ -2,6 +2,7 @@ mod alloc;
 mod api;
 mod config;
 mod mailer;
+mod mcp;
 mod relay;
 mod transfer;
 mod web;

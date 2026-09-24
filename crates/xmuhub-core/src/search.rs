@@ -58,6 +58,8 @@ struct Fields {
     main: Field,
     py: Field,
     sub: Field,
+    /// Rank multiplier ×100 (see `Hub::node_weight`); resources use 100.
+    w: Field,
 }
 
 pub struct Search {
@@ -90,6 +92,7 @@ impl Search {
             main: sb.add_text_field("main", text.clone()),
             py: sb.add_text_field("py", text.clone()),
             sub: sb.add_text_field("sub", text),
+            w: sb.add_u64_field("w", FAST),
         };
         let index = Index::create_in_ram(sb.build());
         let writer = index.writer_with_num_threads(1, WRITER_BUDGET)?;
@@ -97,7 +100,7 @@ impl Search {
         Ok(Search { f, writer: Mutex::new(writer), reader })
     }
 
-    pub fn put_node(&self, n: &Node, at: &Placement) -> Result<()> {
+    pub fn put_node(&self, n: &Node, at: &Placement, weight: u64) -> Result<()> {
         let f = &self.f;
         let mut doc = doc!(
             f.key => key(DocType::Node, n.id),
@@ -105,6 +108,7 @@ impl Search {
             f.main => joined(&format!("{} {} {} {}", n.name, n.label, n.code, at.aliases_text)),
             f.py => joined(&pinyin_forms(&format!("{} {} {}", n.name, n.label, at.aliases_text))),
             f.sub => joined(at.path_text),
+            f.w => weight,
         );
         for a in at.ancestors.iter().chain(std::iter::once(&n.id)) {
             doc.add_u64(f.anc, *a);
@@ -126,6 +130,7 @@ impl Search {
             f.main => joined(&format!("{stem} {}", at.aliases_text)),
             f.py => joined(&pinyin_forms(&format!("{} {}", r.name.course, at.aliases_text))),
             f.sub => joined(&format!("{} {} {}", at.path_text, r.tag.label(), r.note)),
+            f.w => 100u64,
         );
         for a in at.ancestors.iter().chain(std::iter::once(&at.node)) {
             doc.add_u64(f.anc, *a);
@@ -203,7 +208,11 @@ impl Search {
         let query = BooleanQuery::new(clauses);
 
         let searcher = self.reader.searcher();
-        let collector = (TopDocs::with_limit(limit).and_offset(offset).order_by_score(), Count);
+        let ranked = TopDocs::with_limit(limit).and_offset(offset).tweak_score(|seg: &tantivy::SegmentReader| {
+            let w = seg.fast_fields().u64("w").ok().map(|c| c.first_or_default_col(100));
+            move |doc: tantivy::DocId, score: tantivy::Score| score * w.as_ref().map_or(100, |c| c.get_val(doc)) as f32 / 100.0
+        });
+        let collector = (ranked, Count);
         let (top, total) = searcher.search(&query, &collector)?;
         let mut hits = Vec::with_capacity(top.len());
         for (score, addr) in top {

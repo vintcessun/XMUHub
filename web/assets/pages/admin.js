@@ -1,13 +1,39 @@
-import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, pathText, resourceItem, toast, tree, $ } from '../app.js';
+import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, pathText, preview, resourceItem, toast, tree, $ } from '../app.js';
 
 let me;
 
+/** 类型 picker grouped by tag: choosing a word sets both the name's type word and the tag. */
+function typeSelect(M, r) {
+  const cur = r.name.type_word;
+  const groups = M.tags.map((t) => {
+    const words = M.type_words.filter((w) => w.tag === t.code);
+    return words.length ? `<optgroup label="${t.code} ${t.label}">${words.map((w) => `<option value="${w.word}|${t.code}"${w.word === cur && t.code === r.tag.code ? ' selected' : ''}>${w.word}</option>`).join('')}</optgroup>` : '';
+  }).join('');
+  const known = M.type_words.some((w) => w.word === cur && w.tag === r.tag.code);
+  return `<select class="input" data-f="type" title="类型 / 标签" style="max-width:150px;min-height:30px;padding:2px 6px">${known ? '' : `<option value="${esc(cur)}|${r.tag.code}" selected>${esc(cur)}（${r.tag.label}）</option>`}${groups}</select>`;
+}
+
+/** Changes a resource's type word + tag, keeping every other name part. */
+async function retype(r, value) {
+  const [type_word, tag] = value.split('|');
+  const n = r.name;
+  return api(`/resources/${r.id}`, {
+    method: 'PATCH',
+    body: {
+      node: r.node.id, course: n.course, time: n.time, type_word, tag, paper: n.paper, with_answer: n.with_answer,
+      extra: n.extra, note: r.note, admin: { uncertain: !!r.uncertain, free_type: true },
+    },
+  });
+}
+
 /** A reviewable list of resources with per-item and bulk actions. */
-function queueUI(box, items, intro, actions) {
+async function queueUI(box, items, intro, actions) {
   if (!items.length) {
     box.innerHTML = '<div class="card empty"><b>这里是空的</b>辛苦了 ☕</div>';
     return;
   }
+  const M = await meta();
+  const byId = new Map(items.map((r) => [String(r.id), r]));
   box.innerHTML = `<section class="card"><p class="small muted">${intro}</p>
     <div class="bulkbar"><label class="small"><input type="checkbox" id="qall"> 全选</label>
       ${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-bulk="${a}">批量${l}</button>`).join('')}
@@ -18,15 +44,37 @@ function queueUI(box, items, intro, actions) {
         <span class="faint">${esc(r.original_name || '')}</span>
         ${r.uploader ? `<span class="faint">· ${esc(r.uploader.nickname)}</span>` : ''}<span class="faint">· ${ago(r.created_at)}</span>
         <span class="grow"></span>
-        <input class="input" placeholder="备注" style="max-width:200px;min-height:30px;padding:3px 8px">
+        ${typeSelect(M, r)}
+        <input class="input" data-f="note" placeholder="备注" style="max-width:180px;min-height:30px;padding:3px 8px">
+        <button class="btn sm" data-pv type="button">预览</button>
         ${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-a="${a}">${l}</button>`).join('')}
         <a class="btn sm" href="/r/${r.id}" target="_blank">打开</a>
       </div></div>`).join('')}</div></section>`;
   const act = async (wrap, action) => {
-    await api(`/resources/${wrap.dataset.id}/review`, { method: 'POST', body: { action, note: wrap.querySelector('input.input').value } });
+    await api(`/resources/${wrap.dataset.id}/review`, { method: 'POST', body: { action, note: wrap.querySelector('[data-f="note"]').value } });
     wrap.remove();
   };
+  box.onchange = async (e) => {
+    const sel = e.target.closest('[data-f="type"]');
+    if (!sel) return;
+    const wrap = sel.closest('[data-id]');
+    try {
+      const r = await retype(byId.get(wrap.dataset.id), sel.value);
+      byId.set(String(r.id), r);
+      wrap.querySelector('.title').textContent = r.title;
+      const tagEl = wrap.querySelector('.tag');
+      tagEl.className = `tag t-${r.tag.code}`;
+      tagEl.textContent = r.tag.label;
+      toast(`已改为 ${r.name.type_word}（${r.tag.label}）`);
+    } catch (err) { toast(err.message, true); }
+  };
   box.onclick = async (e) => {
+    const pv = e.target.closest('[data-pv]');
+    if (pv) {
+      const r = byId.get(pv.closest('[data-id]').dataset.id);
+      preview(r.id, modal(r.title, { wide: true }));
+      return;
+    }
     const one = e.target.closest('[data-a]');
     const bulk = e.target.closest('[data-bulk]');
     try {
@@ -46,15 +94,15 @@ function queueUI(box, items, intro, actions) {
 
 const panels = {
   async queue(box) {
-    queueUI(box, await api('/review'), '「待审核」来自贡献者，通过后才会公开；「待复核」来自可信贡献者，已公开。',
+    await queueUI(box, await api('/review'), '「待审核」来自贡献者，通过后才会公开；「待复核」来自可信贡献者，已公开。',
       [['approve', '通过', 'ok'], ['reject', '驳回', 'danger']]);
   },
   async uncertain(box) {
-    queueUI(box, await api('/review?status=pending&uncertain=true'), '导入时标注「不确定」的资料（扫描件或压缩包，分类未经内容核实）。打开确认后通过，或改分类后再通过。',
+    await queueUI(box, await api('/review?status=pending&uncertain=true'), '导入时标注「不确定」的资料（扫描件或压缩包，分类未经内容核实）。打开确认后通过，或改分类后再通过。',
       [['approve', '确认并公开', 'ok'], ['restrict', '设为仅内部', ''], ['reject', '驳回', 'danger']]);
   },
   async restricted(box) {
-    queueUI(box, await api('/review?status=restricted'), '「仅内部」资料不公开、不可搜索（勿外传、加密题库等）。确认获得授权后可以恢复发布。',
+    await queueUI(box, await api('/review?status=restricted'), '「仅内部」资料不公开、不可搜索（勿外传、加密题库等）。确认获得授权后可以恢复发布。',
       [['restore', '恢复发布', 'ok']]);
   },
   async reports(box) {
@@ -78,6 +126,34 @@ const panels = {
         else { await api(`/admin/reports/${it.dataset.id}/handle`, { method: 'POST', body: { note } }); it.remove(); toast('已处理'); }
       } catch (err) { toast(err.message, true); }
     };
+  },
+  async feedback(box, all = false) {
+    const list = await api(`/admin/feedback${all ? '?all=true' : ''}`);
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">用户从「意见反馈」页提交的问题和建议。</p><span class="grow"></span>
+        <label class="small"><input type="checkbox" id="fball"${all ? ' checked' : ''}> 显示已处理</label></div>
+      ${list.length ? list.map((f) => `<div class="item" data-id="${f.id}"><div class="body">
+        <div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(f.body)}</div>
+        <div class="meta"><span>${ago(f.created_at)}</span>${f.nickname ? `<span>${esc(f.nickname)}</span>` : '<span>未登录</span>'}${f.contact ? `<span>联系：${esc(f.contact)}</span>` : ''}${f.page ? `<span class="faint">${esc(f.page)}</span>` : ''}
+          ${f.handled ? `<span class="badge published">已处理${f.handled_by ? ` · ${esc(f.handled_by)}` : ''}</span>${f.handled_note ? `<span>${esc(f.handled_note)}</span>` : ''}` : ''}</div>
+        ${f.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="处理说明（选填）" style="max-width:260px;min-height:30px;padding:3px 8px"><button class="btn sm ok" data-a="done">标记已处理</button></div>`}
+      </div></div>`).join('') : '<div class="empty"><b>没有待处理的反馈</b></div>'}</section>`;
+    box.querySelector('#fball').onchange = (e) => panels.feedback(box, e.target.checked);
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a="done"]');
+      if (!b) return;
+      const it = b.closest('[data-id]');
+      try { await api(`/admin/feedback/${it.dataset.id}/handle`, { method: 'POST', body: { note: it.querySelector('input').value } }); toast('已处理'); panels.feedback(box, all); } catch (err) { toast(err.message, true); }
+    };
+  },
+  async log(box) {
+    const list = await api('/admin/reviews');
+    const A = { approve: ['通过', 'published'], reject: ['驳回', 'rejected'], remove: ['下架', 'removed'], restrict: ['仅内部', 'restricted'], restore: ['恢复发布', 'published'] };
+    box.innerHTML = `<section class="card scroll-x"><p class="small muted">最近 300 条审核操作（谁在什么时候通过、驳回或下架了哪份资料）。</p>
+      ${list.length ? `<table class="table"><thead><tr><th>时间</th><th>审核人</th><th>操作</th><th>资料</th><th>备注</th></tr></thead><tbody>
+      ${list.map((e) => `<tr><td class="small faint">${fmtDate(e.at, true)}</td><td>${esc(e.actor)}</td>
+        <td><span class="badge ${(A[e.action] || [])[1] || ''}">${(A[e.action] || [e.action])[0]}</span></td>
+        <td><a href="/r/${e.resource}" target="_blank">${esc(e.title || `#${e.resource}`)}</a></td><td class="small">${esc(e.note)}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty"><b>还没有审核记录</b>（记录从这次更新开始）</div>'}</section>`;
   },
   async nodes(box) {
     const list = await api('/review/nodes');
@@ -114,12 +190,12 @@ const panels = {
     const opts = (cur) => [1, 2, 3].filter((l) => l <= maxLevel || l === cur).map((l) => `<option value="${l}"${l === cur ? ' selected' : ''}${l > maxLevel ? ' disabled' : ''}>${LEVELS[l]}</option>`).join('');
     box.innerHTML = `<section class="card scroll-x">
       <form class="row" id="uq" style="margin-bottom:12px"><input class="input" id="uqv" value="${esc(q)}" placeholder="按邮箱或昵称搜索" style="max-width:280px"><button class="btn">搜索</button>
-        <span class="small muted">贡献者先审后发；可信贡献者先发后审。管理员由服务器上的管理员名单维护，这里最多设为审核员。${me.level < 4 ? '审核员只能调整贡献者和可信贡献者。' : ''}</span></form>
+        <span class="small muted">贡献者先审后发；可信贡献者先发后审。管理员由服务器上的管理员名单维护，这里最多设为审核员；同级之间不能互相封禁或调整。${me.level < 4 ? '审核员只能调整贡献者和可信贡献者。' : ''}</span></form>
       <table class="table"><thead><tr><th>昵称</th><th>邮箱</th><th>角色</th><th>上传</th><th>注册</th><th></th></tr></thead><tbody>
       ${list.map((u) => `<tr data-id="${u.id}"><td>${esc(u.nickname)}</td><td class="small">${esc(u.email)}${u.xmu ? ' <span class="badge published">厦大</span>' : ''}</td>
-        <td>${u.id === me.id || u.level === 4 ? `${LEVELS[u.level]}${u.level === 4 ? ' <span class="small faint">（名单）</span>' : ''}` : `<select class="input" data-f="level" style="min-height:30px;padding:2px 8px">${opts(u.level)}</select>`}</td>
+        <td>${u.id === me.id || u.level >= me.level ? `${LEVELS[u.level]}${u.level === 4 ? ' <span class="small faint">（名单）</span>' : ''}` : `<select class="input" data-f="level" style="min-height:30px;padding:2px 8px">${opts(u.level)}</select>`}</td>
         <td>${u.uploads}</td><td class="small faint">${fmtDate(u.created_at)}</td>
-        <td>${u.id === me.id ? '<span class="small faint">你自己</span>' : `<button class="btn sm ${u.banned ? '' : 'danger'}" data-a="ban">${u.banned ? '解除封禁' : '封禁'}</button>`}</td></tr>`).join('')}
+        <td>${u.id === me.id ? '<span class="small faint">你自己</span>' : u.level >= me.level ? '<span class="small faint">同级</span>' : `<button class="btn sm ${u.banned ? '' : 'danger'}" data-a="ban">${u.banned ? '解除封禁' : '封禁'}</button>`}</td></tr>`).join('')}
       </tbody></table></section>`;
     box.querySelector('#uq').onsubmit = (e) => { e.preventDefault(); panels.users(box, box.querySelector('#uqv').value); };
     box.onchange = async (e) => {

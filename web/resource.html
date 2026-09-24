@@ -14,6 +14,7 @@
 <main><div class="wrap">
   <div class="crumbs" id="crumbs"></div>
   <div class="layout-side">
+    <div class="stack">
     <section class="card">
       <h1 id="title" style="overflow-wrap:anywhere">加载中…</h1>
       <div class="row small muted" id="tags" style="margin-bottom:14px"></div>
@@ -21,6 +22,17 @@
       <p id="note" class="muted" style="white-space:pre-wrap" hidden></p>
       <dl class="kv" id="kv"></dl>
     </section>
+    <section class="card" id="pvcard"><div class="row"><h2 style="margin:0">在线预览</h2><span class="grow"></span><button class="btn sm" id="pvgo" type="button">加载预览</button></div>
+      <div id="pv" style="margin-top:12px"><p class="small muted">PDF、图片经国内镜像加载，Word / PPT / Excel 由微软在线查看器显示；预览不计下载次数。</p></div></section>
+    <section class="card" id="social">
+      <div class="row"><h2 style="margin:0">评分与评论</h2><span class="grow"></span><span id="ravg" class="small muted"></span></div>
+      <div class="row" style="margin:10px 0"><span class="small">我的评分</span><span class="rate" id="rate"></span><span class="small faint" id="ratehint"></span></div>
+      <form id="cf"><textarea class="input" id="cbody" maxlength="500" rows="3" placeholder="说说这份资料怎么样：是否完整、答案对不对、适合哪位老师的课…"></textarea>
+        <div class="row" style="margin-top:8px"><button class="btn primary sm">发表评论</button><span class="small faint" id="chint"></span></div></form>
+      <div id="clist" style="margin-top:12px"></div>
+    </section>
+    <section class="card" id="history" hidden><h2>审核记录</h2><div id="hlist" class="small"></div></section>
+    </div>
     <aside>
       <section class="card">
         <button class="btn primary lg" id="dl" style="width:100%">下载</button>

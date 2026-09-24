@@ -17,8 +17,9 @@
     <form id="f" autocomplete="on">
       <label class="field"><span>邮箱</span><input class="input" id="email" type="email" autocomplete="email" required></label>
       <div id="codebox" hidden><label class="field"><span>邮箱验证码</span><div class="row" style="flex-wrap:nowrap"><input class="input" id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button class="btn" id="sendcode" type="button" style="flex:none">获取验证码</button></div></label></div>
-      <div id="nickbox" hidden><label class="field"><span>昵称（仅审核员可见）</span><input class="input" id="nickname" maxlength="20"></label></div>
+      <div id="nickbox" hidden><label class="field"><span>昵称（仅审核员和评论区可见，一个字也行）</span><input class="input" id="nickname" maxlength="20"></label></div>
       <label class="field"><span id="pwlabel">密码</span><input class="input" id="password" type="password" autocomplete="current-password" minlength="8" required></label>
+      <div id="pw2box" hidden><label class="field"><span>再次输入密码</span><input class="input" id="password2" type="password" autocomplete="new-password" minlength="8"></label></div>
       <div id="msg"></div>
       <button class="btn primary lg" id="go" style="width:100%">登录</button>
     </form>

@@ -278,6 +278,9 @@ impl Hub {
             r.reviewed_by = Some(me.id);
             r.updated_at = now();
             st.put_resource(tx, r.clone())?;
+            let e = ReviewEvent { id: st.next_id(tx)?, resource: r.id, actor: me.id, action: action.to_string(), note: r.review_note.clone(), at: now() };
+            tx.put_review(&e)?;
+            st.reviews.push(e);
             let garbage = if r.status == Status::Rejected { Self::release_blob(st, tx, &r.blob)? } else { Vec::new() };
             Ok((r, garbage))
         })?;
@@ -419,7 +422,8 @@ impl Hub {
 
     // ---------------------------------------------------------------- downloads
 
-    pub fn download(&self, viewer: Viewer, id: Id) -> Result<DownloadPlan> {
+    /// Download plan. `count` = false for previews, which don't bump the counter.
+    pub fn download(&self, viewer: Viewer, id: Id, count: bool) -> Result<DownloadPlan> {
         let plan = {
             let st = self.st.read();
             let r = st
@@ -439,10 +443,12 @@ impl Hub {
                     .collect(),
             }
         };
-        if let Some(r) = self.st.write().resources.get_mut(&id) {
-            r.downloads += 1;
+        if count {
+            if let Some(r) = self.st.write().resources.get_mut(&id) {
+                r.downloads += 1;
+            }
+            self.dirty_downloads.lock().insert(id);
         }
-        self.dirty_downloads.lock().insert(id);
         Ok(plan)
     }
 }

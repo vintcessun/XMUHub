@@ -7,6 +7,8 @@
 mod accounts;
 mod imports;
 mod resources;
+mod social;
+mod tokens;
 mod tree;
 mod uploads;
 
@@ -24,6 +26,8 @@ use crate::storage::Storage;
 
 pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
+pub use social::{CommentView, RatingSummary, ReviewView};
+pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
@@ -67,6 +71,15 @@ pub(crate) struct State {
     blobs: HashMap<String, Blob>,
     /// Published resources in each node's subtree (recomputed after writes).
     counts: HashMap<Id, usize>,
+    /// Review audit trail, oldest first.
+    reviews: Vec<ReviewEvent>,
+    /// resource → user → stars
+    ratings: HashMap<Id, HashMap<Id, u8>>,
+    comments: HashMap<Id, Comment>,
+    comments_by_res: HashMap<Id, Vec<Id>>,
+    feedback: HashMap<Id, Feedback>,
+    tokens: HashMap<Id, ApiToken>,
+    token_by_hash: HashMap<[u8; 32], Id>,
 }
 
 impl State {
@@ -100,6 +113,24 @@ impl State {
         }
         for b in snap.blobs {
             st.blobs.insert(b.key.clone(), b);
+        }
+        st.reviews = snap.reviews;
+        st.reviews.sort_by_key(|e| e.id);
+        for r in snap.ratings {
+            st.ratings.entry(r.resource).or_default().insert(r.user, r.stars);
+        }
+        let mut comments = snap.comments;
+        comments.sort_by_key(|c| c.id);
+        for c in comments {
+            st.comments_by_res.entry(c.resource).or_default().push(c.id);
+            st.comments.insert(c.id, c);
+        }
+        for f in snap.feedback {
+            st.feedback.insert(f.id, f);
+        }
+        for t in snap.tokens {
+            st.token_by_hash.insert(t.hash, t.id);
+            st.tokens.insert(t.id, t);
         }
         st.rebuild_children();
         st.recount();
@@ -320,6 +351,17 @@ impl Hub {
         Ok(hub)
     }
 
+    /// Search rank multiplier (×100) for a node: courses first, empty nodes last.
+    fn node_weight(st: &State, n: &Node) -> u64 {
+        let base = match n.kind {
+            NodeKind::Course => 300,
+            NodeKind::Group => 200,
+            NodeKind::Level => 150,
+            NodeKind::Section => 100,
+        };
+        if st.counts.get(&n.id).copied().unwrap_or(0) == 0 { base / 3 } else { base }
+    }
+
     fn placement_parts(st: &State, node: Id) -> (Vec<Id>, String, String) {
         (st.ancestors(node), st.path_text(node), st.aliases_text(node))
     }
@@ -331,7 +373,7 @@ impl Hub {
                 let (anc, path, aliases) = Self::placement_parts(&st, n.id);
                 let parent_path = anc.iter().filter_map(|a| st.nodes.get(a)).map(|n| n.name.as_str()).collect::<Vec<_>>().join(" ");
                 let _ = path;
-                self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases })?;
+                self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n))?;
             }
         }
         for r in st.resources.values() {
@@ -366,6 +408,17 @@ impl Hub {
             st.recount();
         }
         let st = self.st.read();
+        // A resource changing state can flip its ancestors between empty and non-empty,
+        // which changes their search weight.
+        let mut nodes: Vec<Id> = nodes.to_vec();
+        for rid in resources {
+            if let Some(r) = st.resources.get(rid) {
+                nodes.push(r.node);
+                nodes.extend(st.ancestors(r.node));
+            }
+        }
+        nodes.sort_unstable();
+        nodes.dedup();
         for rid in resources {
             let Some(r) = st.resources.get(rid) else {
                 self.search.remove(DocType::Resource, *rid);
@@ -378,12 +431,12 @@ impl Hub {
                 self.search.remove(DocType::Resource, *rid);
             }
         }
-        for nid in nodes {
+        for nid in &nodes {
             match st.nodes.get(nid) {
                 Some(n) if !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section => {
                     let (anc, _, aliases) = Self::placement_parts(&st, n.id);
                     let parent_path = anc.iter().filter_map(|a| st.nodes.get(a)).map(|n| n.name.as_str()).collect::<Vec<_>>().join(" ");
-                    let _ = self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases });
+                    let _ = self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n));
                 }
                 _ => self.search.remove(DocType::Node, *nid),
             }

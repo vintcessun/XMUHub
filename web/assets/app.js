@@ -183,6 +183,7 @@ export async function layout(active) {
     ${active === 'home' || active === 'search' ? '<span class="grow"></span>' : `<form action="/search" role="search"><input name="q" value="${esc(q)}" placeholder="搜索课程、资料…" aria-label="搜索"></form>`}
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>
+      <a href="/help" data-k="help">教程</a>
       <a href="/admin" data-k="admin" hidden>审核</a>
       <a href="/me" data-k="me" id="nav-me">登录</a>
       <a href="/upload" data-k="upload" class="up">上传</a>
@@ -192,7 +193,8 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>XMUHub · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
+    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
+  if (active !== 'feedback') feedbackButton();
   const user = await me();
   const navMe = top.querySelector('#nav-me');
   if (user) {
@@ -221,7 +223,7 @@ function saveBlob(blob, name) {
  * Fetches one part, trying each URL in turn. A mirror that is reachable but crawling
  * (under ~150 KB/s after a few seconds) is abandoned for the next one.
  */
-async function fetchPart(part, urls, onBytes) {
+export async function fetchPart(part, urls, onBytes) {
   let lastErr;
   for (const [i, url] of urls.entries()) {
     const hasNext = i < urls.length - 1;
@@ -326,52 +328,10 @@ export function pwToggle(...inputs) {
 
 // ---------------------------------------------------------------- preview
 
-const INLINE = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', txt: 'text/plain;charset=utf-8', md: 'text/plain;charset=utf-8' };
-const OFFICE = { doc: 10, docx: 10, ppt: 10, pptx: 10, pptm: 10, xls: 5, xlsx: 5 };
-const PREVIEW_MAX = 60 * 1024 * 1024;
-
-/**
- * Renders a preview of a resource into `box`. PDFs, images and text are fetched in the
- * browser through a mirror that allows cross-origin reads (never through our server);
- * Office files use Microsoft's online viewer. Previews don't count as downloads.
- */
+/** Renders a preview of resource `id` into `box` (code loaded on first use). */
 export async function preview(id, box) {
-  box.innerHTML = '<p class="small muted">正在加载预览…</p>';
-  let plan;
-  try { plan = await api(`/resources/${id}/download?peek=1`); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
-  const ext = (/\.([^.]+)$/.exec(plan.filename)?.[1] || '').toLowerCase();
-  const part = plan.parts[0];
-  const fallback = (msg) => { box.innerHTML = `<div class="notice">${msg}</div>`; };
-  if (plan.parts.length === 1 && INLINE[ext]) {
-    if (plan.size > PREVIEW_MAX) return fallback(`文件较大（${fmtSize(plan.size)}），请下载后查看。`);
-    const urls = part.preview_urls || [];
-    if (!urls.length) return fallback('暂时没有支持在线预览的镜像，请下载后查看。');
-    box.innerHTML = '<p class="small muted">正在通过镜像加载预览…</p><div class="progress"><i></i></div>';
-    const bar = box.querySelector('.progress i');
-    let blob;
-    try {
-      blob = await fetchPart(part, urls, (n) => { bar.style.width = `${Math.round((n / part.size) * 100)}%`; });
-    } catch (e) {
-      return fallback(`预览加载失败（${esc(e.message)}），请下载后查看。`);
-    }
-    if (!box.isConnected) return;
-    const url = URL.createObjectURL(new Blob([blob], { type: INLINE[ext] }));
-    const open = `<p class="small" style="margin:8px 0 0"><a href="${url}" target="_blank" rel="noopener">在新标签页打开</a> · 手机上显示空白时点这里或直接下载</p>`;
-    box.innerHTML = (INLINE[ext].startsWith('image/')
-      ? `<img class="preview-img" src="${url}" alt="预览">`
-      : `<iframe class="preview-frame" src="${url}" title="预览"></iframe>`) + open;
-    return;
-  }
-  if (plan.parts.length === 1 && OFFICE[ext]) {
-    if (plan.size > OFFICE[ext] * 1024 * 1024) return fallback(`文件较大（${fmtSize(plan.size)}），在线预览最大 ${OFFICE[ext]} MB，请下载后查看。`);
-    // Microsoft fetches the file itself, so give it the plain GitHub URL (the last one).
-    const direct = part.urls[part.urls.length - 1];
-    const src = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(direct)}`;
-    box.innerHTML = `<iframe class="preview-frame" src="${esc(src)}" title="预览"></iframe>
-      <p class="small faint" style="margin:8px 0 0">由微软 Office 在线查看器显示，加载可能需要十几秒。</p>`;
-    return;
-  }
-  fallback(plan.parts.length > 1 ? '分卷文件不支持在线预览，请下载后查看。' : `.${esc(ext || '未知')} 文件不支持在线预览，请下载后查看。`);
+  const m = await import('./preview.js');
+  return m.preview(id, box);
 }
 
 // ---------------------------------------------------------------- node picker
@@ -423,4 +383,48 @@ export async function moveResources(ids) {
     toast(`已移动 ${r.moved} 份到「${n.name}」`);
     return r.moved;
   } catch (e) { toast(e.message, true); return 0; }
+}
+
+// ---------------------------------------------------------------- feedback button
+
+/** A floating 「反馈」 button on every page; the form goes to the admin 反馈 tab. */
+function feedbackButton() {
+  if (document.querySelector('.fbfab')) return;
+  const b = document.createElement('button');
+  b.className = 'fbfab';
+  b.type = 'button';
+  b.textContent = '反馈';
+  b.title = '意见反馈';
+  b.onclick = () => {
+    const body = modal('意见反馈');
+    const DK = 'xmuhub.feedback.draft';
+    let d = {};
+    try { d = JSON.parse(store.get(DK) || '{}') || {}; } catch { /* ignore */ }
+    body.innerHTML = `<form id="fbq">
+      <p class="small muted" style="margin-top:0">遇到问题、想要新功能、资料分类不对，都可以说。${COMMUNITY ? `也可以加${esc(COMMUNITY)}。` : ''}</p>
+      <label class="field"><span>反馈内容 <em>*</em></span><textarea class="input" id="fbq_b" rows="5" maxlength="2000" required placeholder="尽量写清楚：在哪个页面、做了什么、看到了什么。"></textarea></label>
+      <label class="field"><span>联系方式（选填：邮箱 / QQ）</span><input class="input" id="fbq_c" maxlength="100"></label>
+      <p class="small faint">会自动附上当前页面地址：${esc(location.pathname + location.search)}</p>
+      <button class="btn primary">提交</button></form>`;
+    const tb = body.querySelector('#fbq_b');
+    const tc = body.querySelector('#fbq_c');
+    tb.value = d.body || '';
+    tc.value = d.contact || '';
+    const save = () => store.set(DK, tb.value.trim() || tc.value.trim() ? JSON.stringify({ body: tb.value, contact: tc.value }) : null);
+    tb.oninput = save;
+    tc.oninput = save;
+    tb.focus();
+    body.querySelector('#fbq').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = body.querySelector('#fbq button');
+      btn.disabled = true;
+      try {
+        await api('/feedback', { method: 'POST', body: { body: tb.value, contact: tc.value, page: location.pathname + location.search } });
+        store.set(DK, null);
+        body.innerHTML = '<div class="notice ok">谢谢！我们已经收到你的反馈。</div>';
+        setTimeout(() => body.close(), 1600);
+      } catch (err) { toast(err.message, true); btn.disabled = false; }
+    };
+  };
+  document.body.appendChild(b);
 }

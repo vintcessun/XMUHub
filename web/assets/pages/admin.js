@@ -173,9 +173,10 @@ const panels = {
       ${list.length ? list.map((r) => `
       <div class="item" data-id="${r.id}" data-res="${r.resource ? r.resource.id : ''}"><div class="body">
         <div><b>${esc(r.reason)}</b></div>
-        <div class="meta"><span>${ago(r.created_at)}</span>${r.contact ? `<span>联系：${esc(r.contact)}</span>` : ''}
+        <div class="meta"><span>${ago(r.created_at)}</span>${r.contact ? `<span>投诉人：${esc(r.contact)}</span>` : ''}
           ${r.resource ? `<a href="/r/${r.resource.id}" target="_blank">${esc(r.resource.title)}</a><span class="badge ${esc(r.resource.status)}">${STATUS[r.resource.status] || esc(r.resource.status)}</span>` : '<span>资料已不存在</span>'}
-          ${r.handled ? `<span class="badge published">已处理${r.handled_by ? ` · ${esc(r.handled_by)}` : ''}</span>${r.handled_note ? `<span>${esc(r.handled_note)}</span>` : ''}` : ''}</div>
+          ${r.handled ? `<span class="badge published">已处理${r.handled_by ? ` · ${esc(r.handled_by)}` : ''}</span>${r.handled_note ? `<span>${esc(r.handled_note)}</span>` : ''}` : ''}
+          ${me.level >= 4 ? '<a href="#" class="small" data-a="delete" style="color:var(--bad)">删除</a>' : ''}</div>
         ${r.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="处理说明" style="max-width:260px;min-height:30px;padding:3px 8px">
           ${r.resource && r.resource.status !== 'removed' ? '<button class="btn sm danger" data-a="remove">下架</button>' : ''}<button class="btn sm ok" data-a="done">标记已处理</button></div>`}
       </div></div>`).join('') : `<div class="empty"><b>${all ? '还没有投诉' : '没有待处理的投诉'}</b>${all ? '' : '勾选右上角「显示已处理」可查看历史'}</div>`}</section>`;
@@ -184,8 +185,16 @@ const panels = {
       const b = e.target.closest('[data-a]');
       if (!b) return;
       const it = b.closest('[data-id]');
-      const note = it.querySelector('input').value;
+      const note = it.querySelector('input')?.value || '';
       try {
+        if (b.dataset.a === 'delete') {
+          e.preventDefault();
+          if (!confirm('删除这条投诉记录？（只删记录，不影响资料）')) return;
+          await api(`/admin/reports/${it.dataset.id}`, { method: 'DELETE' });
+          toast('已删除');
+          panels.reports(box, all);
+          return;
+        }
         if (b.dataset.a === 'remove') { await api(`/resources/${it.dataset.res}/review`, { method: 'POST', body: { action: 'remove', note: note || '收到投诉，已下架' } }); toast('已下架'); panels.reports(box, all); }
         else { await api(`/admin/reports/${it.dataset.id}/handle`, { method: 'POST', body: { note } }); toast('已处理，可在「显示已处理」中查看'); panels.reports(box, all); }
       } catch (err) { toast(err.message, true); }

@@ -57,7 +57,10 @@ impl Site {
             let (br, gz) = if compressible(mime) && raw.len() > 512 {
                 let mut br = Vec::new();
                 {
-                    let mut w = brotli::CompressorWriter::new(&mut br, 4096, 11, 22);
+                    // Max quality for our own small files; big vendor libraries (pdf.js, SheetJS…)
+                    // at quality 11 would add seconds to every start-up for a few % of size.
+                    let quality = if raw.len() > 128 * 1024 { 6 } else { 11 };
+                    let mut w = brotli::CompressorWriter::new(&mut br, 4096, quality, 22);
                     w.write_all(&raw)?;
                 }
                 let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());

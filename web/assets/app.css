@@ -368,3 +368,31 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .kpi span { font-size: 12px; color: var(--muted); }
 .selbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .item .rsel { margin: 4px 8px 0 0; flex: none; }
+.pdfview { max-height: min(78vh, 1000px); overflow: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; -webkit-overflow-scrolling: touch; }
+.pdfpage { background: #fff; margin: 0 auto 8px; width: 100%; max-width: 900px; box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.pdfpage canvas { width: 100%; height: 100%; display: block; }
+.help { display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start; }
+.help-toc { position: sticky; top: 76px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.help-toc a { color: var(--muted); }
+.help-body { min-width: 0; }
+.help-body .card + .card { margin-top: 16px; }
+.help-body section { scroll-margin-top: 76px; }
+.help-body li { margin: 6px 0; line-height: 1.7; }
+@media (max-width: 860px) { .help { grid-template-columns: 1fr; } .help-toc { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px 12px; } }
+pre.textview { max-height: min(75vh, 900px); overflow: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.docx-host, .sheet-host, .pptx-host { max-height: min(78vh, 1000px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); -webkit-overflow-scrolling: touch; }
+.docx-host .docx-wrapper { background: transparent !important; padding: 8px !important; }
+.sheet-host { background: #fff; color: #111; }
+.sheet-host table { border-collapse: collapse; font-size: 13px; }
+.sheet-host td, .sheet-host th { border: 1px solid #d9dce3; padding: 3px 6px; white-space: nowrap; max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.sheet-tabs { margin-bottom: 8px; }
+.pptx-host { background: #fff; padding: 8px 0; }
+.epub-host { height: min(72vh, 820px); border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+.archive-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.archive-list li { display: flex; gap: 10px; justify-content: space-between; padding: 6px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+.archive-list li:first-child { border-top: 0; }
+.archive-list a { overflow-wrap: anywhere; }
+.archive-list a.on { font-weight: 700; }
+.fbfab { position: fixed; right: 16px; bottom: 16px; z-index: 40; border: 0; border-radius: 999px; padding: 10px 16px; background: var(--navy); color: var(--on-navy); box-shadow: var(--shadow); cursor: pointer; font-size: 14px; }
+@media (max-width: 640px) { .fbfab { right: 12px; bottom: 12px; padding: 8px 13px; font-size: 13px; } }
+@media print { .fbfab { display: none; } }

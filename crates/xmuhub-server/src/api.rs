@@ -283,6 +283,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/review/nodes", get(pending_nodes))
         .route("/admin/reports", get(reports))
         .route("/admin/reports/{id}/handle", post(handle_report))
+        .route("/admin/reports/{id}", axum::routing::delete(delete_report))
         .route("/admin/feedback", get(feedback_list))
         .route("/admin/feedback/{id}/handle", post(handle_feedback))
         .route("/admin/reviews", get(review_log))
@@ -642,15 +643,13 @@ async fn review(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<Rev
 #[derive(Deserialize)]
 struct ReportIn {
     reason: String,
-    #[serde(default)]
-    contact: String,
 }
 
 async fn report(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<Id>, Json(b): Json<ReportIn>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let ip = client_ip(&h);
-    blocking(move || hub.report(Viewer { user: user.as_ref() }, id, &b.reason, &b.contact, &ip)).await?;
+    blocking(move || hub.report(Viewer { user: user.as_ref() }, id, &b.reason, &ip)).await?;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -896,6 +895,13 @@ async fn reports(State(app): S, auth: Auth, Query(q): Query<ReportsQ>) -> R<Json
 struct HandleIn {
     #[serde(default)]
     note: String,
+}
+
+async fn delete_report(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_report(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn handle_report(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<HandleIn>) -> R<Json<Value>> {

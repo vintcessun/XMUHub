@@ -217,6 +217,10 @@ impl Tx<'_> {
         self.txn.open_table(SESSIONS)?.remove(hash.as_slice())?;
         Ok(())
     }
+    pub fn del_report(&self, id: Id) -> Result<()> {
+        self.txn.open_table(REPORTS)?.remove(id)?;
+        Ok(())
+    }
     pub fn put_report(&self, r: &Report) -> Result<()> {
         self.txn.open_table(REPORTS)?.insert(r.id, encode(r).as_slice())?;
         Ok(())

@@ -435,7 +435,9 @@ impl Hub {
 
     // ---------------------------------------------------------------- reports
 
-    pub fn report(&self, viewer: Viewer, resource: Id, reason: &str, contact: &str, ip: &str) -> Result<Report> {
+    /// Files a complaint. Only signed-in users may; the contact is their account email.
+    pub fn report(&self, viewer: Viewer, resource: Id, reason: &str, ip: &str) -> Result<Report> {
+        let me = viewer.at_least(Level::Contributor)?.clone();
         let reason = clean(reason, 1000);
         if reason.chars().count() < 4 {
             return Err(bad("请写明投诉或下架理由"));
@@ -452,8 +454,8 @@ impl Hub {
                 id: st.next_id(tx)?,
                 resource,
                 reason,
-                contact: clean(contact, 100),
-                reporter: viewer.id(),
+                contact: me.email.clone(),
+                reporter: Some(me.id),
                 ip: clean(ip, 64),
                 created_at: now(),
                 handled: false,
@@ -463,6 +465,15 @@ impl Hub {
             tx.put_report(&r)?;
             st.reports.insert(r.id, r.clone());
             Ok(r)
+        })
+    }
+
+    /// Deletes a complaint outright (test entries, spam). Admins only.
+    pub fn delete_report(&self, actor: Viewer, id: Id) -> Result<()> {
+        actor.at_least(Level::Admin)?;
+        self.mutate(|st, tx| {
+            st.reports.remove(&id).ok_or(Error::NotFound("投诉"))?;
+            tx.del_report(id)
         })
     }
 

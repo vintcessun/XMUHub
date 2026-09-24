@@ -46,6 +46,11 @@ async function load() {
   $('#notice').innerHTML = (note ? `<div class="notice ${note[0]}">${note[1]}</div>` : '')
     + (r.uncertain ? '<div class="notice">这份资料的分类或内容尚未核实，欢迎审核员确认。</div>' : '');
   $('#dl').disabled = r.status === 'rejected';
+  // Small previewable files load their preview right away (through mirrors, not our server).
+  const ext = (r.ext || '').toLowerCase();
+  const previewable = !['caj', 'kdh', 'nh', 'exe', 'msi', 'apk', 'dmg'].includes(ext);
+  $('#pvcard').hidden = !previewable || r.status === 'rejected';
+  if (previewable && r.size <= 8 * 1024 * 1024 && !$('#pvgo').hidden) { $('#pvgo').hidden = true; preview(id, $('#pv')); }
   $('#dl').textContent = `下载 · ${fmtSize(r.size)}`;
 
   const me = await mePromise;
@@ -148,11 +153,13 @@ $('#dl').onclick = async () => {
 
 $('#report').onclick = async (e) => {
   e.preventDefault();
-  const reason = prompt('请写明投诉或申请下架的理由（例如：侵犯版权 / 含个人隐私 / 分类错误）：');
+  const user = await mePromise;
+  if (!user) { toast('请先登录再投诉', true); setTimeout(() => { location.href = loginUrl(); }, 800); return; }
+  const reason = prompt(`请写明投诉或申请下架的理由（例如：侵犯版权 / 含个人隐私 / 分类错误）。
+处理结果会通过你的账号邮箱 ${user.email} 联系你。`);
   if (!reason) return;
-  const contact = prompt('联系方式（选填，方便我们回复你）：') || '';
   try {
-    await api(`/resources/${id}/report`, { method: 'POST', body: { reason, contact } });
+    await api(`/resources/${id}/report`, { method: 'POST', body: { reason } });
     toast('已收到，我们会在 48 小时内处理');
   } catch (err) { toast(err.message, true); }
 };

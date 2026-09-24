@@ -70,7 +70,7 @@ window.addEventListener('beforeunload', (e) => {
   }
   M = await meta();
   $('#form').hidden = false;
-  $('#droptip').textContent = `单个文件最大 ${fmtSize(M.limits.max_file)}，大文件会自动分卷上传`;
+  $('#droptip').textContent = `支持任意格式：PDF、Word、PPT、Excel、图片、压缩包等；单个文件最大 ${fmtSize(M.limits.max_file)}，大文件自动分卷上传`;
   $('#b_type').innerHTML += M.type_words.map((t) => `<option>${t.word}</option>`).join('');
   $('#b_year').innerHTML += yearOptions('');
   const startNode = Number(qs.get('node')) || draft.node;

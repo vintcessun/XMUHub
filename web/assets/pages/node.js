@@ -3,7 +3,7 @@ import { api, esc, layout, moveResources, nodeCard, nodeTitle, pathId, resourceI
 const id = pathId();
 const mePromise = layout('browse');
 
-// A 公共课 courses keep the four fixed folders of the scheme.
+// 公共课 courses keep the four fixed folders of the scheme.
 const BUCKETS = [[1, '01 真题与答案'], [2, '02 提纲笔记'], [3, '03 题库刷题'], [4, '04 课件与拓展']];
 let data = null;
 const params = new URLSearchParams(location.search);
@@ -124,6 +124,8 @@ function renderEditor(n) {
         <select class="input" id="c_kind" style="max-width:120px"><option value="course">课程</option><option value="level">层次</option><option value="group">分组</option></select>
         <button class="btn sm" id="c_go">新建下级</button>
         <span class="grow"></span>
+        <input class="input" id="p_to" placeholder="移到上级分类 ID" style="max-width:130px">
+        <button class="btn sm" id="p_go">移动</button>
         <input class="input" id="m_into" placeholder="合并到分类 ID" style="max-width:130px">
         <button class="btn danger sm" id="m_go">合并</button>
         <button class="btn danger sm" id="d_go">删除（仅空分类）</button>
@@ -139,6 +141,11 @@ function renderEditor(n) {
     },
   }), '已保存');
   $('#c_go').onclick = () => call(() => api('/nodes', { method: 'POST', body: { parent: n.id, kind: $('#c_kind').value, name: $('#c_name').value, bucketed: n.bucketed } }), '已新建');
+  $('#p_go').onclick = () => {
+    const to = Number($('#p_to').value);
+    if (!to) return toast('填写新的上级分类 ID', true);
+    call(() => api(`/nodes/${n.id}`, { method: 'PATCH', body: { parent: to } }), '已移动（连同下级分类和资料）');
+  };
   $('#m_go').onclick = async () => {
     const into = Number($('#m_into').value);
     if (!into) return toast('填写目标分类 ID', true);

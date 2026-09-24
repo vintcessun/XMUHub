@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="鹭岛书阁">
-  <rect width="64" height="64" rx="15" fill="#bd6b4e"/>
-  <path d="M17 15h24l8 8v26H17z" fill="#fff9f2"/>
-  <path d="M41 15v9h8" fill="#ead5c4"/>
-  <path d="M24 31h18M24 38h15M24 45h11" fill="none" stroke="#a8523b" stroke-width="2.5" stroke-linecap="round"/>
-</svg>

@@ -4,6 +4,7 @@ mod config;
 mod mailer;
 mod mcp;
 mod relay;
+mod thumbs;
 mod transfer;
 mod web;
 
@@ -177,6 +178,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     });
     if let Some(gh) = &github {
         transfer::spawn(hub.clone(), gh.clone());
+        thumbs::spawn(hub.clone(), gh.clone());
     }
     spawn_jobs(app.clone(), github, probe_http);
 

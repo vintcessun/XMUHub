@@ -396,3 +396,10 @@ pre.textview { max-height: min(75vh, 900px); overflow: auto; background: var(--s
 .fbfab { position: fixed; right: 16px; bottom: 16px; z-index: 40; border: 0; border-radius: 999px; padding: 10px 16px; background: var(--navy); color: var(--on-navy); box-shadow: var(--shadow); cursor: pointer; font-size: 14px; }
 @media (max-width: 640px) { .fbfab { right: 12px; bottom: 12px; padding: 8px 13px; font-size: 13px; } }
 @media print { .fbfab { display: none; } }
+.item .qpv { align-self: center; flex: none; margin-left: auto; }
+.qpv-nav { display: inline-flex; gap: 6px; align-items: center; margin-left: 10px; flex-wrap: wrap; }
+.modal-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.modal-head { flex-wrap: wrap; }
+@media (max-width: 640px) { .modal { padding: 0; } .modal-box, .modal-box.wide { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; } .qpv-nav { margin-left: 0; width: 100%; } }
+.item .thumb { width: 66px; height: 88px; flex: none; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
+@media (max-width: 640px) { .item .thumb { width: 54px; height: 72px; } }

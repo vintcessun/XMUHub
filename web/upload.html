@@ -19,12 +19,12 @@
     <section class="card">
       <h2>1 · 选择分类</h2>
       <div id="nodepick">
-        <div class="field suggest"><span>搜索课程或分类 <em>*</em></span><input class="input" id="nq" placeholder="课程名 / 代码 / 拼音首字母，如 wjf、A2-1" autocomplete="off"><ul id="ns" hidden></ul></div>
-        <p class="small muted">也可以 <a href="/browse?pick=1" id="browsepick">在分类树里选</a>。专业课找不到课程？<a href="#" id="newcourse">在学院下新建课程</a></p>
+        <div class="field suggest"><span>搜索课程或分类 <em>*</em></span><div class="row" style="flex-wrap:nowrap"><input class="input" id="nq" placeholder="课程名 / 代码 / 拼音首字母，如 wjf、A2-1" autocomplete="off"><button class="btn" id="newcourse" type="button" style="flex:none">＋ 新增课程</button></div><ul id="ns" hidden></ul></div>
+        <p class="small muted">也可以 <a href="/browse?pick=1" id="browsepick">在分类树里选</a>。找不到你的课程？点「新增课程」，选好所属学院或分组、填上课程名即可，审核员会确认。</p>
       </div>
       <div id="coursenew" hidden>
         <div class="fields-2">
-          <label class="field"><span>所属学院 <em>*</em></span><select class="input" id="nc_parent"></select></label>
+          <label class="field"><span>所属学院 / 分组 <em>*</em></span><select class="input" id="nc_parent"></select></label>
           <label class="field"><span>课程名称（教务全称） <em>*</em></span><input class="input" id="nc_name" maxlength="60"></label>
         </div>
         <div class="row"><button class="btn sm primary" id="nc_go" type="button">创建</button><a href="#" id="backpick" class="small">返回搜索</a><span class="small muted">新课程会由审核员确认。</span></div>

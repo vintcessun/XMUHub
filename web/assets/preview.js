@@ -18,7 +18,8 @@ const WORD = new Set(['docx', 'docm', 'dotx']);
 const SHEET = new Set(['xlsx', 'xlsm', 'xls', 'xlsb', 'ods', 'csv', 'tsv', 'et']);
 const SLIDES = new Set(['pptx', 'ppsx', 'pptm']);
 const ARCHIVE = new Set(['zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'bz2', 'xz', 'cab', 'iso']);
-/** Binary Office formats no browser library reads well: Microsoft's viewer (size limit in MB). */
+/** Binary Office 97–2003 formats: text is extracted in the browser; Microsoft's viewer
+ * (size limit in MB) is offered for the full layout. */
 const LEGACY_OFFICE = { doc: 10, ppt: 10, pps: 10, dot: 10 };
 const NOPE = {
   caj: 'CAJ 是知网的专有格式，只能用 CAJViewer 打开，浏览器无法预览。',
@@ -56,7 +57,6 @@ export async function preview(id, box) {
   try { plan = await api(`/resources/${id}/download?peek=1`); } catch (e) { note(box, esc(e.message)); return; }
   const ext = extOf(plan.filename);
   if (NOPE[ext]) return note(box, NOPE[ext]);
-  if (LEGACY_OFFICE[ext] && plan.parts.length === 1) return officeViewer(box, plan, ext);
   if (plan.size > MAX) return note(box, `文件较大（${fmtSize(plan.size)}），在线预览最多 ${fmtSize(MAX)}，请下载后查看。`);
   if (plan.parts.some((p) => !(p.preview_urls || []).length)) return note(box, '暂时没有支持在线预览的下载线路，请稍后再试或直接下载。');
   box.innerHTML = '<p class="small muted">正在通过镜像加载预览…</p><div class="progress"><i></i></div>';
@@ -72,11 +72,11 @@ export async function preview(id, box) {
     return note(box, `预览加载失败（${esc(e.message)}），请稍后再试或直接下载。`);
   }
   if (!box.isConnected) return;
-  await renderBlob(box, new Blob(blobs), ext, plan.filename);
+  await renderBlob(box, new Blob(blobs), ext, plan.filename, plan);
 }
 
 /** Renders file contents by type; also used for files inside archives. */
-export async function renderBlob(box, blob, ext, name) {
+export async function renderBlob(box, blob, ext, name, plan = null) {
   try {
     if (!ext || !knows(ext)) ext = await sniff(blob) || ext;
     if (ext === 'pdf') return await pdf(box, blob);
@@ -89,8 +89,9 @@ export async function renderBlob(box, blob, ext, name) {
     if (ext === 'epub') return await epub(box, blob);
     if (ARCHIVE.has(ext)) return await archive(box, blob, name);
     if (TEXT.has(ext) || ext === 'text') return await text(box, blob, ext);
+    if (ext === 'doc' || ext === 'dot') return await legacyText(box, blob, 'doc', plan);
+    if (ext === 'ppt' || ext === 'pps') return await legacyText(box, blob, 'ppt', plan);
     if (NOPE[ext]) return note(box, NOPE[ext]);
-    if (LEGACY_OFFICE[ext]) return note(box, `.${esc(ext)} 是旧版 Office 格式，压缩包里的这类文件无法预览，请下载后查看。`);
     note(box, `无法识别的文件格式${ext ? `（.${esc(ext)}）` : ''}，请下载后用相应软件打开。大小 ${fmtSize(blob.size)}。`);
   } catch (e) {
     const u = URL.createObjectURL(blob);
@@ -238,13 +239,105 @@ async function slides(box, blob) {
   await viewer.preview(await blob.arrayBuffer());
 }
 
+/** Microsoft's online viewer for the full layout of a legacy Office file. */
 function officeViewer(box, plan, ext) {
-  if (plan.size > LEGACY_OFFICE[ext] * 1024 * 1024) return note(box, `旧版 .${ext} 文件较大（${fmtSize(plan.size)}），无法在线预览，请下载后查看。`);
+  if (plan.size > LEGACY_OFFICE[ext] * 1024 * 1024) return note(box, `文件较大（${fmtSize(plan.size)}），微软查看器打不开，请下载后查看。`);
   // Microsoft fetches the file itself, so it gets the plain GitHub URL (the last one).
   const direct = plan.parts[0].urls[plan.parts[0].urls.length - 1];
   const src = `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(direct)}`;
   box.innerHTML = `<iframe class="preview-frame" src="${esc(src)}" title="预览"></iframe>
-    <p class="small faint" style="margin:8px 0 0">旧版 .${ext} 格式由微软 Office 在线查看器显示，加载需要十几秒；显示空白说明当前网络连不上微软，请直接下载。</p>`;
+    <p class="small faint" style="margin:8px 0 0">由微软 Office 在线查看器显示，加载需要十几秒；一直空白说明当前网络连不上微软，请直接下载。</p>`;
+}
+
+// ---------------------------------------------------------------- Office 97–2003 text
+
+/** Shows the text of a .doc / .ppt (read from the binary format), with the full-layout
+ * Microsoft viewer as an option when the file is a whole resource. */
+async function legacyText(box, blob, kind, plan) {
+  await script(`${V}/xlsx-0.18.5/xlsx.full.min.js`);
+  const cfb = window.XLSX.CFB.read(new Uint8Array(await blob.arrayBuffer()), { type: 'array' });
+  const s = kind === 'doc' ? docText(cfb) : pptText(cfb);
+  if (!s.trim()) throw new Error('没有读到文字（可能是扫描件或加密文件）');
+  box.innerHTML = `<p class="small muted" style="margin:0 0 8px">旧版 .${kind} 格式，这里只显示文字内容${plan && plan.parts.length === 1 ? '，<a href="#" data-ms>用微软查看器看完整排版</a>' : ''}。</p><pre class="textview"></pre>`;
+  box.querySelector('pre').textContent = s;
+  const ms = box.querySelector('[data-ms]');
+  if (ms) ms.onclick = (e) => { e.preventDefault(); officeViewer(box, plan, kind); };
+}
+
+function stream(cfb, name) {
+  const f = window.XLSX.CFB.find(cfb, name);
+  if (!f || !f.content) return null;
+  const c = f.content;
+  return c instanceof Uint8Array ? c : Uint8Array.from(c);
+}
+
+/** Word 97–2003: walk the piece table (Clx) and decode each piece. */
+function docText(cfb) {
+  const wd = stream(cfb, 'WordDocument');
+  if (!wd) throw new Error('不是 Word 97–2003 文件');
+  const dv = new DataView(wd.buffer, wd.byteOffset, wd.byteLength);
+  const flags = dv.getUint16(0x0a, true);
+  if (flags & 0x0100) throw new Error('文件已加密');
+  const table = stream(cfb, flags & 0x0200 ? '1Table' : '0Table');
+  if (!table) throw new Error('缺少 Table 流');
+  const fcClx = dv.getUint32(0x01a2, true);
+  const lcbClx = dv.getUint32(0x01a6, true);
+  const tv = new DataView(table.buffer, table.byteOffset, table.byteLength);
+  let p = fcClx;
+  const end = fcClx + lcbClx;
+  while (p < end && table[p] === 0x01) p += 3 + tv.getUint16(p + 1, true); // skip Prc
+  if (table[p] !== 0x02) throw new Error('无法解析文字');
+  const lcb = tv.getUint32(p + 1, true);
+  const plc = p + 5;
+  const n = (lcb - 4) / 12;
+  const utf16 = new TextDecoder('utf-16le');
+  const ansi = new TextDecoder('windows-1252');
+  let out = '';
+  for (let i = 0; i < n && out.length < 2_000_000; i++) {
+    const cp0 = tv.getUint32(plc + i * 4, true);
+    const cp1 = tv.getUint32(plc + (i + 1) * 4, true);
+    const fc = tv.getUint32(plc + (n + 1) * 4 + i * 8 + 2, true);
+    const len = cp1 - cp0;
+    if (fc & 0x40000000) {
+      const off = (fc & 0x3fffffff) / 2;
+      out += ansi.decode(wd.subarray(off, off + len));
+    } else {
+      out += utf16.decode(wd.subarray(fc, fc + len * 2));
+    }
+  }
+  return cleanText(out.replace(/\x13[^\x14\x15]*\x14?/g, '').replace(/\x15/g, ''));
+}
+
+/** PowerPoint 97–2003: collect text atoms from the record tree, slide by slide. */
+function pptText(cfb) {
+  const pd = stream(cfb, 'PowerPoint Document');
+  if (!pd) throw new Error('不是 PowerPoint 97–2003 文件');
+  const dv = new DataView(pd.buffer, pd.byteOffset, pd.byteLength);
+  const utf16 = new TextDecoder('utf-16le');
+  const ansi = new TextDecoder('windows-1252');
+  const parts = [];
+  let slide = 0;
+  const walk = (start, end, depth) => {
+    let p = start;
+    while (p + 8 <= end && depth < 16) {
+      const verInst = dv.getUint16(p, true);
+      const type = dv.getUint16(p + 2, true);
+      const len = dv.getUint32(p + 4, true);
+      const body = p + 8;
+      if (body + len > end) break;
+      if (type === 0x03ee) { slide++; parts.push(`\n── 第 ${slide} 页 ──`); } // Slide container
+      if ((verInst & 0x0f) === 0x0f) walk(body, body + len, depth + 1);
+      else if (type === 0x0fa0) parts.push(utf16.decode(pd.subarray(body, body + len)));
+      else if (type === 0x0fa8) parts.push(ansi.decode(pd.subarray(body, body + len)));
+      p = body + len;
+    }
+  };
+  walk(0, pd.length, 0);
+  return cleanText(parts.join('\n'));
+}
+
+function cleanText(s) {
+  return s.replace(/\r/g, '\n').replace(/\x07/g, '\t').replace(/\x0b/g, '\n').replace(/[\x00-\x08\x0c\x0e-\x1f]/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // ---------------------------------------------------------------- e-books

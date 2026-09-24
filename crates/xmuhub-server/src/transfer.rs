@@ -188,7 +188,8 @@ async fn apply(hub: &Arc<Hub>, gh: &GitHubBackend, cur: &Current, res: ResultsFi
 }
 
 async fn tick(hub: &Arc<Hub>, gh: &GitHubBackend) -> anyhow::Result<()> {
-    if let Some(bytes) = hub.meta_get(STATE_KEY)? {
+    // An empty value means "no run in flight" (written after a run is applied).
+    if let Some(bytes) = hub.meta_get(STATE_KEY)?.filter(|b| !b.is_empty()) {
         let cur: Current = serde_json::from_slice(&bytes)?;
         if let Some((raw, _)) = gh.read_file(REPO, &format!("results/{}.json", cur.id)).await? {
             let res: ResultsFile = serde_json::from_slice(&raw)?;

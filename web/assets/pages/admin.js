@@ -384,7 +384,7 @@ const panels = {
     };
   },
   async status(box) {
-    const s = await api('/admin/status');
+    const [s, th] = await Promise.all([api('/admin/status'), api('/admin/thumbs').catch(() => null)]);
     const st = s.stats;
     box.innerHTML = `<section class="card"><h3>概况</h3><dl class="kv">
         <dt>已发布资料</dt><dd>${st.resources}</dd><dt>待审</dt><dd>${st.pending}</dd><dt>待处理投诉</dt><dd>${st.reports}</dd>
@@ -392,11 +392,17 @@ const panels = {
         <dt>今日中转</dt><dd>${s.relay_bytes_today != null ? fmtSize(s.relay_bytes_today) : '—'}</dd>
         <dt>邮件</dt><dd>${s.mail ? '已开启' : '<span class="badge rejected">未配置</span>'}</dd>
         <dt>内存占用</dt><dd>${s.rss_bytes ? fmtSize(s.rss_bytes) : '—'}</dd><dt>版本</dt><dd>${esc(s.version)}</dd></dl></section>
+      ${th ? `<section class="card"><h3>列表缩略图</h3>
+        <p class="small">已生成 <b>${th.done}</b> 个 · 待生成 <b>${th.todo}</b> 个 · 无法生成 ${th.never} 个（CAJ、程序、加密压缩包等）${th.current ? ` · 正在运行批次（${th.current.files} 个文件，${ago(th.current.dispatched_at)}开始）` : ''}</p>
+        <p class="small muted">由 GitHub Actions 在 GitHub 内部渲染首页（PDF、Office、压缩包里的第一个文档、图片、文本），不经过服务器；每 10 分钟检查一次，每批最多 300 个。</p>
+        ${me.level >= 4 ? '<button class="btn sm" id="thkick" type="button">立即检查</button>' : ''}</section>` : ''}
       <section class="card scroll-x"><h3>下载镜像</h3><p class="small muted">每 15 分钟从服务器经各镜像下载一个 256KB 探针文件，按实际速度排序；下载时依次尝试，全部失败时直连 GitHub。</p>
         ${s.mirrors.length ? `<table class="table"><thead><tr><th>镜像</th><th>状态</th><th>速度</th><th>检测时间</th></tr></thead><tbody>
         ${s.mirrors.map((m) => `<tr><td class="mono">${esc(m.prefix)}</td><td>${m.ok ? '<span class="badge published">可用</span>' : `<span class="badge rejected">不可用</span> <span class="small faint">${esc(m.error)}</span>`}</td>
           <td>${m.ok ? `${(m.speed_kbps / 1024).toFixed(2)} MB/s` : '—'}</td><td class="small faint">${ago(m.checked_at)}</td></tr>`).join('')}</tbody></table>` : '<p class="faint">尚未探测（本地存储模式或刚启动）</p>'}
       </section>`;
+    const k = box.querySelector('#thkick');
+    if (k) k.onclick = async () => { try { await api('/admin/thumbs', { method: 'POST' }); toast('已触发'); panels.status(box); } catch (e) { toast(e.message, true); } };
   },
 };
 

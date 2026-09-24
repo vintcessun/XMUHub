@@ -133,12 +133,17 @@ export function resourceItem(r, { showNode = true } = {}) {
     r.rating && r.rating.count ? `<span title="${r.rating.count} 人评分">${stars(r.rating.avg)} ${r.rating.avg}</span>` : '',
     statusBadge(r),
   ].filter(Boolean);
+  // First-page thumbnail when one has been made (see server thumbs.rs); else the type badge.
+  const icon = r.thumb && r.thumb.length
+    ? `<img class="thumb" src="${esc(r.thumb[0])}" data-alts="${esc(r.thumb.slice(1).join(' '))}" data-ext="${esc(e.slice(0, 4))}" loading="lazy" alt="" title="点击预览">`
+    : `<div class="ficon ${esc(e)}">${esc(e.slice(0, 4))}</div>`;
   return `<div class="item">
-    <div class="ficon ${esc(e)}">${esc(e.slice(0, 4))}</div>
+    ${icon}
     <div class="body"><a class="title" href="/r/${r.id}">${esc(r.title)}</a>
       ${r.subtitle ? `<div class="subtitle">${esc(r.subtitle)}</div>` : ''}
       ${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
       <div class="meta">${bits.join('')}</div></div>
+    <button class="btn sm qpv" data-qpv="${r.id}" type="button" title="不用点进去，直接看内容">预览</button>
   </div>`;
 }
 
@@ -428,3 +433,65 @@ function feedbackButton() {
   };
   document.body.appendChild(b);
 }
+
+// ---------------------------------------------------------------- quick preview from lists
+
+/**
+ * 「预览」 on any resource list opens the file in a dialog straight away; ← / → (or the
+ * buttons) step through the other files of the same list, so comparing a handful of
+ * candidates takes a click each instead of a page visit each.
+ */
+function quickPreview(btn) {
+  const scope = btn.closest('.list') || document;
+  const all = [...scope.querySelectorAll('[data-qpv]')];
+  let i = all.indexOf(btn);
+  const body = modal('', { wide: true });
+  const head = body.parentElement.querySelector('.modal-head');
+  head.querySelector('b').insertAdjacentHTML('afterend', '<span class="qpv-nav"><button class="btn sm" data-nav="-1" type="button" aria-label="上一份">‹ 上一份</button><span class="small faint" data-pos></span><button class="btn sm" data-nav="1" type="button" aria-label="下一份">下一份 ›</button><a class="btn sm primary" data-open>详情 / 下载</a></span>');
+  const show = () => {
+    const b = all[i];
+    const item = b.closest('.item');
+    const title = item?.querySelector('.title')?.textContent || '';
+    const sub = item?.querySelector('.subtitle')?.textContent || '';
+    head.querySelector('b').textContent = title;
+    head.querySelector('[data-pos]').textContent = all.length > 1 ? `${i + 1} / ${all.length}` : '';
+    head.querySelectorAll('[data-nav]').forEach((n) => { n.hidden = all.length < 2; });
+    head.querySelector('[data-open]').href = `/r/${b.dataset.qpv}`;
+    body.innerHTML = `${sub ? `<p class="small muted" style="margin:0 0 8px">${esc(sub)}</p>` : ''}<div></div>`;
+    preview(Number(b.dataset.qpv), body.lastElementChild);
+  };
+  const go = (d) => { i = (i + d + all.length) % all.length; show(); };
+  head.onclick = (e) => { const n = e.target.closest('[data-nav]'); if (n) go(Number(n.dataset.nav)); };
+  const onKey = (e) => {
+    if (!body.isConnected) { document.removeEventListener('keydown', onKey); return; }
+    if (e.target.closest('input, textarea')) return;
+    if (e.key === 'ArrowLeft') go(-1);
+    if (e.key === 'ArrowRight') go(1);
+  };
+  document.addEventListener('keydown', onKey);
+  show();
+}
+
+// A thumbnail that fails on one mirror tries the next, then falls back to the type badge.
+document.addEventListener('error', (e) => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.classList.contains('thumb')) return;
+  const alts = (img.dataset.alts || '').split(' ').filter(Boolean);
+  if (alts.length) {
+    img.dataset.alts = alts.slice(1).join(' ');
+    img.src = alts[0];
+  } else {
+    const d = document.createElement('div');
+    d.className = `ficon ${img.dataset.ext || ''}`;
+    d.textContent = img.dataset.ext || 'file';
+    img.replaceWith(d);
+  }
+}, true);
+
+document.addEventListener('click', (e) => {
+  const thumb = e.target.closest('img.thumb');
+  const b = thumb ? thumb.closest('.item')?.querySelector('[data-qpv]') : e.target.closest('[data-qpv]');
+  if (!b) return;
+  e.preventDefault();
+  quickPreview(b);
+});

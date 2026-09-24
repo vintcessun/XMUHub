@@ -520,3 +520,14 @@ pub struct ApiToken {
     pub created_at: i64,
     pub last_used: i64,
 }
+
+/// A generated first-page thumbnail of a stored file (keyed by blob), or a record that
+/// making one failed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Thumb {
+    pub key: String,
+    pub loc: Option<Location>,
+    /// Failed attempts; files that can't have a thumbnail are marked with a high count.
+    pub tries: u8,
+    pub at: i64,
+}

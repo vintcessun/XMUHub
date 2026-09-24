@@ -118,10 +118,12 @@ $('#nq').oninput = () => {
     const list = await api(`/nodes/suggest?q=${encodeURIComponent(q)}`).catch(() => []);
     if (my !== seq) return;
     ul.hidden = false;
-    ul.innerHTML = list.length
+    ul.innerHTML = (list.length
       ? list.map((x, i) => `<li data-i="${i}">${esc(x.node.name)}<small>${esc(pathText(x.path))}${x.node.status === 'pending' ? ' · 待确认' : ''}</small></li>`).join('')
-      : '<li class="faint">没有找到，试试拼音首字母，或在分类树里选</li>';
+      : '<li class="faint">没有找到，试试拼音首字母，或在分类树里选</li>') +
+      `<li data-new="1"><b>＋ 新增课程「${esc(q)}」</b><small>找不到就自己建一个，审核员会确认</small></li>`;
     ul.onclick = (e) => {
+      if (e.target.closest('li[data-new]')) { ul.hidden = true; openNewCourse(q); return; }
       const li = e.target.closest('li[data-i]');
       if (!li) return;
       ul.hidden = true;
@@ -132,15 +134,25 @@ $('#nq').oninput = () => {
 };
 document.addEventListener('click', (e) => { if (!e.target.closest('.suggest')) $('#ns').hidden = true; });
 
-$('#newcourse').onclick = async (e) => {
-  e.preventDefault();
+/** New-course form: any group (colleges, 公共课 groups such as 校选课, …) can take a course. */
+async function openNewCourse(name = '') {
   const t = await tree();
-  const b = t.children(0).find((s) => s.code === 'B' || s.name.startsWith('B'));
-  const colleges = b ? t.children(b.id) : [];
-  $('#nc_parent').innerHTML = colleges.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const sel = $('#nc_parent');
+  const keep = sel.value;
+  sel.innerHTML = t.children(0).map((s) => {
+    const groups = t.children(s.id).filter((g) => g.kind === 'group');
+    return groups.length ? `<optgroup label="${esc(s.name)}">${groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</optgroup>` : '';
+  }).join('');
+  // Default to the first college (专业课) unless the user already chose.
+  const b = t.children(0).find((s) => s.code === 'B');
+  const first = b && t.children(b.id).find((g) => g.kind === 'group');
+  sel.value = keep || (first ? String(first.id) : sel.value);
+  if (name) $('#nc_name').value = name;
   $('#nodepick').hidden = true;
   $('#coursenew').hidden = false;
-};
+  $('#nc_name').focus();
+}
+$('#newcourse').onclick = (e) => { e.preventDefault(); openNewCourse($('#nq').value.trim()); };
 $('#backpick').onclick = (e) => { e.preventDefault(); $('#coursenew').hidden = true; $('#nodepick').hidden = false; };
 $('#nc_go').onclick = async () => {
   try {

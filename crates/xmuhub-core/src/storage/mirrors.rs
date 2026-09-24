@@ -21,6 +21,10 @@ pub struct MirrorStat {
     pub cors: bool,
 }
 
+/// Mirrors known to send CORS headers; used for previews until the first probe has run
+/// (otherwise every restart leaves previews without a route for a minute).
+const KNOWN_CORS: &[&str] = &["https://gh.idayer.com", "https://gh.ddlc.top", "https://gh.llkk.cc"];
+
 pub struct Mirrors {
     candidates: Vec<String>,
     /// Healthy prefixes, fastest first.
@@ -33,7 +37,8 @@ pub struct Mirrors {
 impl Mirrors {
     pub fn new(candidates: Vec<String>) -> Mirrors {
         let candidates: Vec<String> = candidates.into_iter().map(|c| c.trim_end_matches('/').to_string()).collect();
-        Mirrors { ranked: RwLock::new(candidates.clone()), candidates, stats: RwLock::new(Vec::new()), cors: RwLock::new(Vec::new()) }
+        let cors = candidates.iter().filter(|c| KNOWN_CORS.contains(&c.as_str())).cloned().collect();
+        Mirrors { ranked: RwLock::new(candidates.clone()), candidates, stats: RwLock::new(Vec::new()), cors: RwLock::new(cors) }
     }
 
     /// `url` rewritten through each healthy mirror, then the original.

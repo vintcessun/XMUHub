@@ -24,6 +24,7 @@ pub const RATINGS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("ratings
 pub const COMMENTS: TableDefinition<u64, &[u8]> = TableDefinition::new("comments");
 pub const FEEDBACK: TableDefinition<u64, &[u8]> = TableDefinition::new("feedback");
 pub const TOKENS: TableDefinition<u64, &[u8]> = TableDefinition::new("tokens");
+pub const THUMBS: TableDefinition<&str, &[u8]> = TableDefinition::new("thumbs");
 /// Resource id → hand-edited subtitle (plain UTF-8; empty = deliberately none).
 pub const SUBTITLES: TableDefinition<u64, &str> = TableDefinition::new("subtitles");
 /// Free-form small state: id sequences, storage bucket cursors, settings.
@@ -64,6 +65,7 @@ pub struct Snapshot {
     pub feedback: Vec<Feedback>,
     pub tokens: Vec<ApiToken>,
     pub subtitles: Vec<(Id, String)>,
+    pub thumbs: Vec<Thumb>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -95,6 +97,7 @@ impl Db {
         txn.open_table(FEEDBACK)?;
         txn.open_table(TOKENS)?;
         txn.open_table(SUBTITLES)?;
+        txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
     }
@@ -145,6 +148,9 @@ impl Db {
         for row in txn.open_table(SUBTITLES)?.iter()? {
             let (k, v) = row?;
             snap.subtitles.push((k.value(), v.value().to_string()));
+        }
+        for row in txn.open_table(THUMBS)?.iter()? {
+            snap.thumbs.push(decode(row?.1.value())?);
         }
         Ok(snap)
     }
@@ -275,6 +281,10 @@ impl Tx<'_> {
     }
     pub fn put_token(&self, t: &ApiToken) -> Result<()> {
         self.txn.open_table(TOKENS)?.insert(t.id, encode(t).as_slice())?;
+        Ok(())
+    }
+    pub fn put_thumb(&self, t: &Thumb) -> Result<()> {
+        self.txn.open_table(THUMBS)?.insert(t.key.as_str(), encode(t).as_slice())?;
         Ok(())
     }
     pub fn put_subtitle(&self, id: Id, s: &str) -> Result<()> {

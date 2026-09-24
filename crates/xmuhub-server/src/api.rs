@@ -221,6 +221,7 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         "updated_at": r.updated_at,
         "downloads": r.downloads,
         "rating": app.hub.rating(r.id),
+        "thumb": thumb_urls(app, &r.blob),
         "mine": mine,
     });
     if staff {
@@ -234,6 +235,19 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         }
     }
     v
+}
+
+/// A few ways to load a blob's thumbnail: the two fastest mirrors, then GitHub directly.
+fn thumb_urls(app: &App, key: &str) -> Vec<String> {
+    let Some(loc) = app.hub.thumb_of(key) else { return Vec::new() };
+    let urls = app.hub.storage.download_urls(std::slice::from_ref(&loc));
+    let mut out: Vec<String> = urls.iter().take(2).cloned().collect();
+    if let Some(last) = urls.last() {
+        if !out.contains(last) {
+            out.push(last.clone());
+        }
+    }
+    out
 }
 
 fn list(app: &App, v: Vec<(Resource, Node)>, viewer: Viewer) -> Json<Value> {
@@ -294,6 +308,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/admin/github/scan", post(gh_scan))
         .route("/admin/github/import", post(gh_import))
         .route("/admin/github/transfer", get(gh_transfer).post(gh_transfer_kick))
+        .route("/admin/thumbs", get(thumbs_status).post(thumbs_kick))
         .route("/relay/upload", post(crate::relay::upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/upload", put(local_upload).layer(axum::extract::DefaultBodyLimit::disable()))
         .route("/local/file/{name}", get(local_file))
@@ -1050,6 +1065,21 @@ async fn gh_transfer_kick(State(app): S, auth: Auth) -> R<Json<Value>> {
     let gh = app.github.as_ref().ok_or_else(|| bad("GitHub 存储未启用"))?;
     crate::transfer::kick(&app.hub, gh).await.map_err(|e| ApiError(Error::Upstream(e.to_string())))?;
     Ok(Json(json!({ "current": crate::transfer::current_job(&app.hub) })))
+}
+
+async fn thumbs_status(State(app): S, auth: Auth) -> R<Json<Value>> {
+    if !auth.viewer().staff() {
+        return Err(ApiError(Error::Forbidden));
+    }
+    let (ok, todo, never) = app.hub.thumb_counts();
+    Ok(Json(json!({ "done": ok, "todo": todo, "never": never, "current": crate::thumbs::current_job(&app.hub) })))
+}
+
+async fn thumbs_kick(State(app): S, auth: Auth) -> R<Json<Value>> {
+    require_admin(&auth)?;
+    let gh = app.github.as_ref().ok_or_else(|| bad("GitHub 存储未启用"))?;
+    crate::thumbs::kick(&app.hub, gh).await.map_err(|e| ApiError(Error::Upstream(e.to_string())))?;
+    Ok(Json(json!({ "current": crate::thumbs::current_job(&app.hub) })))
 }
 
 // ------------------------------------------------------------------ local backend (dev)

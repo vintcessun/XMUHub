@@ -9,6 +9,7 @@ mod imports;
 mod resources;
 mod social;
 mod stats;
+mod thumbs;
 mod tokens;
 mod tree;
 mod uploads;
@@ -28,6 +29,7 @@ use crate::storage::Storage;
 pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
 pub use stats::DayStats;
+pub use thumbs::ThumbJob;
 pub use social::{CommentView, RatingSummary, ReviewView};
 pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
@@ -84,6 +86,8 @@ pub(crate) struct State {
     token_by_hash: HashMap<[u8; 32], Id>,
     /// Hand-edited subtitles; resources without one fall back to `auto_subtitle`.
     subtitles: HashMap<Id, String>,
+    /// blob key → thumbnail record
+    thumbs: HashMap<String, Thumb>,
 }
 
 impl State {
@@ -133,6 +137,7 @@ impl State {
             st.feedback.insert(f.id, f);
         }
         st.subtitles = snap.subtitles.into_iter().collect();
+        st.thumbs = snap.thumbs.into_iter().map(|t| (t.key.clone(), t)).collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);
             st.tokens.insert(t.id, t);

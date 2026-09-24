@@ -134,19 +134,32 @@ $('#nq').oninput = () => {
 };
 document.addEventListener('click', (e) => { if (!e.target.closest('.suggest')) $('#ns').hidden = true; });
 
-/** New-course form: any group (colleges, 公共课 groups such as 校选课, …) can take a course. */
+/** New-course form: pick the category (校选课 / 公共课 / 专业课 / 体育课 …), then the offering
+ * college or group, as on the course-selection site. */
 async function openNewCourse(name = '') {
   const t = await tree();
-  const sel = $('#nc_parent');
-  const keep = sel.value;
-  sel.innerHTML = t.children(0).map((s) => {
-    const groups = t.children(s.id).filter((g) => g.kind === 'group');
-    return groups.length ? `<optgroup label="${esc(s.name)}">${groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</optgroup>` : '';
-  }).join('');
-  // Default to the first college (专业课) unless the user already chose.
-  const b = t.children(0).find((s) => s.code === 'B');
-  const first = b && t.children(b.id).find((g) => g.kind === 'group');
-  sel.value = keep || (first ? String(first.id) : sel.value);
+  const secs = t.children(0).filter((s) => t.children(s.id).some((g) => g.kind === 'group'));
+  const ss = $('#nc_sec');
+  const keep = ss.value;
+  ss.innerHTML = secs.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  // Default to 专业课 unless the user already chose.
+  const b = secs.find((s) => s.code === 'B');
+  ss.value = keep || (b ? String(b.id) : ss.value);
+  const fill = () => {
+    const sel = $('#nc_parent');
+    const prev = sel.value;
+    const groups = t.children(Number(ss.value)).filter((g) => g.kind === 'group');
+    sel.innerHTML = groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+    if (groups.some((g) => String(g.id) === prev)) sel.value = prev;
+    else {
+      // Keep the same college when switching category (专业课 信息学院 → 校选课 信息学院).
+      const was = t.byId.get(Number(prev))?.name;
+      const same = was && groups.find((g) => g.name === was);
+      if (same) sel.value = String(same.id);
+    }
+  };
+  ss.onchange = fill;
+  fill();
   if (name) $('#nc_name').value = name;
   $('#nodepick').hidden = true;
   $('#coursenew').hidden = false;

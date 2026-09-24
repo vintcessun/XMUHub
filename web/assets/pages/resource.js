@@ -172,7 +172,7 @@ async function renderManage(r, me) {
   const actions = staff
     ? [
         (r.status !== 'published' || r.needs_review || r.uncertain) && ['approve', r.status === 'published' ? '确认无误' : '通过并公开', 'ok'],
-        r.status === 'pending' && ['reject', '驳回', 'danger'],
+        (r.status === 'pending' || r.status === 'restricted' || r.needs_review || r.uncertain) && ['reject', '驳回', 'danger'],
         r.status === 'published' && ['remove', '下架', 'danger'],
         r.status !== 'restricted' && ['restrict', '设为仅内部', ''],
         (r.status === 'removed' || r.status === 'rejected' || r.status === 'restricted') && ['restore', '恢复发布', ''],

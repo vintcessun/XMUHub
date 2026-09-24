@@ -163,7 +163,7 @@ const panels = {
   },
   async restricted(box) {
     await queueUI(box, await api('/review?status=restricted'), '「仅内部」资料不公开、不可搜索（勿外传、加密题库等）。确认获得授权后可以恢复发布。',
-      [['restore', '恢复发布', 'ok']]);
+      [['restore', '恢复发布', 'ok'], ['reject', '驳回', 'danger']]);
   },
   async reports(box, all = false) {
     const list = await api(`/admin/reports${all ? '?all=true' : ''}`);

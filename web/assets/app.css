@@ -403,3 +403,11 @@ pre.textview { max-height: min(75vh, 900px); overflow: auto; background: var(--s
 @media (max-width: 640px) { .modal { padding: 0; } .modal-box, .modal-box.wide { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; } .qpv-nav { margin-left: 0; width: 100%; } }
 .item .thumb { width: 66px; height: 88px; flex: none; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: zoom-in; }
 @media (max-width: 640px) { .item .thumb { width: 54px; height: 72px; } }
+.nav .gh { white-space: nowrap; }
+@media (max-width: 520px) { .nav .gh { display: none; } }
+.oss { display: flex; align-items: center; gap: 14px; margin: 0 0 20px; color: inherit; text-decoration: none; border: 1px solid var(--line); }
+.oss:hover { border-color: var(--navy-2); }
+.oss-icon { color: var(--navy); flex: none; display: flex; }
+.oss-text { flex: 1; font-size: 14px; line-height: 1.6; }
+.oss .btn { flex: none; }
+@media (max-width: 640px) { .oss { flex-wrap: wrap; } .oss .btn { width: 100%; justify-content: center; } }

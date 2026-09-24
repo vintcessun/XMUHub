@@ -64,6 +64,8 @@ export function tree() {
 /** Site slogan, shown big on the home page. */
 export const SLOGAN = '让每一份资料都被需要它的人找到';
 /** User group shown on the feedback page, e.g. 'QQ 群 123456789'; empty hides it. */
+export const REPO_URL = 'https://github.com/vintcessun/XMUHub';
+
 export const COMMUNITY = 'QQ 群：1106047582';
 
 export const LEVELS = ['访客', '贡献者', '可信贡献者', '审核员', '管理员'];
@@ -189,6 +191,7 @@ export async function layout(active) {
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>
       <a href="/help" data-k="help">教程</a>
+      <a href="https://github.com/vintcessun/XMUHub" class="gh" rel="noopener" target="_blank" title="本站完全开源，欢迎 Star 和参与开发">⭐ 开源</a>
       <a href="/admin" data-k="admin" hidden>审核</a>
       <a href="/me" data-k="me" id="nav-me">登录</a>
       <a href="/upload" data-k="upload" class="up">上传</a>
@@ -457,8 +460,44 @@ function quickPreview(btn) {
     head.querySelector('[data-pos]').textContent = all.length > 1 ? `${i + 1} / ${all.length}` : '';
     head.querySelectorAll('[data-nav]').forEach((n) => { n.hidden = all.length < 2; });
     head.querySelector('[data-open]').href = `/r/${b.dataset.qpv}`;
-    body.innerHTML = `${sub ? `<p class="small muted" style="margin:0 0 8px">${esc(sub)}</p>` : ''}<div></div>`;
-    preview(Number(b.dataset.qpv), body.lastElementChild);
+    body.innerHTML = `${sub ? `<p class="small muted" style="margin:0 0 8px">${esc(sub)}</p>` : ''}<div class="qpv-review"></div><div></div>`;
+    const id = Number(b.dataset.qpv);
+    preview(id, body.lastElementChild);
+    reviewBar(id, body.querySelector('.qpv-review'));
+  };
+  // Reviewers decide right in the dialog; the next file opens by itself.
+  const reviewBar = async (id, bar) => {
+    const u = await me();
+    if (!u || u.level < 3) return;
+    let r;
+    try { r = await api(`/resources/${id}`); } catch { return; }
+    if (!bar.isConnected) return;
+    const acts = [
+      (r.status !== 'published' || r.needs_review || r.uncertain) && ['approve', r.status === 'published' ? '确认无误' : '通过', 'ok'],
+      (r.status === 'pending' || r.status === 'restricted' || r.needs_review || r.uncertain) && ['reject', '驳回', 'danger'],
+      r.status === 'published' && ['remove', '下架', 'danger'],
+      (r.status === 'removed' || r.status === 'rejected' || r.status === 'restricted') && ['restore', '恢复发布', ''],
+    ].filter(Boolean);
+    if (!acts.length) return;
+    bar.innerHTML = `<div class="row" style="margin:0 0 10px;gap:6px"><span class="small muted">审核：${esc(STATUS[r.status] || r.status)}${r.needs_review ? ' · 待复核' : ''}${r.uncertain ? ' · 待核实' : ''}</span>
+      <input class="input" data-note placeholder="备注（驳回 / 下架原因）" style="max-width:220px;min-height:30px;padding:3px 8px">
+      ${acts.map(([a, l, c]) => `<button class="btn sm ${c}" data-act="${a}" type="button">${l}</button>`).join('')}</div>`;
+    bar.onclick = async (e) => {
+      const btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      btn.disabled = true;
+      try {
+        const res = await api(`/resources/${id}/review`, { method: 'POST', body: { action: btn.dataset.act, note: bar.querySelector('[data-note]').value } });
+        toast(`已处理：${STATUS[res.status] || res.status}`);
+        // Take it out of the list behind the dialog and move on.
+        const item = all[i].closest('[data-id]') || all[i].closest('.item');
+        all.splice(i, 1);
+        item?.remove();
+        if (!all.length) { body.close(); return; }
+        if (i >= all.length) i = 0;
+        show();
+      } catch (err) { toast(err.message, true); btn.disabled = false; }
+    };
   };
   const go = (d) => { i = (i + d + all.length) % all.length; show(); };
   head.onclick = (e) => { const n = e.target.closest('[data-nav]'); if (n) go(Number(n.dataset.nav)); };

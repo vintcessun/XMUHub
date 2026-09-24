@@ -262,10 +262,9 @@ export async function fetchPart(part, urls, onBytes) {
     const ctl = new AbortController();
     let timer;
     try {
-      // The same-origin fallback buffers and verifies a whole part before replying.
-      const idleLimit = url.startsWith('/api/resources/') ? 210_000 : 30_000;
-      const resetTimeout = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), idleLimit); };
-      resetTimeout();
+      const resetTimeout = (ms = 30_000) => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), ms); };
+      // A mirror that doesn't even answer within 8 s is skipped when there's another to try.
+      resetTimeout(hasNext ? 8_000 : 30_000);
       const res = await fetch(url, { signal: ctl.signal, mode: 'cors', credentials: url.startsWith('/') ? 'same-origin' : 'omit', referrerPolicy: 'no-referrer' });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();

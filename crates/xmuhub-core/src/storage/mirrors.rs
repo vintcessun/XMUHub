@@ -19,11 +19,22 @@ pub struct MirrorStat {
     pub error: String,
     /// Sends `Access-Control-Allow-Origin`, so pages can fetch through it (previews).
     pub cors: bool,
+    /// Failed only with a rate limit or a timeout, which may be specific to our server's IP.
+    pub soft_fail: bool,
 }
 
 /// Mirrors known to send CORS headers; used for previews until the first probe has run
 /// (otherwise every restart leaves previews without a route for a minute).
-const KNOWN_CORS: &[&str] = &["https://gh.idayer.com", "https://gh.ddlc.top", "https://gh.llkk.cc"];
+const KNOWN_CORS: &[&str] = &[
+    "https://cors.isteed.cc",
+    "https://ghpxy.hwinzniej.top",
+    "https://gh.monlor.com",
+    "https://gh.927223.xyz",
+    "https://ghm.078465.xyz",
+    "https://gh.idayer.com",
+    "https://gh.ddlc.top",
+    "https://gh.llkk.cc",
+];
 
 pub struct Mirrors {
     candidates: Vec<String>,
@@ -72,6 +83,12 @@ impl Mirrors {
                 .send()
                 .await;
             let cors = res.as_ref().is_ok_and(|r| r.headers().contains_key(reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN));
+            // 429s and timeouts are what *our server's* IP gets (the probe itself runs every
+            // few minutes); visitors' browsers have their own IPs and limits.
+            let soft = match &res {
+                Ok(r) => r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS,
+                Err(e) => e.is_timeout() || e.is_connect(),
+            };
             let (ok, error) = match res {
                 Ok(r) if r.status().is_success() => match r.bytes().await {
                     // A mirror that answers with an HTML page instead of the file is broken.
@@ -91,6 +108,7 @@ impl Mirrors {
                 checked_at: crate::model::now(),
                 error,
                 cors: cors && ok,
+                soft_fail: !ok && soft,
             }
         });
         let mut stats = futures_util::future::join_all(checks).await;
@@ -101,7 +119,11 @@ impl Mirrors {
         // than all mirrors dying at once; keep the previous ranking rather than going direct-only.
         if !ranked.is_empty() {
             *self.ranked.write() = ranked;
-            *self.cors.write() = stats.iter().filter(|s| s.cors).map(|s| s.prefix.clone()).collect();
+            // Previews: mirrors that passed with CORS first, then known CORS mirrors that only
+            // failed softly from here — browsers skip a dead one within seconds.
+            let mut cors: Vec<String> = stats.iter().filter(|s| s.cors).map(|s| s.prefix.clone()).collect();
+            cors.extend(stats.iter().filter(|s| s.soft_fail && KNOWN_CORS.contains(&s.prefix.as_str())).map(|s| s.prefix.clone()));
+            *self.cors.write() = cors;
         }
         *self.stats.write() = stats;
     }

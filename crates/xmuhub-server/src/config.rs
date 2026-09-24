@@ -23,6 +23,12 @@ pub const DEFAULT_MIRRORS: &[&str] = &[
     "https://gh-proxy.org",
     "https://hk.gh-proxy.com",
     "https://cdn.gh-proxy.com",
+    // Send CORS headers (checked 2026-09-25: byte-exact, Access-Control-Allow-Origin: *).
+    "https://cors.isteed.cc",
+    "https://ghpxy.hwinzniej.top",
+    "https://gh.monlor.com",
+    "https://gh.927223.xyz",
+    "https://ghm.078465.xyz",
 ];
 
 pub enum StorageKind {

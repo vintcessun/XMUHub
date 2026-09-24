@@ -1,5 +1,5 @@
-// In-page previews. Files are fetched from readable mirrors, with a bounded same-origin
-// fallback, then rendered in the browser. Loaded on demand; previews don't count as downloads.
+// In-page previews. Files are fetched by the browser from CORS-readable mirrors (never
+// through our server — see AGENTS.md), then rendered in the browser. Loaded on demand; previews don't count as downloads.
 
 import { api, esc, fetchPart, fmtSize } from './app.js';
 

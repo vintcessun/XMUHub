@@ -30,7 +30,9 @@ param(
     [switch]$DryRun,
     [switch]$Force,
     # Don't push local commits to GitHub (still pulls and deploys).
-    [switch]$NoPush
+    [switch]$NoPush,
+    # Deploy even if new Rust code looks like it fetches files on the server (see AGENTS.md §1).
+    [switch]$AllowRisky
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,6 +41,29 @@ $Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 # Files whose change needs a new binary / a web-only deploy.
 $BinPaths = @("crates", "Cargo.toml", "Cargo.lock", "scripts/build-alinux3.ps1", "scripts/Dockerfile.alinux3")
 $WebPaths = @("web", "scripts/deploy.ps1")
+# AGENTS.md §1: file bytes never pass through the server. New code that fetches or streams
+# HTTP bodies outside these files (probing, GitHub API, upload relay, background jobs)
+# stops the automatic deploy until a person has looked at it.
+$FetchAllowed = @(
+    "crates/xmuhub-core/src/storage/mirrors.rs", "crates/xmuhub-core/src/storage/github.rs",
+    "crates/xmuhub-server/src/relay.rs", "crates/xmuhub-server/src/transfer.rs",
+    "crates/xmuhub-server/src/thumbs.rs", "crates/xmuhub-server/src/main.rs", "crates/xmuhub-server/src/mailer.rs"
+)
+$FetchPattern = 'reqwest::|bytes_stream|\.bytes\(\)|Body::from_stream|StreamBody|\.chunk\(\)'
+
+# Added lines matching $FetchPattern in files outside $FetchAllowed, between two commits.
+function Find-RiskyFetch([string]$From, [string]$To) {
+    $range = if ($From) { @($From, $To) } else { @("4b825dc642cb6eb9a060e54bf8d69288fbee4904", $To) }  # empty tree
+    $hits = @()
+    $file = ""
+    foreach ($line in (& git -C $Root diff -U0 @range -- crates)) {
+        if ($line -like "+++ b/*") { $file = $line.Substring(6); continue }
+        if ($line -like "+*" -and -not ($line -like "+++*") -and $FetchAllowed -notcontains $file -and $line -match $FetchPattern) {
+            $hits += "  ${file}: $($line.Substring(1).Trim())"
+        }
+    }
+    return $hits
+}
 
 function Log([string]$Msg, [string]$Color = "Gray") {
     Write-Host ("[{0}] {1}" -f (Get-Date -Format "MM-dd HH:mm:ss"), $Msg) -ForegroundColor $Color
@@ -104,6 +129,15 @@ function Sync-Once {
     Log ("服务器：程序 {0}，网页 {1}；目标 {2}" -f (Short $dep.bin), (Short $dep.web), (Short $head))
 
     if (-not $needBin -and -not $needWeb) { Log "已是最新，不用部署" Green; return $head }
+    if ($needBin -and -not $AllowRisky) {
+        $base = $dep.bin -replace '-dirty$', ''
+        if ($base) { & git -C $Root cat-file -e "$base^{commit}" 2>$null; if ($LASTEXITCODE -ne 0) { $base = "" } }
+        $risky = Find-RiskyFetch $base $head
+        if ($risky) {
+            throw ("新代码里有服务器发起网络请求 / 读取响应体的写法，可能违反「文件不经过服务器」（AGENTS.md 第 1 条），已停止自动部署：`n" +
+                ($risky -join "`n") + "`n确认没问题后运行：pwsh scripts/sync.ps1 -AllowRisky")
+        }
+    }
     $plan = if ($needBin) { "重新编译并完整部署" } else { "只更新网页（-WebOnly）" }
     if ($DryRun) { Log "（DryRun）会：$plan" Yellow; return $head }
 

@@ -13,7 +13,7 @@
 </head>
 <body data-page="browse">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <div class="crumbs" id="crumbs"></div>
   <div class="layout-side">

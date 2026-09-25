@@ -675,14 +675,15 @@ body {
 .notice { border-left-width: 3px; }
 .fbfab { -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px); }
 
-/* On the landing page the photograph is visible first; existing content then
+/* On the first visit the landing page shows the photograph first (later visits in the
+   same tab have html.seen and skip it); existing content then
    appears inside its glass panels without changing the page structure. */
-body[data-page="home"] .top { animation: glass-reveal .8s ease-out .5s both; }
-body[data-page="home"] .hero { animation: glass-reveal 1s cubic-bezier(.2, .7, .2, 1) .85s both; }
-body[data-page="home"] .oss { animation: glass-reveal .8s ease-out 1.2s both; }
-body[data-page="home"] .sections { animation: glass-reveal .8s ease-out 1.35s both; }
-body[data-page="home"] .layout-side { animation: glass-reveal .8s ease-out 1.5s both; }
-body[data-page="home"] .foot, body[data-page="home"] .fbfab { animation: glass-reveal .8s ease-out 1.5s both; }
+html:not(.seen) body[data-page="home"] .top { animation: glass-reveal .8s ease-out .5s both; }
+html:not(.seen) body[data-page="home"] .hero { animation: glass-reveal 1s cubic-bezier(.2, .7, .2, 1) .85s both; }
+html:not(.seen) body[data-page="home"] .oss { animation: glass-reveal .8s ease-out 1.2s both; }
+html:not(.seen) body[data-page="home"] .sections { animation: glass-reveal .8s ease-out 1.35s both; }
+html:not(.seen) body[data-page="home"] .layout-side { animation: glass-reveal .8s ease-out 1.5s both; }
+html:not(.seen) body[data-page="home"] .foot, html:not(.seen) body[data-page="home"] .fbfab { animation: glass-reveal .8s ease-out 1.5s both; }
 @keyframes glass-reveal {
   from { opacity: 0; transform: translateY(16px); filter: blur(6px); }
   to { opacity: 1; transform: none; filter: blur(0); }
@@ -709,7 +710,12 @@ body[data-page="home"] .foot, body[data-page="home"] .fbfab { animation: glass-r
 
 /* ---------- motion: page switches, content and dialogs ease in instead of popping */
 @view-transition { navigation: auto; }
+/* A scrollbar that comes and goes between a short and a long page shifts everything sideways. */
+html { scrollbar-gutter: stable; }
 .top { view-transition-name: top; }
+/* In-place page switch still waiting for the network (see app.js): a thin bar at the top. */
+html.nav-busy::after { content: ""; position: fixed; top: 0; left: 0; z-index: 100; height: 2px; width: 30%; background: #ffe0d3; animation: nav-busy 1s ease-in-out infinite; }
+@keyframes nav-busy { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 @media (min-width: 721px) { .top { min-height: 61px; } }
 ::view-transition-group(top) { animation-duration: 0s; }
 ::view-transition-old(root) { animation: .12s ease-out both vt-out; }

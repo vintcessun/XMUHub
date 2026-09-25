@@ -66,7 +66,7 @@ export async function preview(id, box) {
   let done = 0;
   try {
     for (const part of plan.parts) {
-      blobs.push(await fetchPart(part, part.preview_urls, (n) => { if (bar.isConnected) bar.style.width = `${Math.round(((done + n) / (plan.size || 1)) * 100)}%`; }));
+      blobs.push(await fetchPart(part, part.preview_urls, (n) => { if (bar.isConnected) bar.style.width = `${Math.round(((done + n) / (plan.size || 1)) * 100)}%`; }, () => box.isConnected && box.previewTicket === ticket));
       done += part.size;
       if (!box.isConnected || box.previewTicket !== ticket) return;
     }

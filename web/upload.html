@@ -13,7 +13,7 @@
 </head>
 <body data-page="upload">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <div class="page-head"><div><h1>上传资料</h1><div class="muted small">选好分类、拖入文件，系统按「课程_时间_类型」规范自动命名；可以一次上传多个文件并批量设置。</div></div></div>
   <div id="gate"></div>

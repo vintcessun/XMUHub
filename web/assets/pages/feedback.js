@@ -1,4 +1,4 @@
-import { api, COMMUNITY, esc, layout, qs, store, toast, $ } from '../app.js';
+import { api, COMMUNITY, esc, layout, qs, referrer, store, toast, $ } from '../app.js';
 
 layout('feedback');
 
@@ -19,7 +19,7 @@ $('#f').onsubmit = async (e) => {
   const btn = $('#f button');
   btn.disabled = true;
   try {
-    await api('/feedback', { method: 'POST', body: { body: $('#body').value, contact: $('#contact').value, page: qs.get('from') || document.referrer.replace(location.origin, '') } });
+    await api('/feedback', { method: 'POST', body: { body: $('#body').value, contact: $('#contact').value, page: qs.get('from') || referrer() } });
     store.set(DK, null);
     $('#f').innerHTML = '<div class="notice ok">谢谢！我们已经收到你的反馈。</div>';
     toast('已提交');

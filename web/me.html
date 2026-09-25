@@ -13,7 +13,7 @@
 </head>
 <body data-page="me">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <div class="page-head"><div><h1>我的</h1><div class="muted small" id="who"></div></div><button class="btn" id="logout">退出登录</button></div>
   <div class="layout-side">

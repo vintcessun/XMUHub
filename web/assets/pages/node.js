@@ -15,7 +15,7 @@ function syncUrl() {
   if (bucket) u.set('b', bucket);
   if ($('#time').value) u.set('t', $('#time').value);
   const qs = u.toString();
-  history.replaceState(null, '', `${location.pathname}${qs ? `?${qs}` : ''}`);
+  history.replaceState(history.state, '', `${location.pathname}${qs ? `?${qs}` : ''}`);
 }
 
 let staff = false;
@@ -42,7 +42,7 @@ async function load() {
     return;
   }
   const n = data.node;
-  if (n.id !== id) history.replaceState(null, '', `/n/${n.id}${location.search}`);
+  if (n.id !== id) history.replaceState(history.state, '', `/n/${n.id}${location.search}`);
   document.title = `${n.name} · 鹭岛书阁`;
   $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
   $('#name').textContent = nodeTitle(n);

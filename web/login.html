@@ -13,7 +13,7 @@
 </head>
 <body data-page="me">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <section class="card auth-card">
     <div class="tabs" id="tabs"><button data-t="login" class="on">登录</button><button data-t="register">注册</button><button data-t="reset">找回密码</button></div>

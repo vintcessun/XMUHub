@@ -13,7 +13,7 @@
 </head>
 <body data-page="browse">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <div class="page-head">
     <div><div class="crumbs" id="crumbs"></div><h1 id="name">加载中…</h1><div class="muted small" id="info"></div></div>

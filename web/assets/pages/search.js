@@ -1,4 +1,4 @@
-import { api, esc, layout, meta, nodeCard, qs, resourceItem, tree, $ } from '../app.js';
+import { api, esc, go, layout, meta, nodeCard, qs, resourceItem, tree, $ } from '../app.js';
 
 layout('search');
 
@@ -23,7 +23,7 @@ $('#types').innerHTML = [['', '全部'], ['node', '只看课程与分类'], ['re
 meta().then((m) => {
   const sel = $('#tag');
   sel.innerHTML += m.tags.map((t) => `<option value="${t.code}"${t.code === tag ? ' selected' : ''}>${t.code} ${t.label}</option>`).join('');
-  sel.onchange = () => { location.href = url({ tag: sel.value }); };
+  sel.onchange = () => { go(url({ tag: sel.value })); };
 });
 tree().then((t) => {
   const sel = $('#within');
@@ -32,7 +32,7 @@ tree().then((t) => {
   const cur = within && t.byId.get(Number(within));
   if (cur && cur.parent) opts.unshift(`<option value="${cur.id}" selected>${esc(cur.name)}</option>`);
   sel.innerHTML += opts.join('');
-  sel.onchange = () => { location.href = url({ within: sel.value }); };
+  sel.onchange = () => { go(url({ within: sel.value })); };
   if (cur) $('#scope').innerHTML = `只在「${esc(cur.name)}」里搜索 · <a href="${url({ within: '' })}">搜全站</a>`;
 });
 

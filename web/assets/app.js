@@ -10,10 +10,35 @@ export class ApiError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+// API calls in flight; a page switch waits for them so the new page shows up already filled in.
+let inflight = 0;
+const idleWaiters = new Set();
+
 /** JSON API call. Every non-GET carries the anti-CSRF header the server requires. */
 export async function api(path, { method = 'GET', body, signal } = {}) {
   const headers = {};
-  if (method !== 'GET') headers['X-XMUHub'] = '1';
+  if (method !== 'GET') {
+    headers['X-XMUHub'] = '1';
+    // Pages now stay open across switches (see navigation below), so drop what a write may have changed.
+    treeCache = null;
+    metaCache = null;
+  }
+  inflight++;
+  try { return await request(path, method, headers, body, signal); } finally {
+    if (--inflight === 0) setTimeout(() => { if (!inflight) { for (const f of idleWaiters) f(); idleWaiters.clear(); } }, 0);
+  }
+}
+
+/** Resolves once no API call has been running for a moment (the page has drawn its data), or after `ms`. */
+function settled(ms) {
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(t); idleWaiters.delete(done); resolve(); };
+    const t = setTimeout(done, ms);
+    setTimeout(() => { if (inflight) idleWaiters.add(done); else done(); }, 0);
+  });
+}
+
+async function request(path, method, headers, body, signal) {
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res;
   try {
@@ -40,16 +65,21 @@ export function forgetMe() {
   try { sessionStorage.removeItem('ludao.top'); } catch { /* storage blocked */ }
 }
 
+// A page can now stay open for a long time, so these are refreshed every few minutes.
+const STALE = 5 * 60_000;
 let metaCache = null;
+let metaAt = 0;
 export function meta() {
-  if (!metaCache) metaCache = api('/meta');
+  if (!metaCache || Date.now() - metaAt > STALE) { metaCache = api('/meta'); metaAt = Date.now(); }
   return metaCache;
 }
 
 let treeCache = null;
+let treeAt = 0;
 /** The whole category tree: { list, byId, children(id) }. */
 export function tree() {
-  if (!treeCache) {
+  if (!treeCache || Date.now() - treeAt > STALE) {
+    treeAt = Date.now();
     treeCache = api('/tree').then((list) => {
       const byId = new Map(list.map((n) => [n.id, n]));
       const kids = new Map();
@@ -168,7 +198,8 @@ export function toast(msg, bad = false) {
   setTimeout(() => el.remove(), bad ? 4500 : 2500);
 }
 
-export const qs = new URLSearchParams(location.search);
+/** The current query string. Read on each call: the address changes without a reload (see navigation below). */
+export const qs = { get: (k) => new URLSearchParams(location.search).get(k) };
 
 /** Numeric id from a clean URL such as /n/12 or /r/34. */
 export function pathId() {
@@ -205,7 +236,7 @@ export async function layout(active) {
   foot.innerHTML = `<div class="wrap">
     <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
     <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
-  if (active !== 'feedback') feedbackButton();
+  feedbackButton(active !== 'feedback');
   const user = await me();
   const navMe = top.querySelector('#nav-me');
   if (user) {
@@ -224,16 +255,14 @@ export async function layout(active) {
   return user;
 }
 
-/** Lets the browser load a page while the pointer rests on its link (Chrome/Edge), so the
- * click opens it at once. Browse-type pages are prerendered; resource pages (which may
- * start a preview download), upload and account pages are only prefetched. */
+/** Lets the browser fetch the pages that still open with a full load (upload, account)
+ * while the pointer rests on their link (Chrome/Edge). The other pages switch in place. */
 function speculate() {
   if (document.querySelector('script[type="speculationrules"]') || !HTMLScriptElement.supports?.('speculationrules')) return;
   const s = document.createElement('script');
   s.type = 'speculationrules';
   s.textContent = JSON.stringify({
-    prerender: [{ where: { or: [{ href_matches: '/' }, { href_matches: '/browse' }, { href_matches: '/help' }, { href_matches: '/about' }, { href_matches: '/n/*' }, { href_matches: '/search?*' }] }, eagerness: 'moderate' }],
-    prefetch: [{ where: { or: [{ href_matches: '/r/*' }, { href_matches: '/me' }, { href_matches: '/feedback' }, { href_matches: '/upload' }, { href_matches: '/upload?*' }] }, eagerness: 'moderate' }],
+    prefetch: [{ where: { or: [{ href_matches: '/me' }, { href_matches: '/upload' }, { href_matches: '/upload?*' }] }, eagerness: 'moderate' }],
   });
   document.head.append(s);
 }
@@ -255,9 +284,10 @@ function saveBlob(blob, name) {
  * Fetches one part, trying each URL in turn. A mirror that is reachable but crawling
  * (under ~150 KB/s after a few seconds) is abandoned for the next one.
  */
-export async function fetchPart(part, urls, onBytes) {
+export async function fetchPart(part, urls, onBytes, alive = () => true) {
   let lastErr;
   for (const [i, url] of urls.entries()) {
+    if (!alive()) throw new Error('已取消');
     const hasNext = i < urls.length - 1;
     const ctl = new AbortController();
     let timer;
@@ -277,6 +307,8 @@ export async function fetchPart(part, urls, onBytes) {
         chunks.push(value);
         got += value.length;
         onBytes(got);
+        // The preview was closed or the page switched: stop downloading.
+        if (!alive()) { ctl.abort(); throw new Error('已取消'); }
         resetTimeout();
         const secs = (performance.now() - t0) / 1000;
         if (hasNext && secs > 6 && got / secs < 150 * 1024) { ctl.abort(); throw new Error('镜像太慢'); }
@@ -425,8 +457,10 @@ export async function moveResources(ids) {
 // ---------------------------------------------------------------- feedback button
 
 /** A floating 「反馈」 button on every page; the form goes to the admin 反馈 tab. */
-function feedbackButton() {
-  if (document.querySelector('.fbfab')) return;
+function feedbackButton(show) {
+  const old = document.querySelector('.fbfab');
+  if (old) { old.hidden = !show; return; }
+  if (!show) return;
   const b = document.createElement('button');
   b.className = 'fbfab';
   b.type = 'button';
@@ -563,3 +597,165 @@ document.addEventListener('click', (e) => {
   e.preventDefault();
   quickPreview(b);
 });
+
+// ---------------------------------------------------------------- page switches without reloading
+
+/*
+ * Links between the reading pages (home, categories, courses, files, search, help) don't
+ * reload the page: the new page's <main> is fetched once per page type, swapped in and its
+ * script run, while the header, background and loaded data stay. The address is a normal
+ * URL, so refresh, bookmarks and back/forward work as before, and a refresh returns to the
+ * same scroll position. Upload, account and admin pages still open with a full load.
+ */
+const SOFT = /^\/(?:|browse|help|about|feedback|search|[nr]\/\d+\/?)$/;
+const here = () => location.pathname + location.search;
+const soft = (u) => u.origin === location.origin && SOFT.test(u.pathname) && SOFT.test(location.pathname);
+const templates = new Map();
+let navSeq = 0;
+let shown = here();
+let prevPage = '';
+
+/** The page (path + query) the user came from, for feedback reports. */
+export function referrer() {
+  return prevPage || document.referrer.replace(location.origin, '');
+}
+
+/** <main>, title and script of a page type; /n/1 and /n/2 share one. Refetched after a while. */
+function template(path) {
+  const k = path.replace(/^\/([nr])\/\d+\/?$/, '/$1/');
+  const hit = templates.get(k);
+  if (hit && Date.now() - hit.at < STALE) return hit.p;
+  const p = fetch(path, { credentials: 'same-origin' }).then(async (res) => {
+    if (!res.ok || !(res.headers.get('content-type') || '').includes('text/html')) throw new Error(`HTTP ${res.status}`);
+    const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    const main = doc.querySelector('main');
+    const script = doc.querySelector('script[type="module"][src]');
+    if (!main || !script) throw new Error('not a page');
+    return { title: doc.title, desc: doc.querySelector('meta[name="description"]')?.content || '', page: doc.body.dataset.page || '', main: main.innerHTML, script: script.getAttribute('src') };
+  });
+  p.catch(() => templates.delete(k));
+  templates.set(k, { p, at: Date.now() });
+  return p;
+}
+
+/** Loads a module without running it, so running it later needs no network. */
+function preloadModule(src) {
+  return new Promise((resolve) => {
+    const l = document.createElement('link');
+    l.rel = 'modulepreload';
+    l.href = src;
+    l.onload = l.onerror = () => { l.remove(); resolve(); };
+    document.head.append(l);
+  });
+}
+
+function saveScroll() {
+  try { history.replaceState({ ...history.state, y: Math.round(scrollY) }, ''); } catch { /* rate-limited */ }
+}
+
+/** Opens `url`: in place when both pages allow it, else as a normal page load. */
+export function go(url, { replace = false } = {}) {
+  const u = new URL(url, location.href);
+  if (!soft(u)) { replace ? location.replace(u) : location.assign(u); return; }
+  saveScroll();
+  if (!replace) prevPage = here();
+  history[replace ? 'replaceState' : 'pushState']({ y: 0 }, '', u.pathname + u.search + u.hash);
+  render({ hash: u.hash });
+}
+
+async function render({ y = 0, hash = '' } = {}) {
+  const seq = ++navSeq;
+  shown = here();
+  const root = document.documentElement;
+  const busy = setTimeout(() => root.classList.add('nav-busy'), 150);
+  let t;
+  try {
+    t = await template(location.pathname);
+    t.src = `${t.script}?v=${seq}`;
+    await preloadModule(t.src);
+  } catch {
+    location.reload();
+    return;
+  } finally {
+    clearTimeout(busy);
+    if (seq === navSeq) root.classList.remove('nav-busy');
+  }
+  if (seq !== navSeq) return;
+
+  const swap = async () => {
+    document.querySelectorAll('.modal .modal-body').forEach((b) => b.close?.());
+    document.title = t.title;
+    document.querySelector('meta[name="description"]')?.setAttribute('content', t.desc);
+    document.body.dataset.page = t.page;
+    document.querySelector('main').innerHTML = t.main;
+    root.classList.add('seen');
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    try { await import(t.src); } catch { location.reload(); return; }
+    // Wait (briefly) for the page's data, so it appears filled in instead of filling in.
+    await settled(700);
+    if (seq !== navSeq) return;
+    const target = hash && document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (target) target.scrollIntoView({ behavior: 'instant' });
+    else window.scrollTo({ top: y, behavior: 'instant' });
+  };
+  if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    await document.startViewTransition(swap).updateCallbackDone.catch(() => {});
+  } else {
+    await swap();
+  }
+}
+
+if ('scrollRestoration' in history && SOFT.test(location.pathname)) {
+  history.scrollRestoration = 'manual';
+  if (history.state?.y) {
+    // A refresh or a return from another site: back to where the user was, once the data is in.
+    const y = history.state.y;
+    settled(1500).then(() => { if (navSeq === 0) window.scrollTo({ top: y, behavior: 'instant' }); });
+  } else {
+    try { history.replaceState({ ...history.state, y: 0 }, ''); } catch { /* ignore */ }
+  }
+  let timer;
+  addEventListener('scroll', () => { clearTimeout(timer); timer = setTimeout(saveScroll, 250); }, { passive: true });
+  addEventListener('pagehide', saveScroll);
+
+  addEventListener('popstate', (e) => {
+    if (!SOFT.test(location.pathname)) { location.reload(); return; }
+    if (here() === shown) { // only the #anchor changed
+      const t = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (t) t.scrollIntoView({ behavior: 'instant' }); else window.scrollTo({ top: e.state?.y || 0, behavior: 'instant' });
+      return;
+    }
+    render({ y: e.state?.y || 0, hash: e.state?.y ? '' : location.hash });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const a = e.target.closest('a[href]');
+    if (!a || (a.target && a.target !== '_self') || a.hasAttribute('download') || typeof a.href !== 'string') return;
+    const u = new URL(a.href);
+    if (!soft(u)) return;
+    if (u.pathname + u.search === here() && u.hash) return; // in-page anchor: the browser scrolls
+    e.preventDefault();
+    go(u, { replace: u.href === location.href });
+  });
+
+  document.addEventListener('submit', (e) => {
+    const f = e.target;
+    if (e.defaultPrevented || f.method.toLowerCase() !== 'get' || (f.target && f.target !== '_self')) return;
+    const u = new URL(f.action);
+    if (!soft(u)) return;
+    e.preventDefault();
+    u.search = new URLSearchParams(new FormData(f)).toString();
+    go(u);
+  });
+
+  // Fetch a page type's template while the pointer is on its link.
+  const warm = (e) => {
+    const a = e.target.closest?.('a[href]');
+    if (!a || typeof a.href !== 'string') return;
+    const u = new URL(a.href);
+    if (soft(u)) template(u.pathname).catch(() => {});
+  };
+  document.addEventListener('pointerover', warm, { passive: true });
+  document.addEventListener('touchstart', warm, { passive: true });
+}

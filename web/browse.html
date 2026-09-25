@@ -13,7 +13,7 @@
 </head>
 <body data-page="browse">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <div class="page-head"><div><h1>全部分类</h1><div class="muted small">和选课系统一样：校选课 · 公共课 · 专业课 · 体育课 → 开课学院 → 课程；另有教材与参考书、工具模板与校园服务</div></div>
     <div class="row"><button class="btn sm" id="expand">全部展开</button><button class="btn sm" id="collapse">全部收起</button></div></div>

@@ -13,7 +13,7 @@
 </head>
 <body data-page="">
 <header id="top" class="top"></header>
-<script>try{var t=sessionStorage.getItem('ludao.top');if(t)document.getElementById('top').innerHTML=t}catch(e){}</script>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
 <main><div class="wrap">
   <div class="empty" style="padding:80px 16px"><b>页面不存在</b>可能是链接写错了，或者资料已经被移除。<p style="margin-top:16px"><a class="btn" href="/">回到首页</a></p></div>
 </div></main>

@@ -682,23 +682,29 @@ async function render({ y = 0, hash = '' } = {}) {
   }
   if (seq !== navSeq) return;
 
+  const vt = !!document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches;
   const swap = async () => {
     document.querySelectorAll('.modal .modal-body').forEach((b) => b.close?.());
     document.title = t.title;
     document.querySelector('meta[name="description"]')?.setAttribute('content', t.desc);
     document.body.dataset.page = t.page;
-    document.querySelector('main').innerHTML = t.main;
+    const main = document.querySelector('main');
+    main.classList.remove('nav-in');
+    if (!vt) main.classList.add('nav-wait');
+    main.innerHTML = t.main;
     root.classList.add('seen');
     window.scrollTo({ top: 0, behavior: 'instant' });
     try { await import(t.src); } catch { location.reload(); return; }
     // Wait (briefly) for the page's data, so it appears filled in instead of filling in.
     await settled(700);
+    main.classList.remove('nav-wait');
+    if (!vt) main.classList.add('nav-in');
     if (seq !== navSeq) return;
     const target = hash && document.getElementById(decodeURIComponent(hash.slice(1)));
     if (target) target.scrollIntoView({ behavior: 'instant' });
     else window.scrollTo({ top: y, behavior: 'instant' });
   };
-  if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (vt) {
     await document.startViewTransition(swap).updateCallbackDone.catch(() => {});
   } else {
     await swap();

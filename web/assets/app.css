@@ -623,9 +623,13 @@ pre.code, pre.textview, .secret { background: var(--surface-2); }
   --shadow: 0 12px 35px rgba(5, 12, 23, .19), inset 0 1px rgba(255, 255, 255, .12);
   color-scheme: dark;
 }
-body {
-  background: #101d2d url('/assets/xmu-campus-background.jpg') center center / cover fixed no-repeat;
-  min-height: 100vh;
+body { background: #101d2d; min-height: 100vh; }
+/* The photograph sits on its own fixed layer: mobile browsers ignore `background-attachment:
+   fixed` and would stretch it over the whole page, re-zooming it whenever the page height
+   changes. */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: #101d2d url('/assets/xmu-campus-background.jpg') center center / cover no-repeat;
 }
 .top, .foot, .card, .hero, .page-head, .tabs, .drop, .modal-box,
 .suggest ul, .picked, .bulkbar, .frow, .kpi, .notice, .oss {
@@ -718,10 +722,15 @@ html.nav-busy::after { content: ""; position: fixed; top: 0; left: 0; z-index: 1
 @keyframes nav-busy { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 @media (min-width: 721px) { .top { min-height: 61px; } }
 ::view-transition-group(top) { animation-duration: 0s; }
-::view-transition-old(root) { animation: .12s ease-out both vt-out; }
-::view-transition-new(root) { animation: .22s cubic-bezier(.2, .7, .3, 1) both vt-in; }
-@keyframes vt-out { to { opacity: 0; } }
-@keyframes vt-in { from { opacity: 0; transform: translateY(8px); } }
+/* The old page stays fully drawn underneath while the new one fades in on top; fading both
+   at once leaves a moment where neither covers the dark base and the screen flashes black. */
+::view-transition-old(root), ::view-transition-new(root) { mix-blend-mode: normal; }
+::view-transition-old(root) { animation: none; }
+::view-transition-new(root) { animation: .2s cubic-bezier(.2, .7, .3, 1) both vt-in; }
+@keyframes vt-in { from { opacity: 0; transform: translateY(6px); } }
+/* Browsers without view transitions: the new content fades in once its data is there. */
+main.nav-in { animation: fade .18s ease-out both; }
+main.nav-wait { opacity: 0; }
 @keyframes fade-up { from { opacity: 0; transform: translateY(4px); } }
 @keyframes fade { from { opacity: 0; } }
 @keyframes pop { from { opacity: 0; transform: translateY(10px) scale(.98); } }

@@ -138,7 +138,9 @@ document.addEventListener('click', (e) => { if (!e.target.closest('.suggest')) $
  * college or group, as on the course-selection site. */
 async function openNewCourse(name = '') {
   const t = await tree();
-  const secs = t.children(0).filter((s) => t.children(s.id).some((g) => g.kind === 'group'));
+  // Some existing college nodes were saved as courses directly under a section.
+  // Their position still makes them offering groups for this form.
+  const secs = t.children(0).filter((s) => t.children(s.id).some((g) => g.kind === 'group' || g.kind === 'course'));
   const ss = $('#nc_sec');
   const keep = ss.value;
   ss.innerHTML = secs.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
@@ -148,7 +150,7 @@ async function openNewCourse(name = '') {
   const fill = () => {
     const sel = $('#nc_parent');
     const prev = sel.value;
-    const groups = t.children(Number(ss.value)).filter((g) => g.kind === 'group');
+    const groups = t.children(Number(ss.value)).filter((g) => g.kind === 'group' || g.kind === 'course');
     sel.innerHTML = groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
     if (groups.some((g) => String(g.id) === prev)) sel.value = prev;
     else {

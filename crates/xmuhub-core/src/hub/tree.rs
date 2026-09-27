@@ -162,9 +162,14 @@ impl Hub {
                 None => None,
             };
             if !staff {
-                // Uploaders may only add a missing course under an existing group (e.g. a college).
-                let pk = parent.and_then(|p| st.nodes.get(&p)).map(|p| p.kind);
-                if kind != NodeKind::Course || pk != Some(NodeKind::Group) {
+                // A few legacy colleges were saved as Course nodes directly under a section.
+                // Treat those as groups by their position, without allowing nested courses elsewhere.
+                let offering_group = parent.and_then(|p| st.nodes.get(&p)).is_some_and(|p| {
+                    p.kind == NodeKind::Group
+                        || (p.kind == NodeKind::Course
+                            && p.parent.and_then(|id| st.nodes.get(&id)).is_some_and(|ancestor| ancestor.kind == NodeKind::Section))
+                });
+                if kind != NodeKind::Course || !offering_group {
                     return Err(Error::Forbidden);
                 }
             }

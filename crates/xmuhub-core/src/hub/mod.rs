@@ -475,7 +475,11 @@ impl Hub {
     pub fn stats(&self) -> Stats {
         let st = self.st.read();
         Stats {
-            nodes: st.nodes.values().filter(|n| n.kind == NodeKind::Course && st.counts.get(&n.id).copied().unwrap_or(0) > 0).count(),
+            nodes: st.nodes.values().filter(|n| {
+                n.kind == NodeKind::Course
+                    && !n.parent.and_then(|id| st.nodes.get(&id)).is_some_and(|parent| parent.kind == NodeKind::Section)
+                    && st.counts.get(&n.id).copied().unwrap_or(0) > 0
+            }).count(),
             resources: st.resources.values().filter(|r| r.status == Status::Published).count(),
             pending: st.resources.values().filter(|r| r.status == Status::Pending || (r.status == Status::Published && r.needs_review)).count(),
             reports: st.reports.values().filter(|r| !r.handled).count(),

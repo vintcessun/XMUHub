@@ -649,6 +649,33 @@ body::before {
   background: rgba(16, 29, 45, .52);
   text-shadow: 0 1px 5px rgba(0, 0, 0, .15);
 }
+body[data-page="home"] .hero { position: relative; }
+body[data-page="home"] .hero > :not(.home-calligraphy) { position: relative; z-index: 1; }
+.home-calligraphy {
+  position: absolute;
+  z-index: 0;
+  width: clamp(190px, 19vw, 250px);
+  height: auto;
+  opacity: .55;
+  filter: invert(1) sepia(.15) saturate(.6);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.home-calligraphy-left { left: clamp(-165px, calc(470px - 45vw), 0px); top: 47%; transform: translateY(-50%); }
+.home-calligraphy-right { right: clamp(-165px, calc(470px - 45vw), 0px); top: 52%; transform: translateY(-50%); }
+@media (max-width: 1200px) {
+  .home-calligraphy { width: 160px; opacity: .4; }
+  .home-calligraphy-left { left: -20px; top: 27%; }
+  .home-calligraphy-right { right: -20px; top: 32%; }
+}
+@media (max-width: 900px) {
+  .home-calligraphy { width: 130px; opacity: .32; }
+  .home-calligraphy-left { left: -25px; }
+  .home-calligraphy-right { right: -25px; }
+}
+@media (max-width: 720px) { .home-calligraphy-right { right: -10px; } }
+@media (max-width: 480px) { .home-calligraphy { display: none; } }
 .page-head { padding: 18px 22px; border-radius: var(--radius); }
 .tabs { padding: 0 12px; border-radius: 12px; }
 .card, .oss, .drop, .frow, .modal-box { border-color: rgba(255, 255, 255, .3); }

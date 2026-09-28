@@ -35,14 +35,14 @@ impl Mailer {
             _ => ("鹭岛书阁注册验证码", "注册账号"),
         };
         let text = format!(
-            "你正在{action}，验证码是：{code}\n\n验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件。\n\n—— 鹭岛书阁 https://xmu.vintces.icu"
+            "你正在{action}，验证码是：{code}\n\n验证码 30 分钟内有效。如果不是你本人操作，请忽略这封邮件。\n\n—— 鹭岛书阁 https://xmu.vintces.icu"
         );
         let html = format!(
             r#"<div style="font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#182033">
 <div style="font-size:20px;font-weight:700;color:#122e66;margin-bottom:16px">鹭岛书阁 · 厦大资料库</div>
 <p>你正在{action}，验证码是：</p>
 <div style="font-size:32px;font-weight:700;letter-spacing:6px;background:#f0f2f7;border-radius:10px;padding:14px 0;text-align:center;margin:12px 0">{code}</div>
-<p style="color:#5f687b;font-size:14px">验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件。</p>
+<p style="color:#5f687b;font-size:14px">验证码 30 分钟内有效。如果不是你本人操作，请忽略这封邮件。</p>
 <p style="color:#8a93a6;font-size:12px;margin-top:24px">鹭岛书阁是同学自发维护的非官方资料共享站 · <a href="https://xmu.vintces.icu" style="color:#1d4494">xmu.vintces.icu</a></p>
 </div>"#
         );

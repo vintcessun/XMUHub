@@ -14,7 +14,8 @@ use crate::error::{Error, Result, bad};
 use crate::model::*;
 
 pub const SESSION_TTL: i64 = 30 * 86400;
-const CODE_TTL: i64 = 10 * 60;
+// Some mailboxes (greylisting) receive the mail 10+ minutes late; the code must outlive that.
+const CODE_TTL: i64 = 30 * 60;
 const CODE_COOLDOWN: i64 = 60;
 const CODE_MAX_ATTEMPTS: u32 = 5;
 const CODES_PER_EMAIL_DAY: u32 = 10;

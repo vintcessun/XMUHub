@@ -7,6 +7,13 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
   if (!me) { location.replace(loginUrl()); return; }
   $('#who').innerHTML = `${esc(me.nickname)} · ${esc(me.email)} · ${LEVELS[me.level]}${me.xmu ? ' · <span class="badge published">厦大认证</span>' : ''}`;
   $('#nick').value = me.nickname;
+  $('#pubname').checked = !!me.public_name;
+  $('#pubname').onchange = async (e) => {
+    try {
+      await api('/me', { method: 'PATCH', body: { public_name: e.target.checked } });
+      toast(e.target.checked ? '已公开：你上传的资料页会显示你的昵称' : '已设为不公开');
+    } catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
+  };
 
   $('#logout').onclick = async () => {
     try { await api('/auth/logout', { method: 'POST' }); } catch { /* already gone */ }

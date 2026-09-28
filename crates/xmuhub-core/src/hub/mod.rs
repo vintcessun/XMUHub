@@ -89,7 +89,17 @@ pub(crate) struct State {
     subtitles: HashMap<Id, String>,
     /// blob key → thumbnail record
     thumbs: HashMap<String, Thumb>,
+    /// Study level set on a node (see `LEVEL_*`); descendants without their own inherit it.
+    node_levels: HashMap<Id, u8>,
+    /// Uploaders who chose to show their nickname on their files.
+    public_uploaders: HashSet<Id>,
 }
+
+/// Study levels of a course (or of a college / group, inherited by its courses).
+/// Untagged courses count as 本科 when filtering.
+pub const LEVEL_UNDERGRAD: u8 = 1;
+pub const LEVEL_GRADUATE: u8 = 2;
+pub const LEVEL_BOTH: u8 = 3;
 
 impl State {
     fn from_db(db: &Db) -> Result<State> {
@@ -139,6 +149,8 @@ impl State {
             st.feedback.insert(f.id, f);
         }
         st.subtitles = snap.subtitles.into_iter().collect();
+        st.node_levels = snap.node_levels.into_iter().collect();
+        st.public_uploaders = snap.public_uploaders.into_iter().collect();
         st.thumbs = snap.thumbs.into_iter().map(|t| (t.key.clone(), t)).collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);
@@ -238,6 +250,14 @@ impl State {
     }
 
     /// Ancestors of `id`, root first (excluding `id`).
+    /// The node's study level: its own, else the nearest ancestor's; 0 when none is set.
+    fn level_of(&self, id: Id) -> u8 {
+        if let Some(l) = self.node_levels.get(&id) {
+            return *l;
+        }
+        self.ancestors(id).iter().rev().find_map(|a| self.node_levels.get(a).copied()).unwrap_or(0)
+    }
+
     fn ancestors(&self, id: Id) -> Vec<Id> {
         let mut out = Vec::new();
         let mut cur = self.nodes.get(&id).and_then(|n| n.parent);
@@ -382,6 +402,26 @@ impl Hub {
         if st.counts.get(&n.id).copied().unwrap_or(0) == 0 { base / 3 } else { base }
     }
 
+    /// (own, effective) study level of a node; see `LEVEL_*`, 0 = not set.
+    pub fn node_level(&self, id: Id) -> (u8, u8) {
+        let st = self.st.read();
+        (st.node_levels.get(&id).copied().unwrap_or(0), st.level_of(id))
+    }
+
+    /// Whether the uploader chose to show their nickname on their files.
+    pub fn public_uploader(&self, user: Id) -> bool {
+        self.st.read().public_uploaders.contains(&user)
+    }
+
+    pub fn set_public_uploader(&self, actor: Viewer, public: bool) -> Result<bool> {
+        let me = actor.at_least(Level::Contributor)?.id;
+        self.mutate(|st, tx| {
+            tx.put_public_uploader(me, public)?;
+            if public { st.public_uploaders.insert(me); } else { st.public_uploaders.remove(&me); }
+            Ok(public)
+        })
+    }
+
     fn is_course(st: &State, n: &Node) -> bool {
         n.kind == NodeKind::Course
             && !n.parent.and_then(|id| st.nodes.get(&id)).is_some_and(|parent| parent.kind == NodeKind::Section)
@@ -398,13 +438,13 @@ impl Hub {
                 let (anc, path, aliases) = Self::placement_parts(&st, n.id);
                 let parent_path = anc.iter().filter_map(|a| st.nodes.get(a)).map(|n| n.name.as_str()).collect::<Vec<_>>().join(" ");
                 let _ = path;
-                self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n), Self::is_course(&st, n))?;
+                self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n), Self::is_course(&st, n), st.level_of(n.id))?;
             }
         }
         for r in st.resources.values() {
             if r.status == Status::Published {
                 let (anc, path, aliases) = Self::placement_parts(&st, r.node);
-                self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases }, &st.subtitle(r))?;
+                self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases }, &st.subtitle(r), st.level_of(r.node))?;
             }
         }
         self.search.commit()
@@ -458,7 +498,7 @@ impl Hub {
             };
             if r.status == Status::Published {
                 let (anc, path, aliases) = Self::placement_parts(&st, r.node);
-                let _ = self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases }, &st.subtitle(r));
+                let _ = self.search.put_resource(r, &Placement { node: r.node, ancestors: &anc, path_text: &path, aliases_text: &aliases }, &st.subtitle(r), st.level_of(r.node));
             } else {
                 self.search.remove(DocType::Resource, *rid);
             }
@@ -468,7 +508,7 @@ impl Hub {
                 Some(n) if !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section => {
                     let (anc, _, aliases) = Self::placement_parts(&st, n.id);
                     let parent_path = anc.iter().filter_map(|a| st.nodes.get(a)).map(|n| n.name.as_str()).collect::<Vec<_>>().join(" ");
-                    let _ = self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n), Self::is_course(&st, n));
+                    let _ = self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n), Self::is_course(&st, n), st.level_of(n.id));
                 }
                 _ => self.search.remove(DocType::Node, *nid),
             }

@@ -23,7 +23,9 @@
       <div class="small muted">点开资料可申请修改备注或删除，审核员同意后生效。</div>
       <div class="small muted" id="mcount"></div><div class="list" id="mine"><div class="skeleton"></div></div></section>
     <aside>
-      <section class="card"><h3>修改昵称</h3><form id="nickf" class="row"><input class="input grow" id="nick" maxlength="20"><button class="btn">保存</button></form></section>
+      <section class="card"><h3>修改昵称</h3><form id="nickf" class="row"><input class="input grow" id="nick" maxlength="20"><button class="btn">保存</button></form>
+        <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="pubname"> 在我上传的资料页上公开显示我的昵称</label>
+        <p class="small faint" style="margin:4px 0 0">默认不公开，只有审核员和管理员能看到上传者。邮箱任何情况下都不会公开。</p></section>
       <section class="card"><h3>修改密码</h3><form id="pwf">
         <label class="field"><span>原密码</span><input class="input" id="oldpw" type="password" autocomplete="current-password"></label>
         <label class="field"><span>新密码（至少 8 位）</span><input class="input" id="newpw" type="password" autocomplete="new-password"></label>

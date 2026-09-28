@@ -175,10 +175,13 @@ fn node_brief(n: &Node) -> Value {
     json!({ "id": n.id, "name": n.name, "code": n.code, "label": n.label, "kind": n.kind.as_str() })
 }
 
-pub(crate) fn node_view(n: &Node, count: usize) -> Value {
+pub(crate) fn node_view(hub: &Hub, n: &Node, count: usize) -> Value {
+    // Study level: `own_level` is set on this node, `level` includes what it inherits.
+    let (own_level, level) = hub.node_level(n.id);
     json!({
         "id": n.id, "parent": n.parent, "kind": n.kind.as_str(), "code": n.code, "name": n.name,
         "label": n.label, "aliases": n.aliases, "bucketed": n.bucketed, "sort": n.sort, "count": count,
+        "level": level, "own_level": own_level,
         "status": match n.status { NodeStatus::Pending => "pending", NodeStatus::Active => "active", NodeStatus::Merged(_) => "merged" },
     })
 }
@@ -233,6 +236,9 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         if let Some(by) = r.reviewed_by {
             v["reviewer"] = json!({ "id": by, "nickname": app.hub.uploader_name(by) });
         }
+    } else if app.hub.public_uploader(r.uploader) {
+        // The uploader chose to show their nickname (「我的」 page); no id for the public.
+        v["uploader"] = json!({ "nickname": app.hub.uploader_name(r.uploader) });
     }
     v
 }
@@ -356,8 +362,15 @@ async fn meta(State(app): S) -> Json<Value> {
     }))
 }
 
-async fn me(auth: Auth) -> Json<Value> {
-    Json(json!({ "user": auth.user.as_ref().map(user_view) }))
+async fn me(State(app): S, auth: Auth) -> Json<Value> {
+    Json(json!({ "user": auth.user.as_ref().map(|u| me_view(&app, u)) }))
+}
+
+/// The signed-in user as they see themselves (with their own settings).
+fn me_view(app: &App, u: &User) -> Value {
+    let mut v = user_view(u);
+    v["public_name"] = json!(app.hub.public_uploader(u.id));
+    v
 }
 
 #[derive(Deserialize)]
@@ -436,14 +449,25 @@ struct MeIn {
     nickname: Option<String>,
     old_password: Option<String>,
     new_password: Option<String>,
+    /// Show my nickname on the files I uploaded.
+    public_name: Option<bool>,
 }
 
 async fn update_me(State(app): S, auth: Auth, Json(b): Json<MeIn>) -> R<Json<Value>> {
     let me = auth.require()?.clone();
     let session = auth.session.clone().unwrap_or_default();
     let hub = app.hub.clone();
-    let u = blocking(move || hub.update_profile(&me, &session, b.nickname.as_deref(), b.old_password.as_deref(), b.new_password.as_deref())).await?;
-    Ok(Json(json!({ "user": user_view(&u) })))
+    let u = blocking(move || {
+        if let Some(p) = b.public_name {
+            hub.set_public_uploader(Viewer { user: Some(&me) }, p)?;
+        }
+        if b.nickname.is_none() && b.new_password.is_none() {
+            return Ok(me);
+        }
+        hub.update_profile(&me, &session, b.nickname.as_deref(), b.old_password.as_deref(), b.new_password.as_deref())
+    })
+    .await?;
+    Ok(Json(json!({ "user": me_view(&app, &u) })))
 }
 
 // ------------------------------------------------------------------ personal access tokens
@@ -479,16 +503,16 @@ async fn revoke_token(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<V
 // ------------------------------------------------------------------ tree
 
 async fn tree(State(app): S) -> Json<Value> {
-    Json(json!(app.hub.tree().iter().map(|i| node_view(&i.node, i.count)).collect::<Vec<_>>()))
+    Json(json!(app.hub.tree().iter().map(|i| node_view(&app.hub, &i.node, i.count)).collect::<Vec<_>>()))
 }
 
 async fn node(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
     let (info, path, children, resources) = app.hub.node(auth.viewer(), id)?;
     let v = auth.viewer();
     Ok(Json(json!({
-        "node": node_view(&info.node, info.count),
+        "node": node_view(&app.hub, &info.node, info.count),
         "path": path.iter().map(node_brief).collect::<Vec<_>>(),
-        "children": children.iter().map(|c| node_view(&c.node, c.count)).collect::<Vec<_>>(),
+        "children": children.iter().map(|c| node_view(&app.hub, &c.node, c.count)).collect::<Vec<_>>(),
         "resources": resources.iter().map(|r| resource_view(&app, r, &info.node, &[], v)).collect::<Vec<_>>(),
     })))
 }
@@ -503,7 +527,7 @@ async fn suggest(State(app): S, Query(q): Query<Q>) -> Json<Value> {
         .hub
         .suggest_nodes(q.q.as_deref().unwrap_or(""), 12)
         .iter()
-        .map(|(n, path)| json!({ "node": node_view(n, 0), "path": path.iter().map(node_brief).collect::<Vec<_>>() }))
+        .map(|(n, path)| json!({ "node": node_view(&app.hub, n, 0), "path": path.iter().map(node_brief).collect::<Vec<_>>() }))
         .collect();
     Json(json!(v))
 }
@@ -512,14 +536,14 @@ async fn create_node(State(app): S, auth: Auth, Json(b): Json<NodeInput>) -> R<J
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let n = blocking(move || hub.create_node(Viewer { user: user.as_ref() }, b)).await?;
-    Ok(Json(node_view(&n, 0)))
+    Ok(Json(node_view(&app.hub, &n, 0)))
 }
 
 async fn patch_node(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<NodePatch>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let n = blocking(move || hub.update_node(Viewer { user: user.as_ref() }, id, b)).await?;
-    Ok(Json(node_view(&n, 0)))
+    Ok(Json(node_view(&app.hub, &n, 0)))
 }
 
 #[derive(Deserialize)]
@@ -531,7 +555,7 @@ async fn merge_node(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let n = blocking(move || hub.merge_node(Viewer { user: user.as_ref() }, id, b.into)).await?;
-    Ok(Json(node_view(&n, 0)))
+    Ok(Json(node_view(&app.hub, &n, 0)))
 }
 
 async fn delete_node(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
@@ -551,6 +575,8 @@ struct SearchQ {
     tag: Option<String>,
     #[serde(default)]
     name_only: bool,
+    /// "ug" (本科, includes untagged courses) or "grad" (研究生).
+    level: Option<String>,
     // Strings, so an empty `within=` / `page=` from a form means "unset" instead of a 400.
     within: Option<String>,
     page: Option<String>,
@@ -568,6 +594,11 @@ async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<V
         courses_only,
         name_only: courses_only || q.name_only,
         within: q.within.as_deref().and_then(|w| w.trim().parse().ok()),
+        level: match q.level.as_deref() {
+            Some("ug") => Some(xmuhub_core::hub::LEVEL_UNDERGRAD),
+            Some("grad") => Some(xmuhub_core::hub::LEVEL_GRADUATE),
+            _ => None,
+        },
         tag: q.tag.as_deref().and_then(Tag::parse).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
     };
     let page = q.page.as_deref().and_then(|p| p.trim().parse::<usize>().ok()).unwrap_or(1).clamp(1, 50);
@@ -577,7 +608,7 @@ async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<V
         .iter()
         .map(|i| match i {
             SearchItem::Node { node, path, count } => {
-                json!({ "type": "node", "node": node_view(node, *count), "path": path.iter().map(node_brief).collect::<Vec<_>>() })
+                json!({ "type": "node", "node": node_view(&app.hub, node, *count), "path": path.iter().map(node_brief).collect::<Vec<_>>() })
             }
             SearchItem::Resource { resource, node, path } => json!({ "type": "resource", "resource": resource_view(&app, resource, node, path, v) }),
         })
@@ -931,7 +962,7 @@ async fn pending_nodes(State(app): S, auth: Auth) -> R<Json<Value>> {
         .hub
         .pending_nodes(auth.viewer())?
         .iter()
-        .map(|(n, path, count)| json!({ "node": node_view(n, *count), "path": path.iter().map(node_brief).collect::<Vec<_>>() }))
+        .map(|(n, path, count)| json!({ "node": node_view(&app.hub, n, *count), "path": path.iter().map(node_brief).collect::<Vec<_>>() }))
         .collect();
     Ok(Json(json!(v)))
 }

@@ -34,6 +34,8 @@ pub struct Filter {
     pub name_only: bool,
     /// Restrict to this node's subtree.
     pub within: Option<Id>,
+    /// Study level: `LEVEL_UNDERGRAD` (also matches untagged courses) or `LEVEL_GRADUATE`.
+    pub level: Option<u8>,
     /// Tag index (see `Tag::ALL`).
     pub tag: Option<u64>,
 }
@@ -60,6 +62,9 @@ struct Fields {
     anc: Field,
     tag: Field,
     course: Field,
+    /// 1 when the doc counts as 本科 / 研究生 (a course tagged both counts as both).
+    ug: Field,
+    grad: Field,
     name: Field,
     name_py: Field,
     main: Field,
@@ -97,6 +102,8 @@ impl Search {
             anc: sb.add_u64_field("anc", INDEXED),
             tag: sb.add_u64_field("tag", INDEXED),
             course: sb.add_u64_field("course", INDEXED),
+            ug: sb.add_u64_field("ug", INDEXED),
+            grad: sb.add_u64_field("grad", INDEXED),
             name: sb.add_text_field("name", text.clone()),
             name_py: sb.add_text_field("name_py", text.clone()),
             main: sb.add_text_field("main", text.clone()),
@@ -110,12 +117,15 @@ impl Search {
         Ok(Search { f, writer: Mutex::new(writer), reader })
     }
 
-    pub fn put_node(&self, n: &Node, at: &Placement, weight: u64, is_course: bool) -> Result<()> {
+    pub fn put_node(&self, n: &Node, at: &Placement, weight: u64, is_course: bool, level: u8) -> Result<()> {
         let f = &self.f;
+        let (ug, grad) = level_flags(level);
         let mut doc = doc!(
             f.key => key(DocType::Node, n.id),
             f.ty => DocType::Node as u64,
             f.course => u64::from(is_course),
+            f.ug => ug,
+            f.grad => grad,
             f.name => joined(&n.name),
             f.name_py => joined(&pinyin_forms(&n.name)),
             f.main => joined(&format!("{} {} {} {}", n.name, n.label, n.code, at.aliases_text)),
@@ -132,14 +142,17 @@ impl Search {
         Ok(())
     }
 
-    pub fn put_resource(&self, r: &Resource, at: &Placement, subtitle: &str) -> Result<()> {
+    pub fn put_resource(&self, r: &Resource, at: &Placement, subtitle: &str, level: u8) -> Result<()> {
         let f = &self.f;
         let stem = r.name.stem();
         let tag_idx = crate::model::Tag::ALL.iter().position(|t| *t == r.tag).unwrap_or(0) as u64;
+        let (ug, grad) = level_flags(level);
         let mut doc = doc!(
             f.key => key(DocType::Resource, r.id),
             f.ty => DocType::Resource as u64,
             f.tag => tag_idx,
+            f.ug => ug,
+            f.grad => grad,
             f.name => joined(&stem),
             f.name_py => joined(&pinyin_forms(&stem)),
             f.main => joined(&format!("{stem} {subtitle} {}", at.aliases_text)),
@@ -221,6 +234,11 @@ impl Search {
         if let Some(n) = filter.within {
             clauses.push(exact(f.anc, n));
         }
+        match filter.level {
+            Some(crate::hub::LEVEL_UNDERGRAD) => clauses.push(exact(f.ug, 1)),
+            Some(crate::hub::LEVEL_GRADUATE) => clauses.push(exact(f.grad, 1)),
+            _ => {}
+        }
         if let Some(t) = filter.tag {
             clauses.push(exact(f.tag, t));
         }
@@ -248,6 +266,12 @@ impl Search {
     }
 }
 
+/// (本科, 研究生) index flags for a study level; untagged counts as 本科.
+fn level_flags(level: u8) -> (u64, u64) {
+    use crate::hub::{LEVEL_BOTH, LEVEL_GRADUATE};
+    (u64::from(level != LEVEL_GRADUATE), u64::from(level == LEVEL_GRADUATE || level == LEVEL_BOTH))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,9 +293,9 @@ mod tests {
     fn name_search_excludes_categories_and_resource_metadata() {
         let index = Search::new().unwrap();
         let place = Placement { node: 1, ancestors: &[], path_text: "专业课 信息学院", aliases_text: "算法" };
-        index.put_node(&node(1, "信息学院", NodeKind::Group), &place, 100, false).unwrap();
-        index.put_node(&node(2, "数据结构", NodeKind::Course), &place, 100, true).unwrap();
-        index.put_node(&node(3, "智能制造学院", NodeKind::Course), &place, 100, false).unwrap();
+        index.put_node(&node(1, "信息学院", NodeKind::Group), &place, 100, false, 0).unwrap();
+        index.put_node(&node(2, "数据结构", NodeKind::Course), &place, 100, true, 0).unwrap();
+        index.put_node(&node(3, "智能制造学院", NodeKind::Course), &place, 100, false, 0).unwrap();
         let resource = Resource {
             id: 4, node: 2, tag: Tag::Exam,
             name: NameParts { course: "数据结构".into(), time: "2025".into(), type_word: "期末试卷".into(), version: 1, ..Default::default() },
@@ -280,7 +304,7 @@ mod tests {
             status: Status::Published, needs_review: false, review_note: String::new(), uploader: 0,
             reviewed_by: None, created_at: 0, updated_at: 0, downloads: 0,
         };
-        index.put_resource(&resource, &place, "重点整理").unwrap();
+        index.put_resource(&resource, &place, "重点整理", 0).unwrap();
         index.commit().unwrap();
 
         let courses = Filter { ty: Some(DocType::Node), courses_only: true, name_only: true, ..Default::default() };

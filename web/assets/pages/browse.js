@@ -1,4 +1,4 @@
-import { esc, layout, qs, store, tree, $ } from '../app.js';
+import { esc, layout, levelBadge, qs, store, tree, $ } from '../app.js';
 
 layout('browse');
 
@@ -29,7 +29,7 @@ function render(t) {
     return `<li>
       <div class="row-n${kids.length ? ' has-kids' : ''}" ${kids.length ? `data-t="${n.id}"` : ''}>
         ${kids.length ? `<button class="tw" data-t="${n.id}" aria-label="${isOpen ? '收起' : '展开'}">${isOpen ? '▾' : '▸'}</button>` : '<span class="tw"></span>'}
-        <a class="n${n.count ? '' : ' zero'}" href="${href}"${picking && kids.length ? ` data-t="${n.id}"` : ''}>${esc(n.name)}</a>
+        <a class="n${n.count ? '' : ' zero'}" href="${href}"${picking && kids.length ? ` data-t="${n.id}"` : ''}>${esc(n.name)}</a>${n.own_level ? levelBadge(n) : ''}
         ${n.status === 'pending' ? '<span class="badge pending">待确认</span>' : ''}
         ${picking && kids.length ? `<span class="small faint">${kids.length} 个下级</span>` : ''}
         ${picking && n.kind !== 'section' ? `<a class="btn sm pick${kids.length ? '' : ' primary'}" href="/upload?node=${n.id}">选这里</a>` : ''}

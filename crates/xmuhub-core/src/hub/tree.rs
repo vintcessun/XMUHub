@@ -21,6 +21,9 @@ pub struct NodeInput {
     pub bucketed: bool,
     #[serde(default)]
     pub sort: u32,
+    /// Study level (`LEVEL_*`); 0 inherits the parent's.
+    #[serde(default)]
+    pub level: u8,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -32,6 +35,8 @@ pub struct NodePatch {
     pub bucketed: Option<bool>,
     pub sort: Option<u32>,
     pub parent: Option<Id>,
+    /// Study level (`LEVEL_*`); 0 clears it so the node inherits its parent's.
+    pub level: Option<u8>,
     #[serde(default)]
     pub approve: bool,
 }
@@ -196,6 +201,13 @@ impl Hub {
                 created_at: now(),
             };
             st.put_node(tx, n.clone())?;
+            if input.level > super::LEVEL_BOTH {
+                return Err(bad("未知的课程层次"));
+            }
+            if input.level != 0 {
+                tx.put_node_level(n.id, input.level)?;
+                st.node_levels.insert(n.id, input.level);
+            }
             Ok(n)
         })?;
         self.reindex(&[n.id], &[]);
@@ -237,6 +249,14 @@ impl Hub {
             }
             if p.approve && n.status == NodeStatus::Pending {
                 n.status = NodeStatus::Active;
+            }
+            if let Some(l) = p.level {
+                if l > super::LEVEL_BOTH {
+                    return Err(bad("未知的课程层次"));
+                }
+                // Descendants inherit it; the subtree is re-indexed below.
+                tx.put_node_level(n.id, l)?;
+                if l == 0 { st.node_levels.remove(&n.id); } else { st.node_levels.insert(n.id, l); }
             }
             st.put_node(tx, n.clone())?;
             // Renames change every descendant's search text.

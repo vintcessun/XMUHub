@@ -28,6 +28,10 @@ pub const TOKENS: TableDefinition<u64, &[u8]> = TableDefinition::new("tokens");
 pub const THUMBS: TableDefinition<&str, &[u8]> = TableDefinition::new("thumbs");
 /// Resource id → hand-edited subtitle (plain UTF-8; empty = deliberately none).
 pub const SUBTITLES: TableDefinition<u64, &str> = TableDefinition::new("subtitles");
+/// Node id → study level set on that node (1 本科, 2 研究生, 3 both); descendants inherit it.
+pub const NODE_LEVELS: TableDefinition<u64, u8> = TableDefinition::new("node_levels");
+/// Users who chose to show their nickname on the files they uploaded (value unused).
+pub const PUBLIC_UPLOADERS: TableDefinition<u64, u8> = TableDefinition::new("public_uploaders");
 /// Free-form small state: id sequences, storage bucket cursors, settings.
 pub const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
@@ -68,6 +72,8 @@ pub struct Snapshot {
     pub tokens: Vec<ApiToken>,
     pub subtitles: Vec<(Id, String)>,
     pub thumbs: Vec<Thumb>,
+    pub node_levels: Vec<(Id, u8)>,
+    pub public_uploaders: Vec<Id>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -100,6 +106,8 @@ impl Db {
         txn.open_table(FEEDBACK)?;
         txn.open_table(TOKENS)?;
         txn.open_table(SUBTITLES)?;
+        txn.open_table(NODE_LEVELS)?;
+        txn.open_table(PUBLIC_UPLOADERS)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -158,6 +166,13 @@ impl Db {
         for row in txn.open_table(THUMBS)?.iter()? {
             snap.thumbs.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(NODE_LEVELS)?.iter()? {
+            let (k, v) = row?;
+            snap.node_levels.push((k.value(), v.value()));
+        }
+        for row in txn.open_table(PUBLIC_UPLOADERS)?.iter()? {
+            snap.public_uploaders.push(row?.0.value());
+        }
         Ok(snap)
     }
 
@@ -194,6 +209,8 @@ impl Db {
             tokens: snap.tokens,
             subtitles: snap.subtitles,
             thumbs: snap.thumbs,
+            node_levels: snap.node_levels,
+            public_uploaders: snap.public_uploaders,
         };
         Ok(serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))?)
     }
@@ -224,6 +241,10 @@ pub struct Dump {
     pub subtitles: Vec<(Id, String)>,
     #[serde(default)]
     pub thumbs: Vec<Thumb>,
+    #[serde(default)]
+    pub node_levels: Vec<(Id, u8)>,
+    #[serde(default)]
+    pub public_uploaders: Vec<Id>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -330,6 +351,17 @@ impl Tx<'_> {
     }
     pub fn put_subtitle(&self, id: Id, s: &str) -> Result<()> {
         self.txn.open_table(SUBTITLES)?.insert(id, s)?;
+        Ok(())
+    }
+    /// 0 clears the node's own level (it then inherits its parent's).
+    pub fn put_node_level(&self, id: Id, level: u8) -> Result<()> {
+        let mut t = self.txn.open_table(NODE_LEVELS)?;
+        if level == 0 { t.remove(id)?; } else { t.insert(id, level)?; }
+        Ok(())
+    }
+    pub fn put_public_uploader(&self, id: Id, public: bool) -> Result<()> {
+        let mut t = self.txn.open_table(PUBLIC_UPLOADERS)?;
+        if public { t.insert(id, 1u8)?; } else { t.remove(id)?; }
         Ok(())
     }
     pub fn del_token(&self, id: Id) -> Result<()> {

@@ -16,7 +16,7 @@ fn register(h: &Hub, email: &str, nick: &str) -> User {
 }
 
 fn node(h: &Hub, v: Viewer, parent: Option<Id>, kind: &str, name: &str) -> Id {
-    let input = NodeInput { parent, kind: kind.into(), code: String::new(), name: name.into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0 };
+    let input = NodeInput { parent, kind: kind.into(), code: String::new(), name: name.into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 };
     h.create_node(v, input).unwrap().id
 }
 

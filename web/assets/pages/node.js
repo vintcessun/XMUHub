@@ -1,4 +1,4 @@
-import { api, esc, layout, moveResources, nodeCard, nodeTitle, pathId, resourceItem, toast, $ } from '../app.js';
+import { api, esc, layout, levelBadge, moveResources, nodeCard, nodeTitle, pathId, resourceItem, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -47,7 +47,7 @@ async function load() {
   const up = data.path.length ? `/n/${data.path[data.path.length - 1].id}` : '/browse';
   $('#crumbs').innerHTML = `<a class="uplevel" href="${up}">‹ 返回上一级</a>`
     + ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
-  $('#name').textContent = nodeTitle(n);
+  $('#name').innerHTML = esc(nodeTitle(n)) + levelBadge(n);
   $('#info').innerHTML = [
     n.code && `<span class="mono">${esc(n.code)}</span>`,
     `${n.count} 份资料`,
@@ -59,8 +59,9 @@ async function load() {
   $('#sq').placeholder = `在「${n.name}」中搜索…`;
   $('#upload').hidden = n.kind === 'section';
 
-  $('#children').innerHTML = data.children.map((c) => nodeCard(c).replace('class="card node-card"', `class="card node-card${c.count ? '' : ' empty-node'}"`)).join('');
+  $('#children').innerHTML = data.children.map((c) => nodeCard(c).replace('class="card node-card"', `class="card node-card${c.count ? '' : ' empty-node'}" data-level="${c.level || 0}"`)).join('');
   $('#children').hidden = !data.children.length;
+  levelChips(data.children);
 
   const hasRes = data.resources.length > 0;
   $('#rescard').hidden = !hasRes && data.children.length > 0;
@@ -107,6 +108,29 @@ $('#list').addEventListener('click', async (e) => {
   if (await moveResources(ids)) load();
 });
 
+/** 全部 / 本科 / 研究生 above the child cards, when both kinds are among them. */
+function levelChips(children) {
+  document.getElementById('lvchips')?.remove();
+  const grad = (c) => c.level === 2 || c.level === 3;
+  const ug = (c) => c.level !== 2;
+  if (!children.some(grad) || !children.some(ug)) return;
+  const bar = document.createElement('div');
+  bar.id = 'lvchips';
+  bar.className = 'chips';
+  bar.style.marginBottom = '12px';
+  bar.innerHTML = [['', '全部'], ['ug', '本科'], ['grad', '研究生']].map(([k, l]) => `<button class="chip${k ? '' : ' on'}" data-lv="${k}" type="button">${l}</button>`).join('');
+  $('#children').before(bar);
+  bar.onclick = (e) => {
+    const b = e.target.closest('[data-lv]');
+    if (!b) return;
+    bar.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b));
+    for (const card of $('#children').children) {
+      const l = Number(card.dataset.level);
+      card.hidden = (b.dataset.lv === 'ug' && l === 2) || (b.dataset.lv === 'grad' && l !== 2 && l !== 3);
+    }
+  };
+}
+
 function renderEditor(n) {
   const box = $('#editor');
   box.hidden = false;
@@ -118,6 +142,9 @@ function renderEditor(n) {
         <label class="field"><span>代号</span><input class="input" id="e_code" value="${esc(n.code)}"></label>
       </div>
       <label class="field"><span>别名 / 俗称（逗号分隔，用于搜索）</span><input class="input" id="e_alias" value="${esc(n.aliases.join('，'))}"></label>
+      <label class="field"><span>本科 / 研究生（设在学院或分组上时，下面的课程都跟着它；未设置的算本科）</span><select class="input" id="e_level" style="max-width:320px">
+        <option value="0">${n.own_level ? '不单独设置（跟随上级）' : `不单独设置（现在：${STUDY_LEVELS[n.level] || '未标注，算本科'}）`}</option>
+        ${[1, 2, 3].map((l) => `<option value="${l}"${n.own_level === l ? ' selected' : ''}>${l === 3 ? '本研都有' : STUDY_LEVELS[l]}</option>`).join('')}</select></label>
       <div class="row"><label class="small"><input type="checkbox" id="e_bucket"${n.bucketed ? ' checked' : ''}> 按 01–04 类型目录分组显示</label>
         <button class="btn primary sm" id="e_save">保存${n.status === 'pending' ? '并确认' : ''}</button></div>
       <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
@@ -138,7 +165,7 @@ function renderEditor(n) {
   $('#e_save').onclick = () => call(() => api(`/nodes/${n.id}`, {
     method: 'PATCH',
     body: {
-      name: $('#e_name').value, label: $('#e_label').value, code: $('#e_code').value, bucketed: $('#e_bucket').checked,
+      name: $('#e_name').value, label: $('#e_label').value, code: $('#e_code').value, bucketed: $('#e_bucket').checked, level: Number($('#e_level').value),
       aliases: $('#e_alias').value.split(/[,，、]/).map((s) => s.trim()).filter(Boolean), approve: true,
     },
   }), '已保存');

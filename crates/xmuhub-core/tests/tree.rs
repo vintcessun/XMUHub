@@ -17,6 +17,7 @@ fn input(parent: Option<u64>, kind: &str, name: &str) -> NodeInput {
         aliases: Vec::new(),
         bucketed: false,
         sort: 0,
+        level: 0,
     }
 }
 

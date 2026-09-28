@@ -182,10 +182,19 @@ export function resourceItem(r, { showNode = true } = {}) {
   </div>`;
 }
 
+/** Study levels of a course (set on it or inherited from its college / group). */
+export const STUDY_LEVELS = { 1: '本科', 2: '研究生', 3: '本研' };
+
+/** 本科 / 研究生 badge for a node (nothing when no level is set). */
+export function levelBadge(n) {
+  const l = STUDY_LEVELS[n.level];
+  return l ? `<span class="lvl lvl-${n.level}">${l}</span>` : '';
+}
+
 export function nodeCard(n, path) {
   const sub = path ? pathText(path) : (n.code || '');
   return `<a class="card node-card" href="/n/${n.id}">
-    <h3>${esc(nodeTitle(n))}</h3>
+    <h3>${esc(nodeTitle(n))}${levelBadge(n)}</h3>
     <div class="meta">${sub ? `<span>${esc(sub)}</span>` : ''}<span><b class="count">${n.count}</b> 份</span></div>
   </a>`;
 }

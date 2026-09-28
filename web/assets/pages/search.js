@@ -6,10 +6,12 @@ const q = (qs.get('q') || '').trim();
 const type = qs.get('type') === 'resource' ? 'resource' : 'course';
 const tag = type === 'resource' ? qs.get('tag') || '' : '';
 const within = qs.get('within') || '';
+// 本科 (also untagged courses) / 研究生, see STUDY_LEVELS.
+const level = ['ug', 'grad'].includes(qs.get('level')) ? qs.get('level') : '';
 const page = Math.min(50, Math.max(1, Number(qs.get('page')) || 1));
 
 function url(p) {
-  const u = new URLSearchParams({ q, type, tag, within, page: 1, ...p });
+  const u = new URLSearchParams({ q, type, tag, within, level, page: 1, ...p });
   for (const [k, v] of [...u]) if (!v || (k === 'page' && v === '1')) u.delete(k);
   return `/search?${u}`;
 }
@@ -20,7 +22,10 @@ $('#sq').value = q;
 $('#stype').value = type;
 $('#sq').placeholder = type === 'course' ? '搜索课程名称或拼音首字母' : '搜索资料名称、年份或拼音首字母';
 $('#types').innerHTML = [['course', '课程'], ['resource', '资料']]
-  .map(([k, l]) => `<a class="chip${k === type ? ' on' : ''}" href="${url({ type: k, tag: k === 'course' ? '' : tag })}">${l}</a>`).join('');
+  .map(([k, l]) => `<a class="chip${k === type ? ' on' : ''}" href="${url({ type: k, tag: k === 'course' ? '' : tag })}">${l}</a>`).join('')
+  + '<span class="chip-sep"></span>'
+  + [['', '本研全部'], ['ug', '本科'], ['grad', '研究生']]
+    .map(([k, l]) => `<a class="chip${k === level ? ' on' : ''}" href="${url({ level: k })}">${l}</a>`).join('');
 $('#tag').hidden = type === 'course';
 
 if (type === 'resource') meta().then((m) => {
@@ -58,6 +63,7 @@ async function run() {
   box.innerHTML = '<div class="skeleton"></div>';
   const params = new URLSearchParams({ q, type, name_only: 'true', page });
   if (within) params.set('within', within);
+  if (level) params.set('level', level);
   if (tag) params.set('tag', tag);
   try {
     const results = await api(`/search?${params}`);

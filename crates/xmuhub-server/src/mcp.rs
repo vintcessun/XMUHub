@@ -100,6 +100,7 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ip: &str, name: &str, a: &Value)
                     _ => None,
                 },
                 courses_only: false,
+                level: None,
                 name_only: false,
                 within: a.get("within").and_then(Value::as_u64),
                 tag: Tag::parse(arg_str(a, "tag")).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
@@ -125,15 +126,15 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ip: &str, name: &str, a: &Value)
         "get_tree" => {
             let parent = a.get("parent").and_then(Value::as_u64);
             let list: Vec<Value> =
-                app.hub.tree().iter().filter(|i| i.node.parent == parent).map(|i| node_view(&i.node, i.count)).collect();
+                app.hub.tree().iter().filter(|i| i.node.parent == parent).map(|i| node_view(&app.hub, &i.node, i.count)).collect();
             json!(list)
         }
         "get_category" => {
             let (info, path, children, resources) = app.hub.node(v, arg_id(a, "id")?).map_err(|e| e.to_string())?;
             json!({
-                "node": node_view(&info.node, info.count),
+                "node": node_view(&app.hub, &info.node, info.count),
                 "path": path.iter().map(|p| json!({ "id": p.id, "name": p.name })).collect::<Vec<_>>(),
-                "children": children.iter().map(|c| node_view(&c.node, c.count)).collect::<Vec<_>>(),
+                "children": children.iter().map(|c| node_view(&app.hub, &c.node, c.count)).collect::<Vec<_>>(),
                 "resources": resources.iter().map(|r| brief(r, &info.node)).collect::<Vec<_>>(),
             })
         }

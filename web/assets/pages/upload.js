@@ -171,7 +171,7 @@ $('#newcourse').onclick = (e) => { e.preventDefault(); openNewCourse($('#nq').va
 $('#backpick').onclick = (e) => { e.preventDefault(); $('#coursenew').hidden = true; $('#nodepick').hidden = false; };
 $('#nc_go').onclick = async () => {
   try {
-    const n = await api('/nodes', { method: 'POST', body: { parent: Number($('#nc_parent').value), kind: 'course', name: $('#nc_name').value } });
+    const n = await api('/nodes', { method: 'POST', body: { parent: Number($('#nc_parent').value), kind: 'course', name: $('#nc_name').value, level: Number($('#nc_level').value) } });
     const d = await api(`/nodes/${n.id}`);
     pick(d.node, d.path);
   } catch (err) { toast(err.message, true); }

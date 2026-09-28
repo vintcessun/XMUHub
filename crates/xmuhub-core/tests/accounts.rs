@@ -56,6 +56,20 @@ fn accounts_and_tokens() {
     h.update_user(Viewer { user: Some(&a) }, b.id, None, Some(true)).unwrap();
     assert!(h.token_user(&secret).is_none());
 
+    // Accounts, complaints, feedback and the site-wide review log are admin-only.
+    let d = register(&h, "d@x.com", "dave");
+    h.update_user(Viewer { user: Some(&a) }, d.id, Some(Level::Reviewer), None).unwrap();
+    let d = h.user(d.id).unwrap();
+    let rev = Viewer { user: Some(&d) };
+    assert!(h.users(rev, "").is_err());
+    assert!(h.update_user(rev, b.id, Some(Level::Trusted), None).is_err());
+    assert!(h.reports(rev, true).is_err());
+    assert!(h.feedback(rev, true).is_err());
+    assert!(h.review_log(rev, None, 10).is_err());
+    assert!(h.review_log(rev, Some(1), 10).is_ok());
+    let adm = Viewer { user: Some(&a) };
+    assert!(h.users(adm, "").is_ok() && h.reports(adm, true).is_ok() && h.feedback(adm, true).is_ok() && h.review_log(adm, None, 10).is_ok());
+
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }

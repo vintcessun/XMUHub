@@ -486,8 +486,11 @@ const panels = {
   },
 };
 
+// Complaints, feedback, the full review log and accounts are admin-only (the server enforces it).
+const ADMIN_TABS = ['reports', 'feedback', 'log', 'users'];
+
 async function show(name) {
-  if (!panels[name]) name = 'dash';
+  if (!panels[name] || (ADMIN_TABS.includes(name) && me.level < 4)) name = 'dash';
   current = name;
   // Keep the tab in the address bar so a refresh (or a shared link) stays here.
   if (location.hash.slice(1) !== name) history.replaceState(null, '', `#${name}`);
@@ -511,6 +514,7 @@ async function show(name) {
     return;
   }
   $('#who').textContent = `${LEVELS[me.level]} · ${me.nickname}`;
+  if (me.level < 4) document.querySelectorAll('#tabs button').forEach((b) => { b.hidden = ADMIN_TABS.includes(b.dataset.t); });
   $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) show(b.dataset.t); };
   show(location.hash.slice(1) || 'dash');
   window.addEventListener('hashchange', () => { if (location.hash.slice(1) !== current) show(location.hash.slice(1)); });

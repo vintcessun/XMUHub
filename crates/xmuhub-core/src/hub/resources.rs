@@ -605,7 +605,7 @@ impl Hub {
     }
 
     pub fn reports(&self, actor: Viewer, include_handled: bool) -> Result<Vec<(Report, Option<(Resource, Node)>)>> {
-        actor.at_least(Level::Reviewer)?;
+        actor.at_least(Level::Admin)?;
         let st = self.st.read();
         let mut v: Vec<(Report, Option<(Resource, Node)>)> = st
             .reports
@@ -621,7 +621,7 @@ impl Hub {
     }
 
     pub fn handle_report(&self, actor: Viewer, id: Id, note: &str) -> Result<Report> {
-        let me = actor.at_least(Level::Reviewer)?.clone();
+        let me = actor.at_least(Level::Admin)?.clone();
         self.mutate(|st, tx| {
             let mut r = st.reports.get(&id).cloned().ok_or(Error::NotFound("投诉"))?;
             r.handled = true;

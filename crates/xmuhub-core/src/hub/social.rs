@@ -172,7 +172,7 @@ impl Hub {
 
     /// Feedback, newest first, with the sender's nickname (if signed in).
     pub fn feedback(&self, actor: Viewer, include_handled: bool) -> Result<Vec<(Feedback, String)>> {
-        actor.at_least(Level::Reviewer)?;
+        actor.at_least(Level::Admin)?;
         let st = self.st.read();
         let mut v: Vec<(Feedback, String)> = st
             .feedback
@@ -185,7 +185,7 @@ impl Hub {
     }
 
     pub fn handle_feedback(&self, actor: Viewer, id: Id, note: &str) -> Result<()> {
-        let me = actor.at_least(Level::Reviewer)?.id;
+        let me = actor.at_least(Level::Admin)?.id;
         self.mutate(|st, tx| {
             let mut f = st.feedback.get(&id).cloned().ok_or(Error::NotFound("反馈"))?;
             f.handled = true;
@@ -201,7 +201,8 @@ impl Hub {
 
     /// Review decisions, newest first; `resource` narrows to one resource's history.
     pub fn review_log(&self, actor: Viewer, resource: Option<Id>, limit: usize) -> Result<Vec<ReviewView>> {
-        actor.at_least(Level::Reviewer)?;
+        // One file's history helps whoever reviews it; the site-wide log is for admins.
+        actor.at_least(if resource.is_some() { Level::Reviewer } else { Level::Admin })?;
         let st = self.st.read();
         Ok(st
             .reviews

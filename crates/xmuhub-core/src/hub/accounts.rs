@@ -421,7 +421,8 @@ impl Hub {
     // ------------------------------------------------------------ roles
 
     pub fn users(&self, actor: Viewer, q: &str) -> Result<Vec<User>> {
-        let me = actor.at_least(Level::Reviewer)?;
+        // Accounts, complaints, feedback and the full review log are for admins only.
+        let me = actor.at_least(Level::Admin)?;
         let q = q.trim().to_lowercase();
         let st = self.st.read();
         let mut v: Vec<User> = st
@@ -438,7 +439,7 @@ impl Hub {
     }
 
     pub fn update_user(&self, actor: Viewer, id: Id, level: Option<Level>, banned: Option<bool>) -> Result<User> {
-        let me = actor.at_least(Level::Reviewer)?.clone();
+        let me = actor.at_least(Level::Admin)?.clone();
         self.mutate(|st, tx| {
             let mut u = st.users.get(&id).cloned().ok_or(Error::NotFound("用户"))?;
             if u.id == me.id {

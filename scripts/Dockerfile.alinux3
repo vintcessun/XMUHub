@@ -17,15 +17,10 @@ RUN set -eux; \
     dnf install -y gcc gcc-c++ make cmake clang lld perl git curl ca-certificates tar gzip which findutils binutils; \
     dnf clean all
 
-# Official installer and toolchain first; the rsproxy.cn mirror for both when either can't be
-# reached from here. A failed download must fail the build (a piped `curl | sh` once
-# produced an image without rustc).
+# Official rustup, reached through the proxy build-alinux3.ps1 passes in (host.docker.internal:7890).
+# A failed download must fail the build: a piped `curl | sh` once produced an image without rustc.
 RUN set -eux; \
-    if curl -sSf --max-time 30 -o /dev/null https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256 \
-       && curl -sSf --max-time 60 -o /tmp/rustup.sh https://sh.rustup.rs; then :; else \
-      export RUSTUP_DIST_SERVER=https://rsproxy.cn RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup; \
-      curl -sSf --max-time 60 -o /tmp/rustup.sh https://rsproxy.cn/rustup-init.sh; \
-    fi; \
+    curl -sSf --retry 3 --max-time 120 -o /tmp/rustup.sh https://sh.rustup.rs; \
     sh /tmp/rustup.sh -y --profile minimal --default-toolchain stable; \
     rm -f /tmp/rustup.sh; \
     /root/.cargo/bin/rustc --version

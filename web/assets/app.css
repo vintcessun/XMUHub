@@ -474,6 +474,8 @@ main { padding-top: 36px; padding-bottom: 72px; }
 
 .card { box-shadow: var(--shadow); padding: 24px; }
 .card + .card { margin-top: 18px; }
+/* ...but not between cells of a grid: a pushed-down neighbour made the first cell of each row taller. */
+.grid > .card, .sections > .card, .layout-side > .card { margin-top: 0; }
 .grid, .sections { gap: 16px; }
 .section-head { margin-top: 36px; margin-bottom: 14px; }
 .section-head h2, .card > h2:first-child { font-size: 24px; }

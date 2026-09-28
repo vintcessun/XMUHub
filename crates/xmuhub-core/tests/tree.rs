@@ -1,3 +1,7 @@
+mod common;
+
+use common::test_password;
+
 use std::sync::Arc;
 
 use xmuhub_core::Hub;
@@ -47,7 +51,7 @@ fn contributor_can_create_under_misclassified_college_only() {
             Registration {
                 email,
                 code,
-                password: "password123".into(),
+                password: test_password(),
                 nickname: nick.into(),
             },
             "1.1.1.1",

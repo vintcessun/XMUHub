@@ -1,5 +1,9 @@
 //! Uploaders editing their own files: published edits go back to review.
 
+mod common;
+
+use common::test_password;
+
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -12,7 +16,7 @@ use xmuhub_core::storage::{Receipt, Storage};
 
 fn register(h: &Hub, email: &str, nick: &str) -> User {
     let (email, code) = h.request_code(email, CodePurpose::Register, "1.1.1.1").unwrap();
-    h.register(Registration { email, code, password: "password123".into(), nickname: nick.into() }, "1.1.1.1").unwrap().1
+    h.register(Registration { email, code, password: test_password(), nickname: nick.into() }, "1.1.1.1").unwrap().1
 }
 
 fn node(h: &Hub, v: Viewer, parent: Option<Id>, kind: &str, name: &str) -> Id {

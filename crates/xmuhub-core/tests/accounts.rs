@@ -1,5 +1,9 @@
 //! Accounts: single-character nicknames, peers can't ban each other, personal tokens.
 
+mod common;
+
+use common::test_password;
+
 use std::sync::Arc;
 
 use xmuhub_core::Hub;
@@ -17,7 +21,7 @@ fn hub(dir: &std::path::Path) -> Hub {
 
 fn register(h: &Hub, email: &str, nick: &str) -> User {
     let (email, code) = h.request_code(email, CodePurpose::Register, "1.1.1.1").unwrap();
-    h.register(Registration { email, code, password: "password123".into(), nickname: nick.into() }, "1.1.1.1").unwrap().1
+    h.register(Registration { email, code, password: test_password(), nickname: nick.into() }, "1.1.1.1").unwrap().1
 }
 
 #[test]

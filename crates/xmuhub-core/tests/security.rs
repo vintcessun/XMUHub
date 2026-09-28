@@ -1,6 +1,10 @@
 //! Abuse defences: sign-up checks, sessions, tokens after a password change, nicknames,
 //! banned users' comments, no-op edits, re-uploads of refused files, download counting.
 
+mod common;
+
+use common::{other_test_password, test_password};
+
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -22,7 +26,7 @@ fn open(tag: &str) -> (Hub, std::path::PathBuf) {
 
 fn register(h: &Hub, email: &str, nick: &str) -> (String, User) {
     let (email, code) = h.request_code(email, CodePurpose::Register, "1.1.1.1").unwrap();
-    h.register(Registration { email, code, password: "password123".into(), nickname: nick.into() }, "1.1.1.1").unwrap()
+    h.register(Registration { email, code, password: test_password(), nickname: nick.into() }, "1.1.1.1").unwrap()
 }
 
 fn input(node: Id) -> ResourceInput {
@@ -68,7 +72,7 @@ fn accounts_are_bounded() {
 
     // Staff-looking nicknames are for staff.
     let (email, code) = h.request_code("c@example.invalid", CodePurpose::Register, "1.1.1.1").unwrap();
-    assert!(h.register(Registration { email, code, password: "password123".into(), nickname: "鹭岛书阁 管理员".into() }, "1.1.1.1").is_err());
+    assert!(h.register(Registration { email, code, password: test_password(), nickname: "鹭岛书阁 管理员".into() }, "1.1.1.1").is_err());
     assert!(h.update_profile(&user, "", Some("管理员"), None, None).is_err());
     assert!(h.update_profile(&admin, "", Some("管理员小王"), None, None).is_ok());
 
@@ -76,7 +80,7 @@ fn accounts_are_bounded() {
     // (Sessions made within the same second may be dropped in either order, so count them.)
     let mut secrets = vec![signup_session];
     for _ in 0..24 {
-        secrets.push(h.login("b@example.invalid", "password123", "2.2.2.2").unwrap().0);
+        secrets.push(h.login("b@example.invalid", &test_password(), "2.2.2.2").unwrap().0);
     }
     assert_eq!(secrets.iter().filter(|s| h.session_user(s).is_some()).count(), 20);
     assert!(h.session_user(secrets.last().unwrap()).is_some(), "the newest one always stays");
@@ -86,7 +90,7 @@ fn accounts_are_bounded() {
     let (token, _) = h.create_token(Viewer { user: Some(&me) }, "script").unwrap();
     assert!(h.token_user(&token).is_some());
     let (email, code) = h.request_code("b@example.invalid", CodePurpose::Reset, "1.1.1.1").unwrap();
-    h.reset_password(&email, &code, "newpassword1", "1.1.1.1").unwrap();
+    h.reset_password(&email, &code, &other_test_password(), "1.1.1.1").unwrap();
     assert!(h.token_user(&token).is_none());
 
     drop(h);

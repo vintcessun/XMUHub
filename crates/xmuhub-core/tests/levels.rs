@@ -54,6 +54,7 @@ fn levels_inherit_and_filter_search() {
     let grad = node(&h, staff, Some(college), "course", "数据挖掘", LEVEL_GRADUATE);
     let both = node(&h, staff, Some(college), "course", "数据库", LEVEL_BOTH);
     assert_eq!(h.node_level(ug), (0, 0));
+    assert_eq!(h.node_level(both), (LEVEL_BOTH, LEVEL_BOTH));
     assert_eq!(h.node_level(grad), (LEVEL_GRADUATE, LEVEL_GRADUATE));
 
     // Untagged courses count as 本科; "both" shows under either filter.

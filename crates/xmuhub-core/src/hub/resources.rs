@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Hub, State, Viewer, clean};
+use super::{Hub, ReportItem, State, Viewer, clean};
 use crate::db::Tx;
 use crate::error::{Error, Result, bad};
 use crate::model::*;
@@ -370,11 +370,11 @@ impl Hub {
                     r.needs_review = false;
                     r.uncertain = false;
                     // Approving a resource also confirms the node it created.
-                    if let Some(mut n) = st.nodes.get(&r.node).cloned() {
-                        if n.status == NodeStatus::Pending {
-                            n.status = NodeStatus::Active;
-                            st.put_node(tx, n)?;
-                        }
+                    if let Some(mut n) = st.nodes.get(&r.node).cloned()
+                        && n.status == NodeStatus::Pending
+                    {
+                        n.status = NodeStatus::Active;
+                        st.put_node(tx, n)?;
                     }
                 }
                 "reject" => r.status = Status::Rejected,
@@ -598,7 +598,7 @@ impl Hub {
         })
     }
 
-    pub fn reports(&self, actor: Viewer, include_handled: bool) -> Result<Vec<(Report, Option<(Resource, Node)>)>> {
+    pub fn reports(&self, actor: Viewer, include_handled: bool) -> Result<Vec<ReportItem>> {
         actor.at_least(Level::Admin)?;
         let st = self.st.read();
         let mut v: Vec<(Report, Option<(Resource, Node)>)> = st

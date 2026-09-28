@@ -321,15 +321,15 @@ pub fn guess_name(text: &str, ext: &str) -> Guess {
         (&["教材", "课本", "教科书", "edition"], "教材"),
         (&["模板", "template"], "模板"),
     ];
-    if !IS_PAPER.is_match(text) {
-        if let Some((_, w)) = notes.iter().find(|(ws, _)| has(ws)) {
-            g.type_word = w;
-        }
+    if !IS_PAPER.is_match(text)
+        && let Some((_, w)) = notes.iter().find(|(ws, _)| has(ws))
+    {
+        g.type_word = w;
     }
-    if g.type_word.is_empty() {
-        if let Some((_, w)) = rules.iter().find(|(ws, _)| has(ws)) {
-            g.type_word = w;
-        }
+    if g.type_word.is_empty()
+        && let Some((_, w)) = rules.iter().find(|(ws, _)| has(ws))
+    {
+        g.type_word = w;
     }
     if g.type_word.is_empty() {
         g.type_word = match ext {

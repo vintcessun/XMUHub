@@ -41,6 +41,9 @@ pub struct NodePatch {
     pub approve: bool,
 }
 
+/// A category page: the node, its ancestors, its children and its visible files.
+pub type NodePage = (NodeInfo, Vec<Node>, Vec<NodeInfo>, Vec<Resource>);
+
 /// A node plus what pages need to render it.
 #[derive(Debug, Clone, Serialize)]
 pub struct NodeInfo {
@@ -79,7 +82,7 @@ impl Hub {
     }
 
     /// A node with its ancestors, children and directly attached resources.
-    pub fn node(&self, viewer: Viewer, id: Id) -> Result<(NodeInfo, Vec<Node>, Vec<NodeInfo>, Vec<Resource>)> {
+    pub fn node(&self, viewer: Viewer, id: Id) -> Result<NodePage> {
         let st = self.st.read();
         let n = st.resolve(id).ok_or(Error::NotFound("分类"))?;
         let path = st.ancestors(n.id).iter().filter_map(|a| st.nodes.get(a).cloned()).collect();

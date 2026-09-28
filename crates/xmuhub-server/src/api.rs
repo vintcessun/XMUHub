@@ -248,10 +248,10 @@ fn thumb_urls(app: &App, key: &str) -> Vec<String> {
     let Some(loc) = app.hub.thumb_of(key) else { return Vec::new() };
     let urls = app.hub.storage.download_urls(std::slice::from_ref(&loc));
     let mut out: Vec<String> = urls.iter().take(2).cloned().collect();
-    if let Some(last) = urls.last() {
-        if !out.contains(last) {
-            out.push(last.clone());
-        }
+    if let Some(last) = urls.last()
+        && !out.contains(last)
+    {
+        out.push(last.clone());
     }
     out
 }

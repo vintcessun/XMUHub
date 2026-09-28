@@ -37,7 +37,7 @@ pub use thumbs::ThumbJob;
 pub use social::{CommentView, RatingSummary, ReviewView};
 pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
-pub use tree::{NodeInput, NodePatch};
+pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
 
 const SEQ_KEY: &str = "seq";
@@ -364,8 +364,11 @@ pub struct Stats {
 
 pub enum SearchItem {
     Node { node: Node, path: Vec<Node>, count: usize },
-    Resource { resource: Resource, node: Node, path: Vec<Node> },
+    Resource { resource: Box<Resource>, node: Node, path: Vec<Node> },
 }
+
+/// A complaint with the file it is about (gone when the file was deleted from the catalog).
+pub type ReportItem = (Report, Option<(Resource, Node)>);
 
 pub(crate) fn clean(s: &str, max: usize) -> String {
     s.trim().chars().filter(|c| !c.is_control()).take(max).collect()
@@ -564,7 +567,7 @@ impl Hub {
                 DocType::Resource => {
                     let r = st.resources.get(&h.id).filter(|r| viewer.can_see(r))?;
                     let n = st.nodes.get(&r.node)?;
-                    Some(SearchItem::Resource { resource: r.clone(), node: n.clone(), path: path_of(n.id) })
+                    Some(SearchItem::Resource { resource: Box::new(r.clone()), node: n.clone(), path: path_of(n.id) })
                 }
             })
             .collect();

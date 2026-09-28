@@ -55,6 +55,12 @@
 - 纯静态网页 + ES module，**没有构建步骤**，不要引入 npm 构建、打包器、框架。
 - 第三方库放在 `web/vendor/<名字>-<版本>/`，固定版本、核对 npm 的 sha512，不要从运行时 CDN 加载。
 
+## 6.5 代码质量：Clippy 零警告
+
+- 每次改 Rust 代码，提交前都要跑 `cargo clippy --workspace --all-targets`，**所有警告都要处理掉**（包括测试代码里的），不能留到以后。
+- 优先改代码本身；`cargo clippy --fix` 自动改完要检查缩进和可读性。确实不该改的，用 `#[allow(clippy::xxx)]` 加在最小范围上，并在旁边写一句原因，不要整个文件或整个 crate 关掉。
+- `cargo test --workspace` 同样要全部通过。
+
 ## 7. 部署
 
 - 用 `pwsh scripts/sync.ps1`：它会同步 git，并按改动决定只更新网页还是重新编译。
@@ -69,6 +75,7 @@
 - [ ] 有没有新增返回文件内容的接口？
 - [ ] 有没有改已有的数据库记录结构？
 - [ ] 有没有把密钥或管理员邮箱写进仓库？
+- [ ] `cargo clippy --workspace --all-targets` 是否零警告？`cargo test --workspace` 是否全部通过？
 - [ ] Rust 改了的话，是否按完整部署发布？
 
 违反第 1 条的改动，即使「能用」「有上限」「只是兜底」，也会被直接回退。

@@ -161,10 +161,10 @@ impl Hub {
         }
         let now = now();
         let a = &self.auth;
-        if let Some(c) = a.codes.lock().get(&(email.clone(), purpose)) {
-            if now - c.sent_at < CODE_COOLDOWN {
-                return Err(Error::TooMany(format!("请 {} 秒后再获取验证码", CODE_COOLDOWN - (now - c.sent_at))));
-            }
+        if let Some(c) = a.codes.lock().get(&(email.clone(), purpose))
+            && now - c.sent_at < CODE_COOLDOWN
+        {
+            return Err(Error::TooMany(format!("请 {} 秒后再获取验证码", CODE_COOLDOWN - (now - c.sent_at))));
         }
         {
             let hour = now / 3600;

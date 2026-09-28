@@ -88,11 +88,11 @@ impl Hub {
         };
         if stale {
             let _ = self.mutate(|st, tx| {
-                if let Some(id) = st.token_by_hash.get(&hash).copied() {
-                    if let Some(t) = st.tokens.get_mut(&id) {
-                        t.last_used = now();
-                        tx.put_token(t)?;
-                    }
+                if let Some(id) = st.token_by_hash.get(&hash).copied()
+                    && let Some(t) = st.tokens.get_mut(&id)
+                {
+                    t.last_used = now();
+                    tx.put_token(t)?;
                 }
                 Ok(())
             });

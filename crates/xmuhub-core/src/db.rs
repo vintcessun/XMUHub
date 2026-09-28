@@ -220,7 +220,7 @@ impl Db {
             public_uploaders: snap.public_uploaders,
             avatars: snap.avatars,
         };
-        Ok(serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))?)
+        serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
 }
 

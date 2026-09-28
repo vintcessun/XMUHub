@@ -232,13 +232,13 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         v["original_name"] = json!(r.original_name);
         v["source"] = json!(r.source);
         v["uncertain"] = json!(r.uncertain);
-        v["uploader"] = json!({ "id": r.uploader, "nickname": app.hub.uploader_name(r.uploader) });
+        v["uploader"] = json!({ "id": r.uploader, "nickname": app.hub.uploader_name(r.uploader), "avatar": app.hub.avatar_of(r.uploader) });
         if let Some(by) = r.reviewed_by {
             v["reviewer"] = json!({ "id": by, "nickname": app.hub.uploader_name(by) });
         }
     } else if app.hub.public_uploader(r.uploader) {
         // The uploader chose to show their nickname (「我的」 page); no id for the public.
-        v["uploader"] = json!({ "nickname": app.hub.uploader_name(r.uploader) });
+        v["uploader"] = json!({ "nickname": app.hub.uploader_name(r.uploader), "avatar": app.hub.avatar_of(r.uploader) });
     }
     v
 }
@@ -267,6 +267,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/meta", get(meta))
         .route("/me", get(me).patch(update_me))
         .route("/me/tokens", get(list_tokens).post(create_token))
+        .route("/me/avatar", post(set_avatar).delete(clear_avatar))
+        .route("/inbox", post(inbox))
         .route("/me/tokens/{id}", axum::routing::delete(revoke_token))
         .route("/auth/code", post(send_code))
         .route("/auth/register", post(register))
@@ -304,6 +306,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/review/change-requests", get(resource_change_requests))
         .route("/review/change-requests/{id}", post(review_resource_change))
         .route("/review/nodes", get(pending_nodes))
+        .route("/admin/avatars", get(pending_avatars))
+        .route("/admin/avatars/{user}", post(review_avatar))
         .route("/admin/reports", get(reports))
         .route("/admin/reports/{id}/handle", post(handle_report))
         .route("/admin/reports/{id}", axum::routing::delete(delete_report))
@@ -370,6 +374,9 @@ async fn me(State(app): S, auth: Auth) -> Json<Value> {
 fn me_view(app: &App, u: &User) -> Value {
     let mut v = user_view(u);
     v["public_name"] = json!(app.hub.public_uploader(u.id));
+    let (avatar, pending) = app.hub.own_avatar(u.id);
+    v["avatar"] = json!(avatar);
+    v["avatar_pending"] = json!(pending);
     v
 }
 
@@ -501,6 +508,51 @@ async fn revoke_token(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<V
 }
 
 // ------------------------------------------------------------------ tree
+
+/// The hidden 「待整理」 node for uploads that the uploader couldn't place (created on first use).
+async fn inbox(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let n = blocking(move || hub.inbox(Viewer { user: user.as_ref() })).await?;
+    Ok(Json(node_view(&app.hub, &n, 0)))
+}
+
+#[derive(Deserialize)]
+struct AvatarIn {
+    upload_id: Id,
+}
+
+/// The picture itself was uploaded like any file (`/uploads`); this makes it the avatar.
+async fn set_avatar(State(app): S, auth: Auth, Json(b): Json<AvatarIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.set_avatar(Viewer { user: user.as_ref() }, b.upload_id)).await?;
+    let me = auth.user.as_ref().ok_or(Error::Unauthorized)?;
+    Ok(Json(me_view(&app, me)))
+}
+
+async fn clear_avatar(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.clear_avatar(Viewer { user: user.as_ref() })).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn pending_avatars(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.pending_avatars(auth.viewer())?)))
+}
+
+#[derive(Deserialize)]
+struct AvatarReviewIn {
+    action: String,
+}
+
+async fn review_avatar(State(app): S, auth: Auth, Path(user): Path<Id>, Json(b): Json<AvatarReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let viewer = auth.user.clone();
+    blocking(move || hub.review_avatar(Viewer { user: viewer.as_ref() }, user, &b.action)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
 
 async fn tree(State(app): S) -> Json<Value> {
     Json(json!(app.hub.tree().iter().map(|i| node_view(&app.hub, &i.node, i.count)).collect::<Vec<_>>()))

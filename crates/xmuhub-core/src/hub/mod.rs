@@ -5,7 +5,9 @@
 //! `resources` (metadata, review, reports), `uploads` (storage slots and blobs).
 
 mod accounts;
+mod avatars;
 mod imports;
+mod inbox;
 mod resources;
 mod social;
 mod stats;
@@ -27,6 +29,8 @@ use crate::search::{DocType, Placement, Search};
 use crate::storage::Storage;
 
 pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
+pub use avatars::{AVATAR_MAX_BYTES, PendingAvatar};
+pub use inbox::INBOX_NAME;
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
 pub use stats::DayStats;
 pub use thumbs::ThumbJob;
@@ -37,6 +41,8 @@ pub use tree::{NodeInput, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
 
 const SEQ_KEY: &str = "seq";
+/// Id of the hidden 「待整理」 node (see inbox.rs), once created.
+const INBOX_KEY: &str = "inbox_node";
 
 #[derive(Debug, Clone)]
 pub struct Limits {
@@ -93,6 +99,10 @@ pub(crate) struct State {
     node_levels: HashMap<Id, u8>,
     /// Uploaders who chose to show their nickname on their files.
     public_uploaders: HashSet<Id>,
+    /// user → profile picture
+    avatars: HashMap<Id, Avatar>,
+    /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
+    inbox: Option<Id>,
 }
 
 /// Study levels of a course (or of a college / group, inherited by its courses).
@@ -108,6 +118,8 @@ impl State {
         for (k, v) in snap.meta {
             if k == SEQ_KEY && v.len() == 8 {
                 st.seq = u64::from_le_bytes(v.try_into().unwrap());
+            } else if k == INBOX_KEY && v.len() == 8 {
+                st.inbox = Some(u64::from_le_bytes(v.try_into().unwrap()));
             }
         }
         for n in snap.nodes {
@@ -151,6 +163,7 @@ impl State {
         st.subtitles = snap.subtitles.into_iter().collect();
         st.node_levels = snap.node_levels.into_iter().collect();
         st.public_uploaders = snap.public_uploaders.into_iter().collect();
+        st.avatars = snap.avatars.into_iter().map(|a| (a.user, a)).collect();
         st.thumbs = snap.thumbs.into_iter().map(|t| (t.key.clone(), t)).collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);
@@ -434,7 +447,7 @@ impl Hub {
     pub fn rebuild_index(&self) -> Result<()> {
         let st = self.st.read();
         for n in st.nodes.values() {
-            if !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section {
+            if !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section && Some(n.id) != st.inbox {
                 let (anc, path, aliases) = Self::placement_parts(&st, n.id);
                 let parent_path = anc.iter().filter_map(|a| st.nodes.get(a)).map(|n| n.name.as_str()).collect::<Vec<_>>().join(" ");
                 let _ = path;
@@ -505,7 +518,7 @@ impl Hub {
         }
         for nid in &nodes {
             match st.nodes.get(nid) {
-                Some(n) if !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section => {
+                Some(n) if !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section && Some(n.id) != st.inbox => {
                     let (anc, _, aliases) = Self::placement_parts(&st, n.id);
                     let parent_path = anc.iter().filter_map(|a| st.nodes.get(a)).map(|n| n.name.as_str()).collect::<Vec<_>>().join(" ");
                     let _ = self.search.put_node(n, &Placement { node: n.id, ancestors: &anc, path_text: &parent_path, aliases_text: &aliases }, Self::node_weight(&st, n), Self::is_course(&st, n), st.level_of(n.id));
@@ -524,6 +537,7 @@ impl Hub {
         Stats {
             nodes: st.nodes.values().filter(|n| {
                 n.kind == NodeKind::Course
+                    && Some(n.id) != st.inbox
                     && !n.parent.and_then(|id| st.nodes.get(&id)).is_some_and(|parent| parent.kind == NodeKind::Section)
                     && st.counts.get(&n.id).copied().unwrap_or(0) > 0
             }).count(),

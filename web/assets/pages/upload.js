@@ -1,4 +1,4 @@
-import { api, esc, fmtSize, layout, loginUrl, meta, pathText, qs, store, toast, tree, $ } from '../app.js';
+import { api, esc, fmtSize, layout, loginUrl, meta, pathText, qs, sendPart, store, toast, tree, $ } from '../app.js';
 
 const state = { node: null, path: [], rows: [], busy: false };
 let M = null; // meta
@@ -93,6 +93,9 @@ function yearOptions(cur) {
 
 // ---------------------------------------------------------------- node picker
 
+/** The hidden 「待整理」 node (see the server's inbox.rs): no parent, fixed name. */
+const isInbox = (node) => !!node && node.parent == null && node.name === '待整理';
+
 function pick(node, path) {
   state.node = node;
   state.path = path || [];
@@ -100,7 +103,9 @@ function pick(node, path) {
   $('#coursenew').hidden = true;
   $('#picked').hidden = false;
   $('#picked').innerHTML = `<div><b>${esc(node.name)}</b> <span class="small muted">${esc(pathText(state.path))}</span>
-    <div class="small faint">文件名将以「${esc(node.label || node.name)}」开头</div></div><span class="grow"></span><a href="#" id="unpick">更换</a>`;
+    <div class="small faint">${isInbox(node)
+      ? '审核员会把这些文件归到正确的课程、改好名字后再公开。备注里写一句是什么课、什么内容会更快。'
+      : `文件名将以「${esc(node.label || node.name)}」开头`}</div></div><span class="grow"></span><a href="#" id="unpick">更换</a>`;
   $('#unpick').onclick = (e) => { e.preventDefault(); state.node = null; saveDraft(); $('#picked').hidden = true; $('#nodepick').hidden = false; $('#nq').focus(); };
   saveDraft();
   renderRows();
@@ -167,6 +172,10 @@ async function openNewCourse(name = '') {
   $('#coursenew').hidden = false;
   $('#nc_name').focus();
 }
+$('#useinbox').onclick = async (e) => {
+  e.preventDefault();
+  try { pick(await api('/inbox', { method: 'POST' }), []); } catch (err) { toast(err.message, true); }
+};
 $('#newcourse').onclick = (e) => { e.preventDefault(); openNewCourse($('#nq').value.trim()); };
 $('#backpick').onclick = (e) => { e.preventDefault(); $('#coursenew').hidden = true; $('#nodepick').hidden = false; };
 $('#nc_go').onclick = async () => {
@@ -392,25 +401,6 @@ async function hashQueue() {
 }
 
 // ---------------------------------------------------------------- upload
-
-function sendPart(target, blob, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open(target.method, target.url);
-    for (const [k, v] of target.headers) xhr.setRequestHeader(k, v);
-    // Same-origin relay requires the anti-CSRF header; the cross-origin Worker must not get it.
-    if (target.url.startsWith('/')) xhr.setRequestHeader('X-XMUHub', '1');
-    xhr.upload.onprogress = (e) => onProgress(e.loaded);
-    xhr.onload = () => {
-      let body = null;
-      try { body = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body || {});
-      else reject(new Error((body && (body.error || body.message)) || `上传失败（HTTP ${xhr.status}）`));
-    };
-    xhr.onerror = () => reject(new Error('网络中断'));
-    xhr.send(blob);
-  });
-}
 
 async function uploadRow(r, bar, base, total) {
   while (!r.parts) await new Promise((res) => setTimeout(res, 300));

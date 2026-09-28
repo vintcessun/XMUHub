@@ -22,6 +22,8 @@ pub struct RatingSummary {
 pub struct CommentView {
     pub id: Id,
     pub nickname: String,
+    /// Mirror URLs of the commenter's approved picture (empty = none).
+    pub avatar: Vec<String>,
     pub body: String,
     pub created_at: i64,
     pub mine: bool,
@@ -93,6 +95,7 @@ impl Hub {
             .map(|c| CommentView {
                 id: c.id,
                 nickname: st.users.get(&c.user).map(|u| u.nickname.clone()).unwrap_or_default(),
+                avatar: st.avatars.get(&c.user).map(|a| self.picture_urls(&st, &a.current)).unwrap_or_default(),
                 body: c.body.clone(),
                 created_at: c.created_at,
                 mine: me == Some(c.user),

@@ -1,4 +1,4 @@
-import { ago, api, esc, fmtDate, forgetMe, LEVELS, layout, loginUrl, pwToggle, resourceItem, toast, $ } from '../app.js';
+import { ago, api, avatar, esc, fmtDate, forgetMe, LEVELS, layout, loginUrl, pwToggle, resourceItem, sendPart, toast, $ } from '../app.js';
 
 pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
 
@@ -13,6 +13,34 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
       await api('/me', { method: 'PATCH', body: { public_name: e.target.checked } });
       toast(e.target.checked ? '已公开：你上传的资料页会显示你的昵称' : '已设为不公开');
     } catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
+  };
+
+  showAvatar(me);
+  $('#avfile').onchange = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    $('#avnote').textContent = '正在上传…';
+    try {
+      const now = await uploadAvatar(f);
+      showAvatar(now);
+      Object.assign(me, now);
+      const nav = document.querySelector('#nav-me');
+      if (nav) nav.innerHTML = `${avatar(now.avatar, now.nickname, 22)}<span>${esc(now.nickname)}</span>`;
+      forgetMe(); // the next page rebuilds the header with the new picture
+      toast(me.level >= 3 ? '头像已更新' : '已提交，审核通过后别人就能看到');
+    } catch (err) { toast(err.message, true); showAvatar(me); }
+  };
+  $('#avclear').onclick = async () => {
+    if (!confirm('移除头像？')) return;
+    try {
+      await api('/me/avatar', { method: 'DELETE' });
+      me.avatar = []; me.avatar_pending = [];
+      showAvatar(me);
+      const nav = document.querySelector('#nav-me');
+      if (nav) nav.innerHTML = `${avatar([], me.nickname, 22)}<span>${esc(me.nickname)}</span>`;
+      forgetMe();
+    } catch (err) { toast(err.message, true); }
   };
 
   $('#logout').onclick = async () => {
@@ -83,4 +111,43 @@ async function loadTokens() {
         <td class="small faint">${t.last_used ? ago(t.last_used) : '未使用'}</td><td><button class="btn sm danger" data-del="${t.id}">删除</button></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="small faint">还没有令牌</p>';
   } catch (e) { $('#tlist').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; }
+}
+
+// ---------------------------------------------------------------- avatar
+
+function showAvatar(u) {
+  const pending = u.avatar_pending && u.avatar_pending.length;
+  $('#avbox').innerHTML = avatar(pending ? u.avatar_pending : u.avatar, u.nickname, 64);
+  $('#avclear').hidden = !(u.avatar && u.avatar.length) && !pending;
+  $('#avnote').textContent = pending ? '新头像正在等待审核，通过前别人看到的还是原来的。' : '显示在页头、你的评论和公开昵称的资料页上。图片会裁成正方形。';
+}
+
+/** Crops the picture to a 256×256 square in the browser, uploads it like any file (to
+ * GitHub, never kept on this server) and makes it the avatar. Resolves to the new `me`. */
+async function uploadAvatar(file) {
+  const img = await createImageBitmap(file).catch(() => { throw new Error('读不出这张图片，换一张试试'); });
+  const side = Math.min(img.width, img.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 256;
+  canvas.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 256, 256);
+  const encode = (type) => new Promise((res) => canvas.toBlob(res, type, 0.86));
+  let blob = await encode('image/webp');
+  if (!blob || blob.type !== 'image/webp') blob = await encode('image/jpeg');
+  const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  const ext = blob.type === 'image/webp' ? 'webp' : 'jpg';
+  const plan = await api('/uploads', { method: 'POST', body: { filename: `avatar.${ext}`, mime: blob.type, parts: [{ size: blob.size, sha256 }] } });
+  if (!plan.dedup) {
+    let target = plan.parts[0].target;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const receipt = await sendPart(target, blob, () => {});
+        await api(`/uploads/${plan.upload_id}/parts/0`, { method: 'POST', body: { asset_id: receipt.id ?? null } });
+        break;
+      } catch (err) {
+        if (attempt >= 1) throw err;
+        target = (await api(`/uploads/${plan.upload_id}/parts/0/renew`, { method: 'POST' })).target;
+      }
+    }
+  }
+  return api('/me/avatar', { method: 'POST', body: { upload_id: plan.upload_id } });
 }

@@ -65,6 +65,9 @@ impl Hub {
         let mut stack: Vec<Id> = st.children.get(&0).cloned().unwrap_or_default();
         stack.reverse();
         while let Some(id) = stack.pop() {
+            if Some(id) == st.inbox {
+                continue;
+            }
             if let Some(n) = st.nodes.get(&id) {
                 out.push(Self::info(&st, n));
             }
@@ -104,7 +107,7 @@ impl Hub {
         let mut scored: Vec<(u8, &Node)> = st
             .nodes
             .values()
-            .filter(|n| !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section)
+            .filter(|n| !matches!(n.status, NodeStatus::Merged(_)) && n.kind != NodeKind::Section && Some(n.id) != st.inbox)
             .filter_map(|n| {
                 let name = n.name.to_lowercase();
                 let label = n.label.to_lowercase();

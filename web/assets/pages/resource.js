@@ -1,4 +1,4 @@
-import { ago, api, downloadResource, esc, fmtDate, fmtSize, layout, loginUrl, meta, pathId, pickNode, preview, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, fmtDate, fmtSize, layout, loginUrl, meta, pathId, pickNode, preview, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -32,7 +32,7 @@ async function load() {
     ['上传于', fmtDate(r.created_at)],
     r.original_name && ['原文件名', `<span class="faint">${esc(r.original_name)}</span>`],
     r.source && ['来源', `<span class="faint">${esc(r.source)}</span>`],
-    r.uploader && ['上传者', `<span class="faint">${esc(r.uploader.nickname)}</span>`],
+    r.uploader && ['上传者', `<span class="who-inline">${avatar(r.uploader.avatar, r.uploader.nickname, 20)}<span class="faint">${esc(r.uploader.nickname)}</span></span>`],
     r.reviewer && ['审核人', `<span class="faint">${esc(r.reviewer.nickname)}</span>`],
   ].filter((x) => x && x[1]);
   $('#kv').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -102,7 +102,7 @@ async function loadSocial(me) {
   $('#cbody').oninput = () => store.set(DK, $('#cbody').value.trim() ? $('#cbody').value : null);
   $('#chint').textContent = '';
   $('#clist').innerHTML = (!me ? `<p class="small muted"><a href="${loginUrl()}">登录</a>后可以发表评论</p>` : '') +
-    (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who"><b>${esc(c.nickname)}</b><span class="faint">${ago(c.created_at)}</span>
+    (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who">${avatar(c.avatar, c.nickname, 24)}<b>${esc(c.nickname)}</b><span class="faint">${ago(c.created_at)}</span>
         <span class="grow"></span>${c.can_delete ? '<a href="#" data-del class="small">删除</a>' : ''}</div><div class="text">${esc(c.body)}</div></div>`).join('')
       : '<p class="small faint">还没有评论</p>');
   $('#clist').onclick = async (e) => {
@@ -211,7 +211,7 @@ async function renderManage(r, me) {
       <label class="small"><input type="checkbox" id="f_ans"${n.with_answer ? ' checked' : ''}> 含答案</label>
       <label class="field" style="margin-top:8px"><span>补充说明（括号内，如 201题、第1册）</span><input class="input" id="f_extra" value="${esc(n.extra)}"></label>
       ${staff ? `<label class="field"><span>备注（公开显示）</span><textarea class="input" id="f_note">${esc(r.note)}</textarea></label>` : ''}
-      ${staff ? `<label class="field"><span>移到分类 ID</span><input class="input" id="f_node" value="${r.node.id}"></label>
+      ${staff ? `<div class="field"><span>所属分类</span><div class="row"><span id="f_nodename">${esc(r.node.name)}</span><span class="small faint">ID</span><input class="input" id="f_node" value="${r.node.id}" style="max-width:110px"><button class="btn sm" id="f_pick" type="button">选择分类</button></div></div>
         <label class="small"><input type="checkbox" id="f_unc"${r.uncertain ? ' checked' : ''}> 待核实</label>`
         : `<div class="field"><span>所属分类</span><div class="row"><span id="f_nodename">${esc(r.node.name)}</span><button class="btn sm" id="f_pick" type="button">换一个分类</button></div></div>`}
       <div style="margin-top:10px"><button class="btn primary sm" id="f_save">保存</button></div>
@@ -236,10 +236,13 @@ async function renderManage(r, me) {
       } catch (e) { toast(e.message, true); }
     };
   });
-  if (canEdit && !staff) {
+  if (canEdit) {
     $('#f_pick').onclick = async () => {
       const t = await pickNode('把这份资料放到哪个分类');
-      if (t) { nodeId = t.id; $('#f_nodename').textContent = t.name; }
+      if (!t) return;
+      nodeId = t.id;
+      $('#f_nodename').textContent = t.name;
+      if (staff) $('#f_node').value = t.id;
     };
   }
   if (canEdit) $('#f_save').onclick = async () => {

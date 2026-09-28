@@ -540,6 +540,19 @@ pub struct ApiToken {
     pub last_used: i64,
 }
 
+/// A user's profile picture, uploaded to storage like any file. Everyone sees `current`;
+/// a new picture waits in `pending` until a reviewer approves it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Avatar {
+    pub user: Id,
+    /// Blob key of the approved picture everyone sees ("" = none).
+    pub current: String,
+    /// Blob key of a newer picture waiting for a reviewer ("" = none).
+    pub pending: String,
+    pub pending_at: i64,
+    pub reviewed_by: Option<Id>,
+}
+
 /// A generated first-page thumbnail of a stored file (keyed by blob), or a record that
 /// making one failed.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -32,6 +32,8 @@ pub const SUBTITLES: TableDefinition<u64, &str> = TableDefinition::new("subtitle
 pub const NODE_LEVELS: TableDefinition<u64, u8> = TableDefinition::new("node_levels");
 /// Users who chose to show their nickname on the files they uploaded (value unused).
 pub const PUBLIC_UPLOADERS: TableDefinition<u64, u8> = TableDefinition::new("public_uploaders");
+/// user id → Avatar (profile picture, stored like any uploaded file).
+pub const AVATARS: TableDefinition<u64, &[u8]> = TableDefinition::new("avatars");
 /// Free-form small state: id sequences, storage bucket cursors, settings.
 pub const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
@@ -74,6 +76,7 @@ pub struct Snapshot {
     pub thumbs: Vec<Thumb>,
     pub node_levels: Vec<(Id, u8)>,
     pub public_uploaders: Vec<Id>,
+    pub avatars: Vec<Avatar>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -108,6 +111,7 @@ impl Db {
         txn.open_table(SUBTITLES)?;
         txn.open_table(NODE_LEVELS)?;
         txn.open_table(PUBLIC_UPLOADERS)?;
+        txn.open_table(AVATARS)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -173,6 +177,9 @@ impl Db {
         for row in txn.open_table(PUBLIC_UPLOADERS)?.iter()? {
             snap.public_uploaders.push(row?.0.value());
         }
+        for row in txn.open_table(AVATARS)?.iter()? {
+            snap.avatars.push(decode(row?.1.value())?);
+        }
         Ok(snap)
     }
 
@@ -211,6 +218,7 @@ impl Db {
             thumbs: snap.thumbs,
             node_levels: snap.node_levels,
             public_uploaders: snap.public_uploaders,
+            avatars: snap.avatars,
         };
         Ok(serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))?)
     }
@@ -245,6 +253,8 @@ pub struct Dump {
     pub node_levels: Vec<(Id, u8)>,
     #[serde(default)]
     pub public_uploaders: Vec<Id>,
+    #[serde(default)]
+    pub avatars: Vec<Avatar>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -357,6 +367,10 @@ impl Tx<'_> {
     pub fn put_node_level(&self, id: Id, level: u8) -> Result<()> {
         let mut t = self.txn.open_table(NODE_LEVELS)?;
         if level == 0 { t.remove(id)?; } else { t.insert(id, level)?; }
+        Ok(())
+    }
+    pub fn put_avatar(&self, a: &Avatar) -> Result<()> {
+        self.txn.open_table(AVATARS)?.insert(a.user, encode(a).as_slice())?;
         Ok(())
     }
     pub fn put_public_uploader(&self, id: Id, public: bool) -> Result<()> {

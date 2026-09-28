@@ -1,4 +1,4 @@
-import { ago, api, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, moveResources, pathText, preview, resourceItem, toast, tree, $ } from '../app.js';
+import { ago, api, avatar, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, moveResources, pathText, preview, resourceItem, toast, tree, $ } from '../app.js';
 
 let me;
 
@@ -238,8 +238,28 @@ const panels = {
     };
   },
   async uncertain(box) {
-    await queueUI(box, await api('/review?status=pending&uncertain=true'), '导入时标注「不确定」的资料（扫描件或压缩包，分类未经内容核实）。打开确认后通过，或改分类后再通过。',
+    await queueUI(box, await api('/review?status=pending&uncertain=true'), '同学放进「待整理」的资料（不知道该放哪门课，先看备注），以及导入时标注「不确定」的资料。先「批量移动分类」或打开资料改好分类和名称，再通过；还在「待整理」里的不能直接通过。',
       [['approve', '确认并公开', 'ok'], ['restrict', '设为仅内部', ''], ['reject', '驳回', 'danger']]);
+  },
+  async avatars(box) {
+    const list = await api('/admin/avatars');
+    if (!list.length) { box.innerHTML = '<div class="card empty"><b>没有待审核的头像</b></div>'; return; }
+    box.innerHTML = `<section class="card"><p class="small muted">头像对所有人公开：色情、暴力、广告、冒充他人或学校官方的一律驳回。驳回后对方原来的头像不变。</p>
+      <div class="list">${list.map((a) => `<div class="item" data-user="${a.user}">
+        ${avatar(a.pending, a.nickname, 72)}
+        <div class="body"><b>${esc(a.nickname)}</b><div class="meta"><span>${ago(a.at)}</span>${a.current.length ? `<span>原头像</span>${avatar(a.current, a.nickname, 28)}` : '<span>原来没有头像</span>'}</div></div>
+        <div class="row"><button class="btn sm ok" data-a="approve">通过</button><button class="btn sm danger" data-a="reject">驳回</button></div>
+      </div>`).join('')}</div></section>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a]');
+      if (!b) return;
+      const row = b.closest('[data-user]');
+      try {
+        await api(`/admin/avatars/${row.dataset.user}`, { method: 'POST', body: { action: b.dataset.a } });
+        row.remove();
+        if (!box.querySelector('[data-user]')) panels.avatars(box);
+      } catch (err) { toast(err.message, true); }
+    };
   },
   async restricted(box) {
     await queueUI(box, await api('/review?status=restricted'), '「仅内部」资料不公开、不可搜索（勿外传、加密题库等）。确认获得授权后可以恢复发布。',

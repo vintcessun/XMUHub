@@ -94,7 +94,8 @@ impl Hub {
         if node.kind == NodeKind::Section {
             return Err(bad("请选择具体的课程或分类"));
         }
-        let course = if input.course.trim().is_empty() { node.label.clone() } else { seg(&input.course, 40) };
+        // A file moved out of 「待整理」 still carries that word as its course segment.
+        let course = if input.course.trim().is_empty() || input.course.trim() == super::INBOX_NAME { node.label.clone() } else { seg(&input.course, 40) };
         if course.is_empty() {
             return Err(bad("请填写课程名"));
         }
@@ -187,7 +188,9 @@ impl Hub {
                 .map(|(_, e)| e.to_lowercase())
                 .filter(|e| e.len() <= 8 && e.chars().all(|c| c.is_ascii_alphanumeric()))
                 .unwrap_or_default();
-            let status = status_override.unwrap_or(if me.level.publishes_directly() { Status::Published } else { Status::Pending });
+            // 「待整理」 files always wait for a reviewer to sort them, whoever uploads them.
+            let inbox = st.inbox == Some(node);
+            let status = if inbox { Status::Pending } else { status_override.unwrap_or(if me.level.publishes_directly() { Status::Published } else { Status::Pending }) };
             let r = Resource {
                 id: st.next_id(tx)?,
                 node,
@@ -197,12 +200,12 @@ impl Hub {
                 note: clean(&input.note, 500),
                 original_name: if staff && !extras.original_name.is_empty() { clean(&extras.original_name, 200) } else { up.filename.clone() },
                 source: if staff { clean(&extras.source, 200) } else { String::new() },
-                uncertain: staff && extras.uncertain,
+                uncertain: inbox || (staff && extras.uncertain),
                 blob: up.key.clone(),
                 size: up.size,
                 mime: up.mime.clone(),
                 status,
-                needs_review: me.level == Level::Trusted,
+                needs_review: me.level == Level::Trusted && !inbox,
                 review_note: String::new(),
                 uploader: me.id,
                 reviewed_by: None,
@@ -358,6 +361,9 @@ impl Hub {
             let mut r = st.resources.get(&id).cloned().ok_or(Error::NotFound("资料"))?;
             match action {
                 "approve" | "restore" => {
+                    if st.inbox == Some(r.node) {
+                        return Err(bad("这份资料还在「待整理」里，请先移到正确的课程再通过"));
+                    }
                     // Files rejected back when rejection still deleted them have no blob left.
                     if !st.blobs.contains_key(&r.blob) { return Err(bad("这份资料的文件已不在存储中，无法恢复，请重新上传")); }
                     r.status = Status::Published;

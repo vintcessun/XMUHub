@@ -182,6 +182,40 @@ export function resourceItem(r, { showNode = true } = {}) {
   </div>`;
 }
 
+/** Sends one upload part to its storage target (Worker or this server's relay). */
+export function sendPart(target, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(target.method, target.url);
+    for (const [k, v] of target.headers) xhr.setRequestHeader(k, v);
+    // Same-origin relay requires the anti-CSRF header; the cross-origin Worker must not get it.
+    if (target.url.startsWith('/')) xhr.setRequestHeader('X-XMUHub', '1');
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onload = () => {
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch { /* ignore */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body || {});
+      else reject(new Error((body && (body.error || body.message)) || `上传失败（HTTP ${xhr.status}）`));
+    };
+    xhr.onerror = () => reject(new Error('网络中断'));
+    xhr.send(blob);
+  });
+}
+
+/** Profile picture (mirror URLs; the next one is tried on error), else the nickname's
+ * first character on a colour picked from the name. */
+export function avatar(urls, name, size = 28) {
+  if (urls && urls.length) {
+    return `<img class="avatar" style="--s:${size}px" src="${esc(urls[0])}" data-alts="${esc(urls.slice(1).join(' '))}" data-name="${esc(name || '')}" alt="" loading="lazy">`;
+  }
+  return letterAvatar(name, size);
+}
+function letterAvatar(name, size) {
+  const chars = [...(name || '?')];
+  const hue = chars.reduce((h, c) => (h * 31 + c.codePointAt(0)) % 360, 7);
+  return `<span class="avatar" style="--s:${size}px;--h:${hue}" aria-hidden="true">${esc(chars[0] || '?')}</span>`;
+}
+
 /** Study levels of a course (set on it or inherited from its college / group). */
 export const STUDY_LEVELS = { 1: '本科', 2: '研究生', 3: '本研' };
 
@@ -250,7 +284,7 @@ export async function layout(active) {
   const user = await me();
   const navMe = top.querySelector('#nav-me');
   if (user) {
-    navMe.textContent = user.nickname;
+    navMe.innerHTML = `${avatar(user.avatar, user.nickname, 22)}<span>${esc(user.nickname)}</span>`;
     if (user.level >= 3) top.querySelector('[data-k="admin"]').hidden = false;
   } else {
     navMe.href = loginUrl();
@@ -587,11 +621,13 @@ function quickPreview(btn) {
 // A thumbnail that fails on one mirror tries the next, then falls back to the type badge.
 document.addEventListener('error', (e) => {
   const img = e.target;
-  if (!(img instanceof HTMLImageElement) || !img.classList.contains('thumb')) return;
+  if (!(img instanceof HTMLImageElement) || !(img.classList.contains('thumb') || img.classList.contains('avatar'))) return;
   const alts = (img.dataset.alts || '').split(' ').filter(Boolean);
   if (alts.length) {
     img.dataset.alts = alts.slice(1).join(' ');
     img.src = alts[0];
+  } else if (img.classList.contains('avatar')) {
+    img.outerHTML = letterAvatar(img.dataset.name, parseInt(img.style.getPropertyValue('--s'), 10) || 28);
   } else {
     const d = document.createElement('div');
     d.className = `ficon ${img.dataset.ext || ''}`;

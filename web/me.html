@@ -23,6 +23,10 @@
       <div class="small muted">点开资料可申请修改备注或删除，审核员同意后生效。</div>
       <div class="small muted" id="mcount"></div><div class="list" id="mine"><div class="skeleton"></div></div></section>
     <aside>
+      <section class="card"><h3>头像</h3>
+        <div class="row" style="gap:14px;flex-wrap:nowrap"><span id="avbox"></span>
+          <div><div class="row"><label class="btn sm">选择图片<input type="file" id="avfile" accept="image/*" hidden></label><button class="btn sm" id="avclear" type="button" hidden>移除</button></div>
+            <p class="small faint" id="avnote" style="margin:6px 0 0"></p></div></div></section>
       <section class="card"><h3>修改昵称</h3><form id="nickf" class="row"><input class="input grow" id="nick" maxlength="20"><button class="btn">保存</button></form>
         <label class="small" style="display:block;margin-top:12px"><input type="checkbox" id="pubname"> 在我上传的资料页上公开显示我的昵称</label>
         <p class="small faint" style="margin:4px 0 0">默认不公开，只有审核员和管理员能看到上传者。邮箱任何情况下都不会公开。</p></section>

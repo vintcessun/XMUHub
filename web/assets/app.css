@@ -816,3 +816,15 @@ a, button { -webkit-tap-highlight-color: transparent; }
   .home-lists .item .subtitle, .home-lists .item .note { -webkit-line-clamp: 1; line-clamp: 1; }
 }
 @media (max-width: 860px) { .home-lists { grid-template-columns: 1fr; } }
+
+/* Profile pictures: an image, or the first character of the nickname on a colour of its own. */
+.avatar {
+  --s: 28px; width: var(--s); height: var(--s); flex: none; border-radius: 50%;
+  display: inline-grid; place-items: center; vertical-align: middle; overflow: hidden;
+  font-size: calc(var(--s) * .48); font-weight: 600; line-height: 1; color: #fff;
+  background: hsl(var(--h, 210) 38% 44%); user-select: none;
+}
+img.avatar { object-fit: cover; background: var(--surface-2); }
+#nav-me { display: inline-flex; align-items: center; gap: 7px; }
+#nav-me .avatar { margin: -3px 0; }
+.who-inline { display: inline-flex; align-items: center; gap: 6px; }

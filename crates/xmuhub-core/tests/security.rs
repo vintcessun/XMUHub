@@ -64,7 +64,7 @@ fn uncommon_mail_domains_need_a_human_check() {
 fn accounts_are_bounded() {
     let (h, dir) = open("security-accounts");
     let (_, admin) = register(&h, "a@example.invalid", "admin");
-    let (_, user) = register(&h, "b@example.invalid", "student");
+    let (signup_session, user) = register(&h, "b@example.invalid", "student");
 
     // Staff-looking nicknames are for staff.
     let (email, code) = h.request_code("c@example.invalid", CodePurpose::Register, "1.1.1.1").unwrap();
@@ -73,14 +73,13 @@ fn accounts_are_bounded() {
     assert!(h.update_profile(&admin, "", Some("管理员小王"), None, None).is_ok());
 
     // Signing in over and over keeps only the newest sessions.
-    let first = h.login("b@example.invalid", "password123", "2.2.2.2").unwrap().0;
-    assert!(h.session_user(&first).is_some());
-    let mut last = String::new();
-    for _ in 0..21 {
-        last = h.login("b@example.invalid", "password123", "2.2.2.2").unwrap().0;
+    // (Sessions made within the same second may be dropped in either order, so count them.)
+    let mut secrets = vec![signup_session];
+    for _ in 0..24 {
+        secrets.push(h.login("b@example.invalid", "password123", "2.2.2.2").unwrap().0);
     }
-    assert!(h.session_user(&first).is_none(), "oldest session dropped");
-    assert!(h.session_user(&last).is_some());
+    assert_eq!(secrets.iter().filter(|s| h.session_user(s).is_some()).count(), 20);
+    assert!(h.session_user(secrets.last().unwrap()).is_some(), "the newest one always stays");
 
     // A password reset revokes API tokens made with the old password.
     let me = h.user(user.id).unwrap();

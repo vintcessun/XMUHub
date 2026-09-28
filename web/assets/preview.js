@@ -58,6 +58,8 @@ function sanitize(root) {
     for (const { name } of [...el.attributes]) {
       if (/^on/i.test(name) || name.toLowerCase() === 'formaction') el.removeAttribute(name);
     }
+    // Links only (HTML and SVG <a>): images and <use> legitimately point at data: / blob: / #ids.
+    if (el.localName !== 'a') continue;
     for (const attr of ['href', 'xlink:href']) {
       if (!el.hasAttribute(attr)) continue;
       const v = el.getAttribute(attr).trim();
@@ -65,7 +67,7 @@ function sanitize(root) {
       let ok = false;
       try { ok = ['http:', 'https:', 'mailto:'].includes(new URL(v, location.href).protocol); } catch { /* invalid */ }
       if (!ok) el.removeAttribute(attr);
-      else if (el.tagName === 'A' && !v.toLowerCase().startsWith('mailto:')) { el.target = '_blank'; el.rel = 'noopener noreferrer'; }
+      else if (!v.toLowerCase().startsWith('mailto:')) { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer'); }
     }
   }
 }

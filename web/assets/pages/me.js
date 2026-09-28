@@ -7,6 +7,13 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
   if (!me) { location.replace(loginUrl()); return; }
   $('#who').innerHTML = `${esc(me.nickname)} · ${esc(me.email)} · ${LEVELS[me.level]}${me.xmu ? ' · <span class="badge published">厦大认证</span>' : ''}`;
   $('#nick').value = me.nickname;
+  // Reviewers asking about the caller's uploads (answered on each file's page).
+  api('/me/questions').then((list) => {
+    if (!list.length) return;
+    $('#questions').hidden = false;
+    $('#questions').innerHTML = `<div class="notice warn"><b>审核员有 ${list.length} 个问题等你回答</b>（回答后资料会继续审核）：
+      ${list.map(({ question: q, title }) => `<div class="small" style="margin-top:6px">· <a href="/r/${q.resource}">${esc(title)}</a>：${esc(q.text)}</div>`).join('')}</div>`;
+  }).catch(() => {});
   $('#pubname').checked = !!me.public_name;
   $('#pubname').onchange = async (e) => {
     try {

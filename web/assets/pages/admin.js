@@ -1,4 +1,4 @@
-import { ago, api, avatar, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, moveResources, pathText, preview, resourceItem, toast, tree, $ } from '../app.js';
+import { ago, api, avatar, esc, fmtDate, fmtSize, LEVELS, layout, loginUrl, meta, modal, moveResources, pathText, preview, resourceItem, store, toast, tree, $ } from '../app.js';
 
 let me;
 
@@ -27,7 +27,16 @@ async function retype(r, value) {
 }
 
 /** A reviewable list of resources with per-item and bulk actions. */
-async function queueUI(box, items, intro, actions, categoryFilters = false) {
+/** Questions to the uploader about one file and their answers (「问上传者」). */
+function questionsHtml(r) {
+  if (!r.questions || !r.questions.length) return '';
+  return `<div class="small" style="padding:0 4px 10px 58px">${r.questions.map((q) => `<div class="notice${q.answer ? ' ok' : ''}" style="margin:4px 0">
+    <b>${esc(q.asker)} 问：</b>${esc(q.text)}<br>${q.answer ? `<b>上传者答：</b>${esc(q.answer)}` : '<span class="faint">等待上传者回答</span>'}</div>`).join('')}</div>`;
+}
+
+/** A list of files to review. `opts.batch`: rows also get 「不懂」 (hand back to the pool);
+ * `opts.onEmpty`: called when the last row is dealt with. */
+async function queueUI(box, items, intro, actions, categoryFilters = false, opts = {}) {
   if (!items.length) {
     box.innerHTML = '<div class="card empty"><b>这里是空的</b>辛苦了 ☕</div>';
     return;
@@ -69,12 +78,18 @@ async function queueUI(box, items, intro, actions, categoryFilters = false) {
         <input class="input" data-f="note" placeholder="备注" style="max-width:180px;min-height:30px;padding:3px 8px">
         <button class="btn sm" data-pv type="button">预览</button>
         ${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-a="${a}">${l}</button>`).join('')}
+        ${opts.batch ? '<button class="btn sm" data-skip type="button" title="拿不准，留给别的审核员">不懂</button>' : ''}
+        <button class="btn sm" data-ask type="button" title="问上传者一个问题，回答前这份先不派给别人">问上传者</button>
         <a class="btn sm" href="/r/${r.id}" target="_blank">打开</a>
-      </div></div>`).join('')}</div></section>`;
-  const act = async (wrap, action) => {
-    await api(`/resources/${wrap.dataset.id}/review`, { method: 'POST', body: { action, note: wrap.querySelector('[data-f="note"]').value } });
+      </div>${questionsHtml(r)}</div>`).join('')}</div></section>`;
+  const gone = (wrap) => {
     wrap.remove();
     updateVisible();
+    if (!box.querySelector('.list > [data-id]') && opts.onEmpty) opts.onEmpty();
+  };
+  const act = async (wrap, action) => {
+    await api(`/resources/${wrap.dataset.id}/review`, { method: 'POST', body: { action, note: wrap.querySelector('[data-f="note"]').value } });
+    gone(wrap);
   };
   const visibleRows = () => [...box.querySelectorAll('.list > [data-id]')].filter((w) => !w.hidden);
   const updateVisible = () => {
@@ -129,6 +144,20 @@ async function queueUI(box, items, intro, actions, categoryFilters = false) {
     if (pv) {
       const r = byId.get(pv.closest('[data-id]').dataset.id);
       preview(r.id, modal(r.title, { wide: true }));
+      return;
+    }
+    const skip = e.target.closest('[data-skip]');
+    if (skip) {
+      const wrap = skip.closest('[data-id]');
+      try { await api(`/review/batch/skip/${wrap.dataset.id}`, { method: 'POST' }); toast('已退回，留给别的审核员'); gone(wrap); } catch (err) { toast(err.message, true); }
+      return;
+    }
+    const ask = e.target.closest('[data-ask]');
+    if (ask) {
+      const wrap = ask.closest('[data-id]');
+      const text = prompt('想问上传者什么？对方会在资料页和「我的」页看到，回答后这份会回到待审池子。');
+      if (!text || !text.trim()) return;
+      try { await api(`/resources/${wrap.dataset.id}/questions`, { method: 'POST', body: { text } }); toast('已发给上传者'); gone(wrap); } catch (err) { toast(err.message, true); }
       return;
     }
     if (e.target.closest('[data-move]')) {
@@ -209,8 +238,49 @@ const panels = {
     box.querySelector('#ddays').onchange = (e) => panels.dash(box, Number(e.target.value));
   },
   async queue(box) {
-    await queueUI(box, await api('/review'), '「待审核」来自贡献者，通过后才会公开；「待复核」来自可信贡献者，已公开。',
-      [['approve', '通过', 'ok'], ['reject', '驳回', 'danger']], true);
+    const intro = '「待审核」来自贡献者，通过后才会公开；「待复核」来自可信贡献者，已公开。';
+    const actions = [['approve', '通过', 'ok'], ['reject', '驳回', 'danger']];
+    // Admins can still see the whole queue at once; everyone works in batches by default.
+    if (me.level >= 4 && store.get(ALL_KEY) === '1') {
+      box.innerHTML = '<div class="row" style="margin-bottom:10px"><span class="small muted">正在查看全部待审资料（不分批）。</span><a href="#" id="tobatch" class="small">回到分批领取</a></div><div id="qbody"></div>';
+      box.querySelector('#tobatch').onclick = (e) => { e.preventDefault(); store.set(ALL_KEY, null); panels.queue(box); };
+      await queueUI(box.querySelector('#qbody'), await api('/review'), intro, actions, true);
+      return;
+    }
+    const t = await tree();
+    const within = store.get(WITHIN_KEY) || '';
+    const opts = t.children(0).map((sec) => `<option value="${sec.id}">${esc(sec.name)}（全部）</option>${t.children(sec.id).filter((g) => t.children(g.id).length).map((g) => `<option value="${g.id}">　${esc(sec.name)} / ${esc(g.name)}</option>`).join('')}`).join('');
+    const load = async (take) => {
+      const q = within ? `?within=${within}` : '';
+      const data = take ? await api('/review/batch', { method: 'POST', body: { within: within ? Number(within) : null } }) : await api(`/review/batch${q}`);
+      box.innerHTML = `<section class="card"><div class="row" style="gap:10px;flex-wrap:wrap">
+          <label class="small" for="bwithin">只审</label><select class="input" id="bwithin" style="max-width:320px"><option value="">全部学院 / 分组</option>${opts}</select>
+          <button class="btn sm primary" id="btake" ${data.items.length ? 'disabled title="这一批审完才能领下一批"' : ''}>领取一批（最多 ${data.size} 份）</button>
+          <span class="small muted">池子里还有 ${data.pool} 份待领取</span><span class="grow"></span>
+          ${me.level >= 4 ? '<a href="#" id="toall" class="small">查看全部待审</a>' : ''}</div>
+        <p class="small muted" style="margin:8px 0 0">每人每次随机领一批、互不重复，审完才能领下一批。离开这个页面几分钟后，没审完的会自动回到池子里。拿不准的点「不懂」留给别人；需要问上传者的点「问上传者」。</p></section>
+        <div id="qbody" style="margin-top:14px"></div>`;
+      box.querySelector('#bwithin').value = within;
+      box.querySelector('#bwithin').onchange = async (e) => {
+        store.set(WITHIN_KEY, e.target.value || null);
+        // The choice applies to the next batch; the one in hand stays until it is done.
+        panels.queue(box);
+      };
+      box.querySelector('#btake').onclick = () => load(true).catch((err) => toast(err.message, true));
+      const all = box.querySelector('#toall');
+      if (all) all.onclick = async (e) => { e.preventDefault(); await releaseBatch(); store.set(ALL_KEY, '1'); panels.queue(box); };
+      const body = box.querySelector('#qbody');
+      if (!data.items.length) {
+        body.innerHTML = `<div class="card empty"><b>${take ? '池子里没有可领的了' : '手上没有待审的'}</b>${data.pool ? '点上面的「领取一批」开始' : '辛苦了 ☕'}</div>`;
+        return;
+      }
+      await queueUI(body, data.items, intro, actions, true, {
+        batch: true,
+        onEmpty: () => { toast('这一批审完了，可以领下一批'); load(false); },
+      });
+    };
+    await load(false);
+    heartbeat(() => api(`/review/batch${within ? `?within=${within}` : ''}`).catch(() => {}));
   },
   async changes(box) {
     const list = await api('/review/change-requests');
@@ -506,11 +576,30 @@ const panels = {
   },
 };
 
+const ALL_KEY = 'xmuhub.review.all';
+const WITHIN_KEY = 'xmuhub.review.within';
+
+// While the 待审资料 tab is open it pings the server every minute so its batch stays held;
+// leaving the tab or the page hands the batch back at once.
+let beat = 0;
+function heartbeat(fn) {
+  clearInterval(beat);
+  beat = setInterval(() => { if (document.visibilityState === 'visible') fn(); }, 60_000);
+}
+function releaseBatch() {
+  clearInterval(beat);
+  beat = 0;
+  // keepalive: still sent while the page is being closed.
+  return fetch('/api/review/batch/release', { method: 'POST', keepalive: true, headers: { 'X-XMUHub': '1' } }).catch(() => {});
+}
+window.addEventListener('pagehide', () => { if (current === 'queue') releaseBatch(); });
+
 // Complaints, feedback, the full review log and accounts are admin-only (the server enforces it).
 const ADMIN_TABS = ['reports', 'feedback', 'log', 'users'];
 
 async function show(name) {
   if (!panels[name] || (ADMIN_TABS.includes(name) && me.level < 4)) name = 'dash';
+  if (current === 'queue' && name !== 'queue') releaseBatch();
   current = name;
   // Keep the tab in the address bar so a refresh (or a shared link) stays here.
   if (location.hash.slice(1) !== name) history.replaceState(null, '', `#${name}`);

@@ -268,6 +268,10 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         // The uploader chose to show their nickname (「我的」 page); no id for the public.
         v["uploader"] = json!({ "nickname": app.hub.uploader_name(r.uploader), "avatar": app.hub.avatar_of(r.uploader) });
     }
+    if mine || staff {
+        // Reviewers' questions to the uploader and the answers (「问上传者」).
+        v["questions"] = json!(app.hub.questions_about(viewer, r.id));
+    }
     v
 }
 
@@ -335,6 +339,12 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/review/change-requests", get(resource_change_requests))
         .route("/review/change-requests/{id}", post(review_resource_change))
         .route("/review/nodes", get(pending_nodes))
+        .route("/review/batch", get(review_batch).post(take_review_batch))
+        .route("/review/batch/release", post(release_review_batch))
+        .route("/review/batch/skip/{id}", post(skip_in_review_batch))
+        .route("/resources/{id}/questions", post(ask_uploader))
+        .route("/questions/{id}/answer", post(answer_question))
+        .route("/me/questions", get(my_questions))
         .route("/admin/avatars", get(pending_avatars))
         .route("/admin/avatars/{user}", post(review_avatar))
         .route("/admin/reports", get(reports))
@@ -1053,6 +1063,67 @@ async fn review_queue(State(app): S, auth: Auth, Query(q): Query<QueueQ>) -> R<J
     let v = auth.viewer();
     let items = app.hub.review_queue(v, q.status.as_deref(), q.uncertain)?;
     Ok(Json(json!(items.iter().map(|(r, n)| resource_view(&app, r, n, &[], v)).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct BatchQ {
+    /// Only files under this section / college / group.
+    within: Option<Id>,
+}
+
+fn batch_view(app: &App, v: Viewer, items: &[(Resource, Node)], within: Option<Id>) -> Value {
+    json!({
+        "items": items.iter().map(|(r, n)| resource_view(app, r, n, &[], v)).collect::<Vec<_>>(),
+        "pool": app.hub.review_pool_size(within),
+        "size": xmuhub_core::hub::BATCH_SIZE,
+    })
+}
+
+/// The reviewer's current batch; also the page's heartbeat (a batch left alone for a few
+/// minutes goes back to the pool).
+async fn review_batch(State(app): S, auth: Auth, Query(q): Query<BatchQ>) -> R<Json<Value>> {
+    let items = app.hub.review_batch(auth.viewer(), q.within, false)?;
+    Ok(Json(batch_view(&app, auth.viewer(), &items, q.within)))
+}
+
+/// 「领取一批」: a fresh batch once the current one is done.
+async fn take_review_batch(State(app): S, auth: Auth, Json(q): Json<BatchQ>) -> R<Json<Value>> {
+    let items = app.hub.review_batch(auth.viewer(), q.within, true)?;
+    Ok(Json(batch_view(&app, auth.viewer(), &items, q.within)))
+}
+
+async fn release_review_batch(State(app): S, auth: Auth) -> R<Json<Value>> {
+    app.hub.release_batch(auth.viewer())?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn skip_in_review_batch(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    app.hub.skip_in_batch(auth.viewer(), id)?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct TextIn {
+    text: String,
+}
+
+async fn ask_uploader(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<TextIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let q = blocking(move || hub.ask_uploader(Viewer { user: user.as_ref() }, id, &b.text)).await?;
+    Ok(Json(json!(q)))
+}
+
+async fn answer_question(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<TextIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let q = blocking(move || hub.answer_question(Viewer { user: user.as_ref() }, id, &b.text)).await?;
+    Ok(Json(json!(q)))
+}
+
+async fn my_questions(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let items = app.hub.my_open_questions(auth.viewer())?;
+    Ok(Json(json!(items.iter().map(|(q, title)| json!({ "question": q, "title": title })).collect::<Vec<_>>())))
 }
 
 async fn pending_nodes(State(app): S, auth: Auth) -> R<Json<Value>> {

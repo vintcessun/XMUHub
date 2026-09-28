@@ -6,6 +6,7 @@
 
 mod accounts;
 mod avatars;
+mod batches;
 mod imports;
 mod inbox;
 mod resources;
@@ -30,6 +31,7 @@ use crate::storage::Storage;
 
 pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL, needs_captcha, normalize_email};
 pub use avatars::{AVATAR_MAX_BYTES, PendingAvatar};
+pub use batches::{BATCH_SIZE, QuestionView};
 pub use inbox::INBOX_NAME;
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
 pub use stats::DayStats;
@@ -105,6 +107,8 @@ pub(crate) struct State {
     public_uploaders: HashSet<Id>,
     /// user → profile picture
     avatars: HashMap<Id, Avatar>,
+    /// reviewers' questions to uploaders, by id
+    questions: HashMap<Id, Question>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
     inbox: Option<Id>,
 }
@@ -168,6 +172,7 @@ impl State {
         st.node_levels = snap.node_levels.into_iter().collect();
         st.public_uploaders = snap.public_uploaders.into_iter().collect();
         st.avatars = snap.avatars.into_iter().map(|a| (a.user, a)).collect();
+        st.questions = snap.questions.into_iter().map(|q| (q.id, q)).collect();
         st.thumbs = snap.thumbs.into_iter().map(|t| (t.key.clone(), t)).collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);
@@ -393,6 +398,7 @@ pub struct Hub {
     download_seen: Mutex<HashMap<(Id, String), i64>>,
     /// (computed at, value) of `stats()`, which walks every resource and blob
     stats_cache: Mutex<Option<(i64, Stats)>>,
+    batches: batches::Batches,
     auth: accounts::AuthState,
 }
 
@@ -410,6 +416,7 @@ impl Hub {
             dirty_downloads: Mutex::new(HashSet::new()),
             download_seen: Mutex::new(HashMap::new()),
             stats_cache: Mutex::new(None),
+            batches: batches::Batches::default(),
             auth: accounts::AuthState::new(Vec::new()),
         };
         hub.set_admins(admins)?;

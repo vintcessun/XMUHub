@@ -540,6 +540,20 @@ pub struct ApiToken {
     pub last_used: i64,
 }
 
+/// A reviewer's question to the uploader of a file under review, and the uploader's answer.
+/// The file waits (out of review batches) until it is answered.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Question {
+    pub id: Id,
+    pub resource: Id,
+    pub asker: Id,
+    pub text: String,
+    pub asked_at: i64,
+    /// "" until the uploader answers.
+    pub answer: String,
+    pub answered_at: i64,
+}
+
 /// A user's profile picture, uploaded to storage like any file. Everyone sees `current`;
 /// a new picture waits in `pending` until a reviewer approves it.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

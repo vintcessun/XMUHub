@@ -44,7 +44,9 @@ async function load() {
   };
   const note = notes[r.status];
   $('#notice').innerHTML = (note ? `<div class="notice ${note[0]}">${note[1]}</div>` : '')
-    + (r.uncertain ? '<div class="notice">这份资料的分类或内容尚未核实，欢迎审核员确认。</div>' : '');
+    + (r.uncertain ? '<div class="notice">这份资料的分类或内容尚未核实，欢迎审核员确认。</div>' : '')
+    + questionsHtml(r);
+  bindAnswers(r);
   const me = await mePromise;
   const unavailable = r.status === 'rejected' || (me?.level < 3 && (r.status === 'removed' || r.status === 'restricted'));
   $('#dl').disabled = unavailable;
@@ -260,6 +262,29 @@ async function renderManage(r, me) {
       load();
     } catch (e) { toast(e.message, true); }
   };
+}
+
+/** Reviewers' questions about this file (「问上传者」): the uploader answers them here. */
+function questionsHtml(r) {
+  if (!r.questions || !r.questions.length) return '';
+  return r.questions.map((q) => `<div class="notice${q.answer ? ' ok' : ' warn'}" data-q="${q.id}">
+    <b>审核员 ${esc(q.asker)} 问：</b>${esc(q.text)} <span class="small faint">${ago(q.asked_at)}</span>
+    ${q.answer ? `<div style="margin-top:6px"><b>上传者答：</b>${esc(q.answer)}</div>`
+      : r.mine ? `<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input class="input" maxlength="500" placeholder="回答审核员（回答后资料会继续审核）"><button class="btn sm primary" data-answer type="button">回答</button></div>`
+        : '<div class="small faint" style="margin-top:6px">等待上传者回答</div>'}
+  </div>`).join('');
+}
+function bindAnswers(r) {
+  $('#notice').querySelectorAll('[data-answer]').forEach((b) => {
+    b.onclick = async () => {
+      const box = b.closest('[data-q]');
+      try {
+        await api(`/questions/${box.dataset.q}/answer`, { method: 'POST', body: { text: box.querySelector('input').value } });
+        toast('已回答，谢谢！');
+        load();
+      } catch (e) { toast(e.message, true); }
+    };
+  });
 }
 
 if (!id) location.href = '/';

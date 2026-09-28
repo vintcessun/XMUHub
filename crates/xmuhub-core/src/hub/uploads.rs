@@ -149,7 +149,9 @@ impl Hub {
 
     /// Moves a not-yet-sent part to a fresh storage slot. Used when a send failed midway:
     /// GitHub keeps a half-written asset name reserved, so the retry needs a new name.
-    pub async fn renew_part(&self, actor: Viewer<'_>, id: Id, index: usize) -> Result<PartPlan> {
+    /// `fallback`: the last try failed on the upload Worker; send this one through the server's
+    /// relay instead (when there is one).
+    pub async fn renew_part(&self, actor: Viewer<'_>, id: Id, index: usize, fallback: bool) -> Result<PartPlan> {
         let me = actor.at_least(Level::Contributor)?.clone();
         let up = self.st.read().uploads.get(&id).cloned().ok_or(Error::NotFound("上传记录"))?;
         if up.user != me.id {
@@ -159,8 +161,12 @@ impl Hub {
         if part.done {
             return Err(Error::Conflict("这一卷已经上传完成".into()));
         }
-        let loc = self.storage.primary().reserve(&up.filename, part.size, &part.sha256).await?;
-        let target = self.storage.primary().upload_target(&loc, part.size)?;
+        let backend = self.storage.primary();
+        let loc = backend.reserve(&up.filename, part.size, &part.sha256).await?;
+        let target = match fallback.then(|| backend.fallback_target(&loc, part.size)).flatten() {
+            Some(t) => t?,
+            None => backend.upload_target(&loc, part.size)?,
+        };
         self.mutate(|st, tx| {
             let mut up = st.uploads.get(&id).cloned().ok_or(Error::NotFound("上传记录"))?;
             up.parts[index].target = loc;

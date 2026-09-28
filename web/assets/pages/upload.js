@@ -461,11 +461,12 @@ async function uploadRow(r, bar, base, total) {
     for (const pp of plan.parts) {
       if (pp.done) { sent += pp.size; continue; }
       const part = r.parts[pp.index];
+      let target = pp.target;
       for (let attempt = 0; ; attempt++) {
         try {
           r.status = plan.parts.length > 1 ? `上传第 ${pp.index + 1} / ${plan.parts.length} 卷…` : '上传中…';
           updateRow(state.rows.indexOf(r));
-          const target = attempt === 0 ? pp.target : (await api(`/uploads/${plan.upload_id}/parts/${pp.index}/renew`, { method: 'POST' })).target;
+          if (attempt > 0) target = await renewTarget(plan.upload_id, pp.index, target);
           const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => {
             bar.style.width = `${Math.round(((base + sent + n) / total) * 100)}%`;
           });
@@ -503,6 +504,14 @@ async function uploadRow(r, bar, base, total) {
   r.status = res.status === 'published'
     ? `✓ 已发布：<a href="/r/${res.id}">${esc(res.filename)}</a>`
     : `✓ 已提交，等待审核：<a href="/r/${res.id}">${esc(res.filename)}</a>`;
+}
+
+/** A fresh slot for a part whose send failed. After a failure on the upload Worker (another
+ * site; unreachable on some networks, or out of its daily quota) the retry goes through this
+ * server's relay instead. */
+async function renewTarget(uploadId, index, failed) {
+  const viaRelay = failed && !failed.url.startsWith('/');
+  return (await api(`/uploads/${uploadId}/parts/${index}/renew${viaRelay ? '?via=relay' : ''}`, { method: 'POST' })).target;
 }
 
 $('#submit').onclick = async () => {

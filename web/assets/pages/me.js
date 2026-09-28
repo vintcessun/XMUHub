@@ -188,7 +188,9 @@ async function uploadAvatar(file) {
         break;
       } catch (err) {
         if (attempt >= 1) throw err;
-        target = (await api(`/uploads/${plan.upload_id}/parts/0/renew`, { method: 'POST' })).target;
+        // A failure on the upload Worker (another site) retries through this server's relay.
+        const viaRelay = !target.url.startsWith('/');
+        target = (await api(`/uploads/${plan.upload_id}/parts/0/renew${viaRelay ? '?via=relay' : ''}`, { method: 'POST' })).target;
       }
     }
   }

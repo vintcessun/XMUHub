@@ -1083,8 +1083,15 @@ async fn confirm_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, us
     Ok(Json(json!({ "finished": finished })))
 }
 
-async fn renew_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>) -> R<Json<Value>> {
-    Ok(Json(json!(app.hub.renew_part(auth.viewer(), id, index).await?)))
+#[derive(Deserialize)]
+struct RenewQ {
+    /// "relay": the Worker failed, send this part through the server instead.
+    via: Option<String>,
+}
+
+async fn renew_part(State(app): S, auth: Auth, Path((id, index)): Path<(Id, usize)>, Query(q): Query<RenewQ>) -> R<Json<Value>> {
+    let fallback = q.via.as_deref() == Some("relay");
+    Ok(Json(json!(app.hub.renew_part(auth.viewer(), id, index, fallback).await?)))
 }
 
 // ------------------------------------------------------------------ review & admin

@@ -21,6 +21,10 @@ use crate::ticket::{self, Ticket};
 
 const API: &str = "https://api.github.com";
 const UPLOADS: &str = "https://uploads.github.com";
+/// Parts sent through the upload Worker per UTC day before the rest go through this server's
+/// relay. Workers' free plan allows 100,000 requests a day and each part costs about two (the
+/// browser's CORS preflight and the upload), so this leaves room for retries.
+const WORKER_PARTS_PER_DAY: u32 = 40_000;
 const CURSOR_KEY: &str = "github.cursor";
 const PROBE_TAG: &str = "probe";
 /// Mirrors are ranked by how fast they deliver this file, so it must be big enough to
@@ -111,11 +115,37 @@ pub struct GitHubBackend {
     db: Arc<Db>,
     mirrors: Arc<Mirrors>,
     reserve_lock: tokio::sync::Mutex<()>,
+    /// (UTC day, parts handed to the Worker that day)
+    worker_today: parking_lot::Mutex<(i64, u32)>,
 }
 
 impl GitHubBackend {
     pub fn new(cfg: GitHubConfig, http: reqwest::Client, db: Arc<Db>, mirrors: Arc<Mirrors>) -> GitHubBackend {
-        GitHubBackend { cfg, http, db, mirrors, reserve_lock: tokio::sync::Mutex::new(()) }
+        GitHubBackend { cfg, http, db, mirrors, reserve_lock: tokio::sync::Mutex::new(()), worker_today: parking_lot::Mutex::new((0, 0)) }
+    }
+
+    /// A signed ticket for sending `size` bytes into the reserved asset.
+    fn ticket_for(&self, reserved: &Location, size: u64) -> Result<String> {
+        let Location::GitHub { owner, repo, release_id, name, .. } = reserved else {
+            return Err(bad("not a github location"));
+        };
+        let dest = format!("{UPLOADS}/repos/{owner}/{repo}/releases/{release_id}/assets?name={name}");
+        Ok(ticket::sign(&self.cfg.ticket_secret, &Ticket { u: dest, s: size, e: now() + 6 * 3600 }))
+    }
+
+    /// Counts a part handed to the Worker today (UTC days, like Cloudflare's quota); false once
+    /// today's share is used up, so the rest of the day goes through the relay instead.
+    fn take_worker_slot(&self) -> bool {
+        let day = now() / 86400;
+        let mut t = self.worker_today.lock();
+        if t.0 != day {
+            *t = (day, 0);
+        }
+        if t.1 >= WORKER_PARTS_PER_DAY {
+            return false;
+        }
+        t.1 += 1;
+        true
     }
 
     fn repo_name(&self, no: u32) -> String {
@@ -497,17 +527,20 @@ impl StorageBackend for GitHubBackend {
     }
 
     fn upload_target(&self, reserved: &Location, size: u64) -> Result<UploadTarget> {
-        let Location::GitHub { owner, repo, release_id, name, .. } = reserved else {
-            return Err(bad("not a github location"));
-        };
-        let dest = format!("{UPLOADS}/repos/{owner}/{repo}/releases/{release_id}/assets?name={name}");
-        let t = ticket::sign(&self.cfg.ticket_secret, &Ticket { u: dest, s: size, e: now() + 6 * 3600 });
-        let url = if self.cfg.worker_url.is_empty() {
+        let t = self.ticket_for(reserved, size)?;
+        let url = if self.cfg.worker_url.is_empty() || !self.take_worker_slot() {
             format!("/api/relay/upload?t={t}")
         } else {
             format!("{}/upload?t={t}", self.cfg.worker_url.trim_end_matches('/'))
         };
         Ok(UploadTarget { url, method: "POST", headers: vec![] })
+    }
+
+    fn fallback_target(&self, reserved: &Location, size: u64) -> Option<Result<UploadTarget>> {
+        if self.cfg.worker_url.is_empty() {
+            return None; // already the relay
+        }
+        Some(self.ticket_for(reserved, size).map(|t| UploadTarget { url: format!("/api/relay/upload?t={t}"), method: "POST", headers: vec![] }))
     }
 
     async fn confirm(&self, reserved: &Location, size: u64, sha256: &str, receipt: &Receipt) -> Result<Location> {
@@ -548,5 +581,53 @@ impl StorageBackend for GitHubBackend {
             Location::GitHub { repo, tag, name, .. } => self.mirrors.wrap(&self.github_url(repo, tag, name)),
             _ => vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod upload_route_tests {
+    use super::*;
+
+    fn backend(worker: &str) -> GitHubBackend {
+        let dir = std::env::temp_dir().join(format!("xmuhub-gh-route-{}-{}", std::process::id(), worker.len()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Arc::new(Db::open(&dir.join("t.redb"), 1 << 20).unwrap());
+        let cfg = GitHubConfig {
+            owner: "o".into(),
+            token: String::new(),
+            repo_prefix: "p".into(),
+            assets_per_release: 900,
+            releases_per_repo: 50,
+            worker_url: worker.into(),
+            ticket_secret: b"secret".to_vec(),
+            backup_repo: String::new(),
+        };
+        GitHubBackend::new(cfg, reqwest::Client::new(), db, Arc::new(Mirrors::new(Vec::new())))
+    }
+
+    fn slot() -> Location {
+        Location::GitHub { owner: "o".into(), repo: "p-001".into(), release_id: 1, tag: "b0001".into(), asset_id: 0, name: "x.pdf".into() }
+    }
+
+    #[test]
+    fn worker_first_relay_as_fallback_and_after_the_daily_share() {
+        let gh = backend("https://upload.example.com");
+        assert!(gh.upload_target(&slot(), 10).unwrap().url.starts_with("https://upload.example.com/upload?t="));
+        let fb = gh.fallback_target(&slot(), 10).unwrap().unwrap();
+        assert!(fb.url.starts_with("/api/relay/upload?t="), "a failed Worker send retries through the relay");
+        // Today's Worker share used up: the rest of the day goes through the relay.
+        *gh.worker_today.lock() = (now() / 86400, WORKER_PARTS_PER_DAY);
+        assert!(gh.upload_target(&slot(), 10).unwrap().url.starts_with("/api/relay/upload?t="));
+        // A new UTC day starts over.
+        *gh.worker_today.lock() = (now() / 86400 - 1, WORKER_PARTS_PER_DAY);
+        assert!(gh.upload_target(&slot(), 10).unwrap().url.starts_with("https://upload.example.com/"));
+    }
+
+    #[test]
+    fn without_a_worker_there_is_nothing_to_fall_back_to() {
+        let gh = backend("");
+        assert!(gh.upload_target(&slot(), 10).unwrap().url.starts_with("/api/relay/upload?t="));
+        assert!(gh.fallback_target(&slot(), 10).is_none());
     }
 }

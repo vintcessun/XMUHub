@@ -147,8 +147,10 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         Cmd::Serve => {}
     }
 
-    let relay = match (&github, cfg.worker_url.is_empty()) {
-        (Some(gh), true) => Some(relay::Relay::new(
+    // The relay stays on next to the Worker: it is where uploads go when the Worker fails or
+    // has used up its daily quota (limits below still apply).
+    let relay = match &github {
+        Some(gh) => Some(relay::Relay::new(
             cfg.ticket_secret.clone(),
             gh.owner().to_string(),
             gh.token().to_string(),
@@ -157,7 +159,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         )?),
         _ => None,
     };
-    tracing::info!(upload_via = if relay.is_some() { "server relay" } else if github.is_some() { "worker" } else { "local" });
+    tracing::info!(upload_via = if !cfg.worker_url.is_empty() && github.is_some() { "worker (relay as fallback)" } else if relay.is_some() { "server relay" } else { "local" });
 
     let site = Arc::new(web::Site::load(&cfg.web_dir)?);
     let csp = site.csp();

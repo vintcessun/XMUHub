@@ -42,6 +42,12 @@ pub trait StorageBackend: Send + Sync {
     /// Signed instructions for sending the bytes of a reserved part.
     fn upload_target(&self, reserved: &Location, size: u64) -> Result<UploadTarget>;
 
+    /// Where to send a part when the usual target failed (the upload Worker unreachable or out
+    /// of its daily quota): this server's own streaming relay. `None` when there is no other way.
+    fn fallback_target(&self, _reserved: &Location, _size: u64) -> Option<Result<UploadTarget>> {
+        None
+    }
+
     /// Verifies the bytes arrived intact and returns the final location.
     async fn confirm(&self, reserved: &Location, size: u64, sha256: &str, receipt: &Receipt) -> Result<Location>;
 

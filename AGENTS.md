@@ -59,6 +59,8 @@
 - 用 `pwsh scripts/sync.ps1`：它会同步 git，并按改动决定只更新网页还是重新编译。
 - **Rust 代码改了就必须重新编译部署**，不能只用 `deploy.ps1 -WebOnly` 把依赖新接口的网页先发上去（会出现网页和后端版本不一致）。
 - 推送前清掉 `GITHUB_TOKEN` 环境变量。
+- 监听端口由 systemd 的 `xmuhub.socket` 持有（重启时新请求在端口上排队，不会 502），部署时是「先替换文件、再 `systemctl restart xmuhub.service`」。
+  需要独占数据库时（比如在服务器上手动运行 `run` 的子命令），要**同时停掉** `xmuhub.socket` 和 `xmuhub.service`：只停服务的话，来一个请求 systemd 就会把它重新拉起来，和你抢数据库。
 
 ## 提交前自查
 

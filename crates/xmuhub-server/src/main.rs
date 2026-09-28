@@ -204,8 +204,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     }
 
     let router = api::router(app.clone()).layer(tower_http::trace::TraceLayer::new_for_http());
-    let listener = tokio::net::TcpListener::bind(cfg.bind).await?;
-    tracing::info!("listening on http://{}", cfg.bind);
+    let listener = listener(cfg.bind).await?;
     axum::serve(listener, router).with_graceful_shutdown(shutdown()).await?;
     hub.flush_downloads()?;
     tracing::info!("bye");
@@ -316,4 +315,27 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
             }
         }
     });
+}
+
+/// The listening socket. In production systemd holds it (xmuhub.socket) and passes it in,
+/// so while the service restarts new connections wait in its queue instead of being
+/// refused; without one (development), bind it here.
+async fn listener(bind: std::net::SocketAddr) -> anyhow::Result<tokio::net::TcpListener> {
+    #[cfg(unix)]
+    {
+        let ours = std::env::var("LISTEN_PID").ok().and_then(|p| p.parse::<u32>().ok()) == Some(std::process::id());
+        if ours && std::env::var("LISTEN_FDS").ok().as_deref() == Some("1") {
+            use std::os::fd::FromRawFd;
+            // SAFETY: systemd passes exactly one socket as fd 3 (SD_LISTEN_FDS_START) and
+            // nothing else in this process owns that descriptor.
+            let l = unsafe { std::net::TcpListener::from_raw_fd(3) };
+            l.set_nonblocking(true)?;
+            let l = tokio::net::TcpListener::from_std(l)?;
+            tracing::info!("listening on http://{} (socket from systemd)", l.local_addr()?);
+            return Ok(l);
+        }
+    }
+    let l = tokio::net::TcpListener::bind(bind).await?;
+    tracing::info!("listening on http://{bind}");
+    Ok(l)
 }

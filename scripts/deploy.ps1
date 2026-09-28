@@ -29,6 +29,7 @@ param(
     [int]$Port = 22,
     [string]$RemoteBase = "/root/xmuhub",
     [string]$Service = "xmuhub.service",
+    [string]$Socket = "xmuhub.socket",
     [int]$AppPort = 8089,
     [string]$PublicUrl = "https://xmu.vintces.icu",
     [string]$IdentityFile = "",
@@ -137,12 +138,15 @@ function Invoke-Remote([string]$Script, [string]$What) {
 if ($SetRole -ne "") {
     # Usage: -SetRole someone@example.com -Level 3. redb is locked while the service runs,
     # so stop it for the moment it takes. (Admins can also do this on the /admin page.)
+    # The socket unit goes down too, or a request arriving meanwhile would start the service again.
     Invoke-Remote @"
 set -e
 cd '$RemoteBase'
+systemctl stop $Socket 2>/dev/null || true
 systemctl stop $Service
 set -a; . ./xmuhub.env; set +a
 ./run role --email '$SetRole' --level $Level || true
+systemctl start $Socket 2>/dev/null || true
 systemctl start $Service
 "@ "设置角色"
     return
@@ -199,11 +203,27 @@ MIMALLOC_PURGE_DELAY=0
 $envPath = Join-Path $stage "xmuhub.env"
 [System.IO.File]::WriteAllText($envPath, ($envText -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
+# systemd holds the listening port (socket activation) and hands it to the service, so
+# while the service restarts, new connections wait in the socket's queue (a few seconds
+# while the database loads) instead of nginx answering 502. See listener() in main.rs.
+$socketUnit = @"
+[Unit]
+Description=XMUHub 监听端口（服务重启期间新连接在这里排队）
+
+[Socket]
+ListenStream=127.0.0.1:$AppPort
+NoDelay=true
+Backlog=4096
+
+[Install]
+WantedBy=sockets.target
+"@
 $unit = @"
 [Unit]
 Description=XMUHub 厦门大学学生资料共享平台
-After=network-online.target
+After=network-online.target $Socket
 Wants=network-online.target
+Requires=$Socket
 
 [Service]
 Type=simple
@@ -243,13 +263,14 @@ $nginxPath = Join-Path $stage "xmuhub-relay.conf"
 
 $unitPath = Join-Path $stage "xmuhub.service"
 [System.IO.File]::WriteAllText($unitPath, ($unit -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+[System.IO.File]::WriteAllText((Join-Path $stage "xmuhub.socket"), ($socketUnit -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
 
 try {
     Invoke-Remote "set -e; mkdir -p '$RemoteBase/data'; rm -rf '$RemoteBase/run.new' '$RemoteBase/web.new' '$RemoteBase/web.tar.gz'" "准备目录"
     Push-Location $stage
     try {
         Write-Host "==> 上传 web 包、环境文件、服务单元..." -ForegroundColor DarkGray
-        & scp @scpOpts "web.tar.gz" "xmuhub.env" "xmuhub.service" "xmuhub-relay.conf" "${Remote}:$RemoteBase/"
+        & scp @scpOpts "web.tar.gz" "xmuhub.env" "xmuhub.service" "xmuhub.socket" "xmuhub-relay.conf" "${Remote}:$RemoteBase/"
         if ($LASTEXITCODE -ne 0) { throw "上传 web/env 失败" }
     }
     finally { Pop-Location }
@@ -285,7 +306,7 @@ $RunCommit = Join-Path $Root "run.commit"
 $BinRev = if (Test-Path $RunCommit) { (Get-Content $RunCommit -Raw).Trim() } else { "unknown" }
 $markBin = if ($WebOnly) { "B=`$(sed -n 's/^bin=//p' DEPLOYED 2>/dev/null)" } else { "B='$BinRev'" }
 
-# ---- 替换并重启（停机只在这一小段）----
+# ---- 替换并重启 ----
 $swapRun = if ($WebOnly) { "" } else { @"
 [ -f run ] && cp -f run run.bak || true
 mv -f run.new run
@@ -296,24 +317,36 @@ set -e
 cd '$RemoteBase'
 chmod 600 xmuhub.env
 mkdir -p web.new && tar -xzf web.tar.gz -C web.new && rm -f web.tar.gz
-if ! cmp -s xmuhub.service /etc/systemd/system/$Service; then
+SOCK_CHANGED=0
+if ! cmp -s xmuhub.socket /etc/systemd/system/$Socket; then cp -f xmuhub.socket /etc/systemd/system/$Socket; SOCK_CHANGED=1; fi
+if [ `$SOCK_CHANGED = 1 ] || ! cmp -s xmuhub.service /etc/systemd/system/$Service; then
   cp -f xmuhub.service /etc/systemd/system/$Service
   systemctl daemon-reload
-  systemctl enable $Service >/dev/null 2>&1 || true
+  systemctl enable $Socket $Service >/dev/null 2>&1 || true
   echo '[remote] systemd 单元已更新'
 fi
-rm -f xmuhub.service
+rm -f xmuhub.service xmuhub.socket
 NGX_EXT='$NginxExtDir'
 if [ -d "`$NGX_EXT" ] && ! cmp -s xmuhub-relay.conf "`$NGX_EXT/xmuhub-relay.conf"; then
   cp -f xmuhub-relay.conf "`$NGX_EXT/xmuhub-relay.conf"
   if nginx -t >/dev/null 2>&1; then nginx -s reload && echo '[remote] nginx 中转路由已更新'; else rm -f "`$NGX_EXT/xmuhub-relay.conf"; nginx -t; echo '[remote] nginx 配置测试失败，已回退'; exit 1; fi
 fi
 rm -f xmuhub-relay.conf
-systemctl stop $Service 2>/dev/null || true
+# Swap files first (the running process has its binary and pages loaded already), then
+# restart: with the port held by systemd a request can start the service at any moment,
+# and it must find the new files.
 $swapRun
 rm -rf web.bak; [ -d web ] && mv web web.bak || true
 mv web.new web
-systemctl start $Service
+if [ `$SOCK_CHANGED = 0 ] && systemctl is-active --quiet $Socket; then
+  systemctl restart $Service
+else
+  # First time (or the port changed): the service releases the port, systemd takes it over.
+  systemctl stop $Service 2>/dev/null || true
+  systemctl restart $Socket
+  systemctl start $Service
+  echo '[remote] 监听端口已交给 systemd（xmuhub.socket）'
+fi
 for i in 1 2 3 4 5 6 7 8 9 10; do
   if curl -fsS -o /dev/null http://127.0.0.1:$AppPort/api/meta; then echo '[remote] 健康检查通过'; break; fi
   sleep 1
@@ -325,10 +358,10 @@ pid=`$(systemctl show -p MainPID --value $Service)
 echo "[remote] 内存 `$(grep VmRSS /proc/`$pid/status)"
 systemctl --no-pager --full status $Service 2>&1 | head -n 8
 "@
-Write-Host "==> 停服务 -> 替换 -> 启动 ..." -ForegroundColor DarkGray
+Write-Host "==> 替换 -> 重启（重启期间请求在端口上排队）..." -ForegroundColor DarkGray
 Invoke-Remote $deploy "替换/重启"
 
 Write-Host ""
 Write-Host "===== 部署完成：$PublicUrl =====" -ForegroundColor Green
-Write-Host "回滚：ssh $Remote `"cd $RemoteBase && systemctl stop $Service && mv -f run.bak run && rm -rf web && mv web.bak web && systemctl start $Service`""
+Write-Host "回滚：ssh $Remote `"cd $RemoteBase && mv -f run.bak run && rm -rf web && mv web.bak web && systemctl restart $Service`""
 Write-Host "管理员名单：.secrets/admins.txt（改完运行 deploy.ps1 -AdminsOnly，一分钟内生效）"

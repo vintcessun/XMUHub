@@ -549,6 +549,8 @@ struct SearchQ {
     #[serde(rename = "type")]
     ty: Option<String>,
     tag: Option<String>,
+    #[serde(default)]
+    name_only: bool,
     // Strings, so an empty `within=` / `page=` from a form means "unset" instead of a 400.
     within: Option<String>,
     page: Option<String>,
@@ -556,12 +558,15 @@ struct SearchQ {
 
 async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<Value>> {
     const PAGE: usize = 20;
+    let courses_only = q.ty.as_deref() == Some("course");
     let filter = Filter {
         ty: match q.ty.as_deref() {
-            Some("node") => Some(DocType::Node),
+            Some("node" | "course") => Some(DocType::Node),
             Some("resource") => Some(DocType::Resource),
             _ => None,
         },
+        courses_only,
+        name_only: courses_only || q.name_only,
         within: q.within.as_deref().and_then(|w| w.trim().parse().ok()),
         tag: q.tag.as_deref().and_then(Tag::parse).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
     };

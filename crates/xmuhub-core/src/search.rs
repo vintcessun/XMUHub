@@ -28,6 +28,10 @@ pub enum DocType {
 #[derive(Default, Clone, Copy)]
 pub struct Filter {
     pub ty: Option<DocType>,
+    /// Restrict node results to actual courses, excluding offering groups/colleges.
+    pub courses_only: bool,
+    /// Match only the displayed course or resource title, not aliases or metadata.
+    pub name_only: bool,
     /// Restrict to this node's subtree.
     pub within: Option<Id>,
     /// Tag index (see `Tag::ALL`).
@@ -55,6 +59,9 @@ struct Fields {
     ty: Field,
     anc: Field,
     tag: Field,
+    course: Field,
+    name: Field,
+    name_py: Field,
     main: Field,
     py: Field,
     sub: Field,
@@ -89,6 +96,9 @@ impl Search {
             ty: sb.add_u64_field("ty", INDEXED),
             anc: sb.add_u64_field("anc", INDEXED),
             tag: sb.add_u64_field("tag", INDEXED),
+            course: sb.add_u64_field("course", INDEXED),
+            name: sb.add_text_field("name", text.clone()),
+            name_py: sb.add_text_field("name_py", text.clone()),
             main: sb.add_text_field("main", text.clone()),
             py: sb.add_text_field("py", text.clone()),
             sub: sb.add_text_field("sub", text),
@@ -100,11 +110,14 @@ impl Search {
         Ok(Search { f, writer: Mutex::new(writer), reader })
     }
 
-    pub fn put_node(&self, n: &Node, at: &Placement, weight: u64) -> Result<()> {
+    pub fn put_node(&self, n: &Node, at: &Placement, weight: u64, is_course: bool) -> Result<()> {
         let f = &self.f;
         let mut doc = doc!(
             f.key => key(DocType::Node, n.id),
             f.ty => DocType::Node as u64,
+            f.course => u64::from(is_course),
+            f.name => joined(&n.name),
+            f.name_py => joined(&pinyin_forms(&n.name)),
             f.main => joined(&format!("{} {} {} {}", n.name, n.label, n.code, at.aliases_text)),
             f.py => joined(&pinyin_forms(&format!("{} {} {}", n.name, n.label, at.aliases_text))),
             f.sub => joined(at.path_text),
@@ -127,6 +140,8 @@ impl Search {
             f.key => key(DocType::Resource, r.id),
             f.ty => DocType::Resource as u64,
             f.tag => tag_idx,
+            f.name => joined(&stem),
+            f.name_py => joined(&pinyin_forms(&stem)),
             f.main => joined(&format!("{stem} {subtitle} {}", at.aliases_text)),
             f.py => joined(&pinyin_forms(&format!("{} {}", r.name.course, at.aliases_text))),
             f.sub => joined(&format!("{} {} {}", at.path_text, r.tag.label(), r.note)),
@@ -177,11 +192,12 @@ impl Search {
         let unit_queries: Vec<(Occur, Box<dyn Query>)> = units
             .iter()
             .map(|u| {
-                let any_field = BooleanQuery::new(vec![
-                    term_q(f.main, u, 3.0),
-                    term_q(f.py, u, 2.0),
-                    term_q(f.sub, u, 1.0),
-                ]);
+                let fields = if filter.name_only {
+                    vec![term_q(f.name, u, 3.0), term_q(f.name_py, u, 2.0)]
+                } else {
+                    vec![term_q(f.main, u, 3.0), term_q(f.py, u, 2.0), term_q(f.sub, u, 1.0)]
+                };
+                let any_field = BooleanQuery::new(fields);
                 (Occur::Should, Box::new(any_field) as Box<dyn Query>)
             })
             .collect();
@@ -198,6 +214,9 @@ impl Search {
         };
         if let Some(ty) = filter.ty {
             clauses.push(exact(f.ty, ty as u64));
+        }
+        if filter.courses_only {
+            clauses.push(exact(f.course, 1));
         }
         if let Some(n) = filter.within {
             clauses.push(exact(f.anc, n));
@@ -226,5 +245,59 @@ impl Search {
     fn key_of(&self, searcher: &tantivy::Searcher, addr: DocAddress) -> Result<u64> {
         let col = searcher.segment_reader(addr.segment_ord).fast_fields().u64("key")?;
         Ok(col.first(addr.doc_id).unwrap_or(0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{NameParts, NodeKind, NodeStatus, Resource, Status, Tag};
+
+    fn node(id: Id, name: &str, kind: NodeKind) -> Node {
+        Node {
+            id, parent: None, kind, name: name.into(), label: name.into(), code: String::new(),
+            aliases: vec![], bucketed: false, sort: 0, status: NodeStatus::Active,
+            created_by: 0, created_at: 0,
+        }
+    }
+
+    fn count(index: &Search, q: &str, filter: Filter) -> usize {
+        index.search(q, filter, 20, 0).unwrap().1
+    }
+
+    #[test]
+    fn name_search_excludes_categories_and_resource_metadata() {
+        let index = Search::new().unwrap();
+        let place = Placement { node: 1, ancestors: &[], path_text: "专业课 信息学院", aliases_text: "算法" };
+        index.put_node(&node(1, "信息学院", NodeKind::Group), &place, 100, false).unwrap();
+        index.put_node(&node(2, "数据结构", NodeKind::Course), &place, 100, true).unwrap();
+        index.put_node(&node(3, "智能制造学院", NodeKind::Course), &place, 100, false).unwrap();
+        let resource = Resource {
+            id: 4, node: 2, tag: Tag::Exam,
+            name: NameParts { course: "数据结构".into(), time: "2025".into(), type_word: "期末试卷".into(), version: 1, ..Default::default() },
+            ext: "pdf".into(), note: "讲义".into(), original_name: "x.pdf".into(), source: String::new(),
+            uncertain: false, blob: String::new(), size: 1, mime: "application/pdf".into(),
+            status: Status::Published, needs_review: false, review_note: String::new(), uploader: 0,
+            reviewed_by: None, created_at: 0, updated_at: 0, downloads: 0,
+        };
+        index.put_resource(&resource, &place, "重点整理").unwrap();
+        index.commit().unwrap();
+
+        let courses = Filter { ty: Some(DocType::Node), courses_only: true, name_only: true, ..Default::default() };
+        assert_eq!(count(&index, "数据结构", courses), 1);
+        assert_eq!(count(&index, "sjjg", courses), 1);
+        assert_eq!(count(&index, "信息学院", courses), 0);
+        assert_eq!(count(&index, "智能制造学院", courses), 0);
+        assert_eq!(count(&index, "算法", courses), 0);
+
+        let files = Filter { ty: Some(DocType::Resource), name_only: true, ..Default::default() };
+        assert_eq!(count(&index, "数据结构", files), 1);
+        assert_eq!(count(&index, "期末试卷", files), 1);
+        assert_eq!(count(&index, "信息学院", files), 0);
+        assert_eq!(count(&index, "重点整理", files), 0);
+        assert_eq!(count(&index, "讲义", files), 0);
+        assert_eq!(count(&index, "算法", files), 0);
+        // Other API callers keep the existing broader search behavior.
+        assert_eq!(count(&index, "重点整理", Filter { ty: Some(DocType::Resource), ..Default::default() }), 1);
     }
 }

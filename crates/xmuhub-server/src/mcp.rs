@@ -99,6 +99,8 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ip: &str, name: &str, a: &Value)
                     "resource" => Some(DocType::Resource),
                     _ => None,
                 },
+                courses_only: false,
+                name_only: false,
                 within: a.get("within").and_then(Value::as_u64),
                 tag: Tag::parse(arg_str(a, "tag")).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
             };

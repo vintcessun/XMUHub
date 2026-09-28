@@ -350,6 +350,7 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
 @media (max-width: 760px) { .frow .opts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; background: var(--navy-soft); border-radius: 10px; margin-bottom: 12px; }
 .bulkbar .input { min-height: 32px; padding: 4px 8px; width: auto; }
+.review-filters select.input { max-width: min(260px, 100%); }
 .auth-card { max-width: 420px; margin: 24px auto; }
 
 /* ---- modal, preview, password, stars, comments, slogan ---- */

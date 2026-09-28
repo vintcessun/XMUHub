@@ -471,6 +471,25 @@ pub struct ReviewEvent {
     pub at: i64,
 }
 
+/// An uploader's request to edit a public note or remove a resource.
+/// Kept separate from Resource so existing postcard records remain readable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceChangeRequest {
+    pub id: Id,
+    pub resource: Id,
+    pub uploader: Id,
+    /// "note" or "delete".
+    pub kind: String,
+    /// Proposed public note, or the reason for deletion.
+    pub value: String,
+    /// "pending", "approved", or "rejected".
+    pub status: String,
+    pub created_at: i64,
+    pub reviewed_by: Option<Id>,
+    pub reviewed_at: Option<i64>,
+    pub review_note: String,
+}
+
 /// A signed-in user's 1–5 star rating of a resource (one per user and resource).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rating {

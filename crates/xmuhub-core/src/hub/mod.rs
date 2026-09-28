@@ -77,6 +77,7 @@ pub(crate) struct State {
     counts: HashMap<Id, usize>,
     /// Review audit trail, oldest first.
     reviews: Vec<ReviewEvent>,
+    resource_change_requests: HashMap<Id, ResourceChangeRequest>,
     /// resource → user → stars
     ratings: HashMap<Id, HashMap<Id, u8>>,
     comments: HashMap<Id, Comment>,
@@ -124,6 +125,7 @@ impl State {
         }
         st.reviews = snap.reviews;
         st.reviews.sort_by_key(|e| e.id);
+        st.resource_change_requests = snap.resource_change_requests.into_iter().map(|r| (r.id, r)).collect();
         for r in snap.ratings {
             st.ratings.entry(r.resource).or_default().insert(r.user, r.stars);
         }

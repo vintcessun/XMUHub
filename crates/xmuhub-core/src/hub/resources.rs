@@ -235,6 +235,9 @@ impl Hub {
             if !staff && !own_pending {
                 return Err(Error::Forbidden);
             }
+            if !staff && clean(&input.note, 500) != r.note {
+                return Err(bad("修改备注需要提交申请，由审核员同意后生效"));
+            }
             let (mut name, tag) = Self::build_name(st, &input, &extras, staff, Some(id))?;
             let node = st.resolve(input.node).map(|n| n.id).ok_or(Error::NotFound("分类"))?;
             // Keep the existing version when the base name didn't change.
@@ -353,6 +356,20 @@ impl Hub {
             r.reviewed_by = Some(me.id);
             r.updated_at = now();
             st.put_resource(tx, r.clone())?;
+            if matches!(r.status, Status::Removed | Status::Rejected) {
+                let open: Vec<Id> = st.resource_change_requests.values()
+                    .filter(|q| q.resource == id && q.status == "pending")
+                    .map(|q| q.id).collect();
+                for qid in open {
+                    let mut q = st.resource_change_requests[&qid].clone();
+                    q.status = "rejected".into();
+                    q.reviewed_by = Some(me.id);
+                    q.reviewed_at = Some(now());
+                    q.review_note = "资料已下架或未通过审核".into();
+                    tx.put_resource_change_request(&q)?;
+                    st.resource_change_requests.insert(qid, q);
+                }
+            }
             let e = ReviewEvent { id: st.next_id(tx)?, resource: r.id, actor: me.id, action: action.to_string(), note: r.review_note.clone(), at: now() };
             tx.put_review(&e)?;
             st.reviews.push(e);
@@ -361,6 +378,90 @@ impl Hub {
         })?;
         self.reindex(&[r.node], &[r.id]);
         Ok((r, garbage))
+    }
+
+    pub fn request_resource_change(&self, actor: Viewer, id: Id, kind: &str, value: &str) -> Result<ResourceChangeRequest> {
+        let me = actor.at_least(Level::Contributor)?;
+        if kind != "note" && kind != "delete" { return Err(bad("未知申请类型")); }
+        let value = clean(value, if kind == "note" { 500 } else { 300 });
+        if kind == "delete" && value.chars().count() < 4 { return Err(bad("请填写至少 4 个字的删除理由")); }
+        self.mutate(|st, tx| {
+            let r = st.resources.get(&id).ok_or(Error::NotFound("资料"))?;
+            if r.uploader != me.id { return Err(Error::Forbidden); }
+            if matches!(r.status, Status::Removed | Status::Rejected) { return Err(bad("这份资料已下架或未通过审核")); }
+            if kind == "note" && r.note == value { return Err(bad("新备注与当前备注相同")); }
+            if st.resource_change_requests.values().any(|q| q.resource == id && q.status == "pending") {
+                return Err(Error::Conflict("这份资料已有待处理申请".into()));
+            }
+            let q = ResourceChangeRequest {
+                id: st.next_id(tx)?, resource: id, uploader: me.id, kind: kind.into(), value,
+                status: "pending".into(), created_at: now(), reviewed_by: None, reviewed_at: None, review_note: String::new(),
+            };
+            tx.put_resource_change_request(&q)?;
+            st.resource_change_requests.insert(q.id, q.clone());
+            Ok(q)
+        })
+    }
+
+    pub fn resource_change_request(&self, actor: Viewer, id: Id) -> Result<Option<ResourceChangeRequest>> {
+        let me = actor.at_least(Level::Contributor)?;
+        let st = self.st.read();
+        let r = st.resources.get(&id).ok_or(Error::NotFound("资料"))?;
+        if r.uploader != me.id && me.level < Level::Reviewer { return Err(Error::Forbidden); }
+        Ok(st.resource_change_requests.values().filter(|q| q.resource == id).max_by_key(|q| q.id).cloned())
+    }
+
+    pub fn pending_resource_changes(&self, actor: Viewer) -> Result<Vec<(ResourceChangeRequest, Resource)>> {
+        actor.at_least(Level::Reviewer)?;
+        let st = self.st.read();
+        let mut out: Vec<_> = st.resource_change_requests.values()
+            .filter(|q| q.status == "pending")
+            .filter_map(|q| Some((q.clone(), st.resources.get(&q.resource)?.clone())))
+            .collect();
+        out.sort_by_key(|(q, _)| (q.created_at, q.id));
+        Ok(out)
+    }
+
+    pub fn review_resource_change(&self, actor: Viewer, id: Id, approve: bool, note: &str) -> Result<ResourceChangeRequest> {
+        let me = actor.at_least(Level::Reviewer)?;
+        let note = clean(note, 300);
+        let (q, changed) = self.mutate(|st, tx| {
+            let mut q = st.resource_change_requests.get(&id).cloned().ok_or(Error::NotFound("申请"))?;
+            if q.status != "pending" { return Err(Error::Conflict("申请已处理".into())); }
+            let mut r = st.resources.get(&q.resource).cloned().ok_or(Error::NotFound("资料"))?;
+            if approve && matches!(r.status, Status::Removed | Status::Rejected) {
+                return Err(bad("资料已下架或未通过审核，无法同意申请"));
+            }
+            if approve {
+                match q.kind.as_str() {
+                    "note" => r.note = q.value.clone(),
+                    "delete" => {
+                        r.status = Status::Removed;
+                        r.needs_review = false;
+                        r.reviewed_by = Some(me.id);
+                        r.review_note = if note.is_empty() { q.value.clone() } else { note.clone() };
+                    }
+                    _ => return Err(bad("未知申请类型")),
+                }
+                r.updated_at = now();
+                st.put_resource(tx, r.clone())?;
+            }
+            q.status = if approve { "approved" } else { "rejected" }.into();
+            q.reviewed_by = Some(me.id);
+            q.reviewed_at = Some(now());
+            q.review_note = note.clone();
+            tx.put_resource_change_request(&q)?;
+            st.resource_change_requests.insert(q.id, q.clone());
+            let e = ReviewEvent {
+                id: st.next_id(tx)?, resource: r.id, actor: me.id,
+                action: format!("{}_{}", q.kind, q.status), note, at: now(),
+            };
+            tx.put_review(&e)?;
+            st.reviews.push(e);
+            Ok((q, approve))
+        })?;
+        if changed { self.reindex(&[], &[q.resource]); }
+        Ok(q)
     }
 
     /// Drops a blob no live resource or open upload uses; returns its replicas for deletion.
@@ -378,7 +479,11 @@ impl Hub {
 
     pub fn resource(&self, viewer: Viewer, id: Id) -> Result<(Resource, Node, Vec<Node>)> {
         let st = self.st.read();
-        let r = st.resources.get(&id).filter(|r| viewer.can_see(r)).ok_or(Error::NotFound("资料"))?;
+        // Let the uploader inspect restricted/removed metadata and review results,
+        // while download access still follows Viewer::can_see.
+        let r = st.resources.get(&id)
+            .filter(|r| viewer.can_see(r) || (matches!(r.status, Status::Removed | Status::Restricted) && viewer.id() == Some(r.uploader)))
+            .ok_or(Error::NotFound("资料"))?;
         let n = st.nodes.get(&r.node).ok_or(Error::NotFound("分类"))?;
         let path = st.ancestors(n.id).iter().filter_map(|a| st.nodes.get(a).cloned()).collect();
         Ok((r.clone(), n.clone(), path))
@@ -536,6 +641,91 @@ impl Hub {
             self.dirty_downloads.lock().insert(id);
         }
         Ok(plan)
+    }
+}
+
+#[cfg(test)]
+mod change_request_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::db::Db;
+    use crate::hub::Limits;
+    use crate::storage::{Storage, local::LocalBackend};
+
+    fn user(id: Id, level: Level) -> User {
+        User {
+            id, email: format!("{id}@example.invalid"), nickname: format!("user{id}"),
+            password: String::new(), level, banned: false, created_at: now(),
+            created_ip: String::new(), last_login: 0, uploads: 0,
+        }
+    }
+
+    #[test]
+    fn uploader_changes_wait_for_review_and_survive_restart() {
+        let dir = std::env::temp_dir().join(format!("xmuhub-change-request-{}-{}", std::process::id(), now()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = Arc::new(Db::open(&dir.join("test.redb"), 1 << 20).unwrap());
+        let storage = Storage::new(vec![Arc::new(LocalBackend { dir: dir.join("files"), secret: b"test".to_vec() })]);
+        let h = Hub::open(db.clone(), storage.clone(), Limits::default(), vec![]).unwrap();
+        let owner = user(1, Level::Contributor);
+        let other = user(2, Level::Contributor);
+        let reviewer = user(3, Level::Reviewer);
+        let resource = Resource {
+            id: 5, node: 4, tag: Tag::Slides,
+            name: NameParts { course: "课程".into(), time: "2025".into(), type_word: "资料".into(), version: 1, ..Default::default() },
+            ext: "pdf".into(), note: "原备注".into(), original_name: "x.pdf".into(), source: String::new(),
+            uncertain: false, blob: "test".into(), size: 1, mime: "application/pdf".into(),
+            status: Status::Pending, needs_review: false, review_note: String::new(), uploader: owner.id,
+            reviewed_by: None, created_at: now(), updated_at: now(), downloads: 0,
+        };
+        h.mutate(|st, tx| {
+            st.seq = 10;
+            tx.put_meta(super::super::SEQ_KEY, &st.seq.to_le_bytes())?;
+            for u in [&owner, &other, &reviewer] { st.put_user(tx, u.clone())?; }
+            st.put_node(tx, Node {
+                id: 4, parent: None, kind: NodeKind::Course, code: String::new(), name: "课程".into(),
+                label: "课程".into(), aliases: vec![], bucketed: false, sort: 0,
+                status: NodeStatus::Active, created_by: reviewer.id, created_at: now(),
+            })?;
+            st.put_resource(tx, resource.clone())?;
+            Ok(())
+        }).unwrap();
+        let mine = Viewer { user: Some(&owner) };
+        let stranger = Viewer { user: Some(&other) };
+        let staff = Viewer { user: Some(&reviewer) };
+        let edited = ResourceInput {
+            node: 4, course: "课程".into(), time: "2025".into(), type_word: "资料".into(),
+            tag: String::new(), paper: String::new(), with_answer: false, extra: String::new(),
+            note: "新备注".into(), subtitle: None,
+        };
+        assert!(h.update_resource(mine, 5, edited, AdminExtras::default()).is_err());
+        assert!(h.request_resource_change(stranger, 5, "note", "新备注").is_err());
+        let q = h.request_resource_change(mine, 5, "note", "新备注").unwrap();
+        assert_eq!(h.resource_change_request(mine, 5).unwrap().unwrap().id, q.id);
+        assert!(h.resource_change_request(stranger, 5).is_err());
+        assert!(h.pending_resource_changes(mine).is_err());
+        assert!(h.request_resource_change(mine, 5, "delete", "内容有误").is_err());
+        assert!(h.review_resource_change(mine, q.id, true, "").is_err());
+        assert_eq!(h.resource(mine, 5).unwrap().0.note, "原备注");
+        drop(h);
+
+        let h = Hub::open(db.clone(), storage, Limits::default(), vec![]).unwrap();
+        assert_eq!(h.pending_resource_changes(staff).unwrap().len(), 1);
+        h.review_resource_change(staff, q.id, true, "").unwrap();
+        assert_eq!(h.resource(mine, 5).unwrap().0.note, "新备注");
+        assert!(h.review_resource_change(staff, q.id, true, "").is_err());
+        let rejected = h.request_resource_change(mine, 5, "delete", "内容有误").unwrap();
+        h.review_resource_change(staff, rejected.id, false, "保留资料").unwrap();
+        assert_eq!(h.resource(mine, 5).unwrap().0.status, Status::Pending);
+        let remove = h.request_resource_change(mine, 5, "delete", "内容有误").unwrap();
+        h.review_resource_change(staff, remove.id, true, "").unwrap();
+        assert_eq!(h.resource(mine, 5).unwrap().0.status, Status::Removed);
+        assert!(matches!(h.download(mine, 5, false), Err(Error::NotFound("资料"))));
+        assert!(h.request_resource_change(mine, 5, "note", "再改").is_err());
+        drop(h);
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

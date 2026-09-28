@@ -349,10 +349,6 @@ impl Tx<'_> {
         self.txn.open_table(THUMBS)?.insert(t.key.as_str(), encode(t).as_slice())?;
         Ok(())
     }
-    pub fn del_thumb(&self, key: &str) -> Result<()> {
-        self.txn.open_table(THUMBS)?.remove(key)?;
-        Ok(())
-    }
     pub fn put_subtitle(&self, id: Id, s: &str) -> Result<()> {
         self.txn.open_table(SUBTITLES)?.insert(id, s)?;
         Ok(())

@@ -358,8 +358,6 @@ impl Hub {
             let mut r = st.resources.get(&id).cloned().ok_or(Error::NotFound("资料"))?;
             match action {
                 "approve" | "restore" => {
-                    // A removed or rejected file has been deleted from storage; there is nothing to publish.
-                    if !st.blobs.contains_key(&r.blob) { return Err(bad("文件已经删除，无法恢复；请重新上传")); }
                     r.status = Status::Published;
                     r.needs_review = false;
                     r.uncertain = false;
@@ -397,9 +395,7 @@ impl Hub {
             let e = ReviewEvent { id: st.next_id(tx)?, resource: r.id, actor: me.id, action: action.to_string(), note: r.review_note.clone(), at: now() };
             tx.put_review(&e)?;
             st.reviews.push(e);
-            // Rejected and removed files are deleted from storage, so links copied earlier
-            // (mirror / GitHub URLs) stop working too. 「仅内部」 is the reversible way to hide one.
-            let garbage = if matches!(r.status, Status::Rejected | Status::Removed) { Self::release_blob(st, tx, &r.blob)? } else { Vec::new() };
+            let garbage = if r.status == Status::Rejected { Self::release_blob(st, tx, &r.blob)? } else { Vec::new() };
             Ok((r, garbage))
         })?;
         self.reindex(&[r.node], &[r.id]);
@@ -448,11 +444,10 @@ impl Hub {
         Ok(out)
     }
 
-    /// Returns storage locations that became unreferenced (an approved deletion), like `review`.
-    pub fn review_resource_change(&self, actor: Viewer, id: Id, approve: bool, note: &str) -> Result<(ResourceChangeRequest, Vec<Location>)> {
+    pub fn review_resource_change(&self, actor: Viewer, id: Id, approve: bool, note: &str) -> Result<ResourceChangeRequest> {
         let me = actor.at_least(Level::Reviewer)?;
         let note = clean(note, 300);
-        let (q, changed, garbage) = self.mutate(|st, tx| {
+        let (q, changed) = self.mutate(|st, tx| {
             let mut q = st.resource_change_requests.get(&id).cloned().ok_or(Error::NotFound("申请"))?;
             if q.status != "pending" { return Err(Error::Conflict("申请已处理".into())); }
             let mut r = st.resources.get(&q.resource).cloned().ok_or(Error::NotFound("资料"))?;
@@ -485,35 +480,23 @@ impl Hub {
             };
             tx.put_review(&e)?;
             st.reviews.push(e);
-            let garbage = if approve && q.kind == "delete" { Self::release_blob(st, tx, &r.blob)? } else { Vec::new() };
-            Ok((q, approve, garbage))
+            Ok((q, approve))
         })?;
         if changed { self.reindex(&[], &[q.resource]); }
-        Ok((q, garbage))
+        Ok(q)
     }
 
-    /// Drops a blob no live resource or open upload uses; returns its replicas and thumbnail
-    /// for deletion. Rejected and removed resources don't count as users; restricted ones keep
-    /// their blob so that decision can be undone.
+    /// Drops a blob no live resource or open upload uses; returns its replicas for deletion.
+    /// Removed/restricted resources keep their blob so the decision can be undone.
     pub(super) fn release_blob(st: &mut State, tx: &Tx, key: &str) -> Result<Vec<Location>> {
-        let used = st.resources.values().any(|r| r.blob == key && !matches!(r.status, Status::Rejected | Status::Removed))
+        let used = st.resources.values().any(|r| r.blob == key && r.status != Status::Rejected)
             || st.uploads.values().any(|u| u.key == key && !u.consumed);
         if used {
             return Ok(Vec::new());
         }
         let Some(b) = st.blobs.remove(key) else { return Ok(Vec::new()) };
         tx.del_blob(key)?;
-        let mut out: Vec<Location> = b.parts.into_iter().flat_map(|p| p.replicas).collect();
-        if let Some(t) = st.thumbs.remove(key) {
-            tx.del_thumb(key)?;
-            out.extend(t.loc);
-        }
-        Ok(out)
-    }
-
-    /// Whether the file behind a resource is still in storage (false once it was rejected or removed).
-    pub fn has_file(&self, r: &Resource) -> bool {
-        self.st.read().blobs.contains_key(&r.blob)
+        Ok(b.parts.into_iter().flat_map(|p| p.replicas).collect())
     }
 
     pub fn resource(&self, viewer: Viewer, id: Id) -> Result<(Resource, Node, Vec<Node>)> {

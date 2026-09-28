@@ -214,7 +214,7 @@ const panels = {
   },
   async changes(box) {
     const list = await api('/review/change-requests');
-    box.innerHTML = `<section class="card"><p class="small muted">上传者申请修改公开备注或删除自己的资料；同意后才会生效。删除获批后资料下架，文件从存储里删除，旧下载链接失效。</p>
+    box.innerHTML = `<section class="card"><p class="small muted">上传者申请修改公开备注或删除自己的资料；同意后才会生效。删除获批后资料下架。</p>
       ${list.length ? list.map(({ request: q, title, current_note, uploader }) => `<div class="item" data-id="${q.id}"><div class="body">
         <div><a class="title" href="/r/${q.resource}" target="_blank">${esc(title)}</a></div>
         <div class="meta"><span>${q.kind === 'note' ? '修改备注' : '删除资料'}</span><span>上传者：${esc(uploader)}</span><span>${ago(q.created_at)}</span></div>
@@ -248,7 +248,7 @@ const panels = {
   async reports(box, all = false) {
     const list = await api(`/admin/reports${all ? '?all=true' : ''}`);
     const STATUS = { pending: '待审核', published: '已发布', rejected: '未通过', removed: '已下架', restricted: '仅内部' };
-    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。需要下架的，先点「下架」再标记已处理。下架会删除文件，旧下载链接随之失效，不能恢复。</p><span class="grow"></span>
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。需要下架的，先点「下架」再标记已处理。</p><span class="grow"></span>
         <label class="small"><input type="checkbox" id="rpall"${all ? ' checked' : ''}> 显示已处理</label></div>
       ${list.length ? list.map((r) => `
       <div class="item" data-id="${r.id}" data-res="${r.resource ? r.resource.id : ''}"><div class="body">
@@ -275,7 +275,7 @@ const panels = {
           panels.reports(box, all);
           return;
         }
-        if (b.dataset.a === 'remove') { if (!confirm('下架会删除这份文件，旧的下载链接随之失效，之后无法恢复。确定吗？')) return; await api(`/resources/${it.dataset.res}/review`, { method: 'POST', body: { action: 'remove', note: note || '收到投诉，已下架' } }); toast('已下架'); panels.reports(box, all); }
+        if (b.dataset.a === 'remove') { await api(`/resources/${it.dataset.res}/review`, { method: 'POST', body: { action: 'remove', note: note || '收到投诉，已下架' } }); toast('已下架'); panels.reports(box, all); }
         else { await api(`/admin/reports/${it.dataset.id}/handle`, { method: 'POST', body: { note } }); toast('已处理，可在「显示已处理」中查看'); panels.reports(box, all); }
       } catch (err) { toast(err.message, true); }
     };

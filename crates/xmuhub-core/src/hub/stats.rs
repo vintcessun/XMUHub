@@ -60,7 +60,8 @@ impl Hub {
                 if d < first { before += 1 } else if d <= today { added[(d - first) as usize] += 1 }
             }
         }
-        for e in &st.reviews {
+        // Uploaders' own edits are logged with the reviews but aren't review work.
+        for e in st.reviews.iter().filter(|e| e.action != "edit") {
             let d = day_index(e.at);
             if d >= first && d <= today {
                 reviewed[(d - first) as usize] += 1;

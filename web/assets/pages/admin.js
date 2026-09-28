@@ -220,7 +220,7 @@ const panels = {
   },
   async log(box) {
     const list = await api('/admin/reviews');
-    const A = { approve: ['通过', 'published'], reject: ['驳回', 'rejected'], remove: ['下架', 'removed'], restrict: ['仅内部', 'restricted'], restore: ['恢复发布', 'published'] };
+    const A = { edit: ['上传者修改', 'pending'], approve: ['通过', 'published'], reject: ['驳回', 'rejected'], remove: ['下架', 'removed'], restrict: ['仅内部', 'restricted'], restore: ['恢复发布', 'published'] };
     box.innerHTML = `<section class="card scroll-x"><p class="small muted">最近 300 条审核操作（谁在什么时候通过、驳回或下架了哪份资料）。</p>
       ${list.length ? `<table class="table"><thead><tr><th>时间</th><th>审核人</th><th>操作</th><th>资料</th><th>备注</th></tr></thead><tbody>
       ${list.map((e) => `<tr><td class="small faint">${fmtDate(e.at, true)}</td><td>${esc(e.actor)}</td>

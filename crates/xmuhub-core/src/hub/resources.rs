@@ -231,12 +231,19 @@ impl Hub {
         let staff = me.level >= Level::Reviewer;
         let r = self.mutate(|st, tx| {
             let mut r = st.resources.get(&id).cloned().ok_or(Error::NotFound("资料"))?;
-            let own_pending = r.uploader == me.id && r.status == Status::Pending;
-            if !staff && !own_pending {
+            // Uploaders may fix their own files while waiting and after publication (the edit
+            // then goes back to review below). Rejected files no longer have their blob.
+            let own = r.uploader == me.id && matches!(r.status, Status::Pending | Status::Published);
+            if !staff && !own {
                 return Err(Error::Forbidden);
             }
             let (mut name, tag) = Self::build_name(st, &input, &extras, staff, Some(id))?;
-            let node = st.resolve(input.node).map(|n| n.id).ok_or(Error::NotFound("分类"))?;
+            let target = st.resolve(input.node).ok_or(Error::NotFound("分类"))?;
+            if !staff && target.kind == NodeKind::Section {
+                return Err(bad("请选择具体的课程或分类，不能直接放在栏目下"));
+            }
+            let node = target.id;
+            let old_node = r.node;
             // Keep the existing version when the base name didn't change.
             if name.base() == r.name.base() && node == r.node && extras.version.is_none() {
                 name.version = r.name.version;
@@ -252,10 +259,25 @@ impl Hub {
             if let Some(sub) = &input.subtitle {
                 Self::set_subtitle(st, tx, &r, sub)?;
             }
+            if !staff {
+                // An edited published file is checked again, by the same rule as a new upload:
+                // trusted uploaders stay public and are re-checked, others wait for approval.
+                if r.status == Status::Published {
+                    if me.level.publishes_directly() {
+                        r.needs_review = true;
+                    } else {
+                        r.status = Status::Pending;
+                    }
+                }
+                let e = ReviewEvent { id: st.next_id(tx)?, resource: r.id, actor: me.id, action: "edit".into(), note: String::new(), at: now() };
+                tx.put_review(&e)?;
+                st.reviews.push(e);
+            }
             st.put_resource(tx, r.clone())?;
-            Ok(r)
+            Ok((r, old_node))
         })?;
-        self.reindex(&[], &[r.id]);
+        let (r, old_node) = r;
+        self.reindex(&[old_node, r.node], &[r.id]);
         Ok(r)
     }
 

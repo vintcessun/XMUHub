@@ -23,8 +23,10 @@ pub struct Asset {
     br: Option<Bytes>,
     gz: Option<Bytes>,
     etag: String,
-    /// Hashed-by-query assets and HTML differ in cacheability.
-    immutable: bool,
+    /// Content key (see versioning.rs): a request whose `?v=` matches it may be cached for good.
+    key: String,
+    /// Third-party libraries live in versioned folders (`vendor/<name>-<version>/`): always final.
+    vendor: bool,
 }
 
 pub struct Site {
@@ -117,10 +119,16 @@ fn mime_of(path: &str) -> &'static str {
 
 impl Site {
     pub fn load(dir: &Path) -> anyhow::Result<Site> {
+        let mut raw_files = HashMap::new();
+        walk(dir, dir, &mut |rel, raw| {
+            raw_files.insert(rel, raw);
+            Ok(())
+        })?;
+        let crate::versioning::Versioned { files: versioned, keys } = crate::versioning::version(raw_files);
         let mut files = HashMap::new();
         let mut total = 0usize;
         let mut script_hashes = BTreeSet::new();
-        walk(dir, dir, &mut |rel, raw| {
+        for (rel, raw) in versioned {
             let mime = mime_of(&rel);
             if rel.ends_with(".html") {
                 inline_script_hashes(&raw, &mut script_hashes);
@@ -142,10 +150,10 @@ impl Site {
             };
             total += raw.len();
             let etag = format!("\"{}\"", &hex::encode(Sha256::digest(&raw))[..16]);
-            let immutable = rel.starts_with("vendor/");
-            files.insert(rel, Asset { mime, raw: Bytes::from(raw), br, gz, etag, immutable });
-            Ok(())
-        })?;
+            let key = keys.get(&rel).cloned().unwrap_or_default();
+            let vendor = rel.starts_with("vendor/");
+            files.insert(rel, Asset { mime, raw: Bytes::from(raw), br, gz, etag, key, vendor });
+        }
         tracing::info!(files = files.len(), bytes = total, inline_scripts = script_hashes.len(), "static site loaded");
         let csp = HeaderValue::from_str(&build_csp(&script_hashes))?;
         Ok(Site { files, csp })
@@ -160,16 +168,20 @@ impl Site {
         self.files.get(path)
     }
 
-    pub fn respond(self: &Arc<Self>, path: &str, req: &HeaderMap, status: StatusCode) -> Response {
+    /// `version`: the request's `?v=`. Pages link every script, style, font and image with
+    /// its content key, so a request carrying the current key can be kept by browsers and
+    /// Cloudflare for a year (a new deploy changes the key, hence the URL). Anything else —
+    /// pages themselves, unversioned or outdated keys — revalidates every time (a 304 costs
+    /// ~200 bytes), so old and new files never mix.
+    pub fn respond(self: &Arc<Self>, path: &str, version: Option<&str>, req: &HeaderMap, status: StatusCode) -> Response {
         let Some(a) = self.files.get(path) else {
             return match self.files.get("404.html") {
-                Some(_) if path != "404.html" => self.respond("404.html", req, StatusCode::NOT_FOUND),
+                Some(_) if path != "404.html" => self.respond("404.html", None, req, StatusCode::NOT_FOUND),
                 _ => (StatusCode::NOT_FOUND, "not found").into_response(),
             };
         };
-        // Pages, scripts and styles revalidate every time (a 304 costs ~200 bytes) so a deploy
-        // never mixes new HTML with stale JS/CSS. Only third-party vendor files are immutable.
-        let cache = if a.immutable { "public, max-age=31536000, immutable" } else { "no-cache" };
+        let fresh = a.vendor || (status == StatusCode::OK && !a.key.is_empty() && version == Some(a.key.as_str()));
+        let cache = if fresh { "public, max-age=31536000, immutable" } else { "no-cache" };
         if status == StatusCode::OK && req.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(a.etag.as_str()) {
             return Response::builder()
                 .status(StatusCode::NOT_MODIFIED)

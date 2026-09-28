@@ -8,6 +8,7 @@ mod ratelimit;
 mod relay;
 mod thumbs;
 mod transfer;
+mod versioning;
 mod web;
 
 use std::sync::Arc;

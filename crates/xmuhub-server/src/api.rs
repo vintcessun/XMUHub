@@ -383,13 +383,19 @@ pub fn router(app: Arc<App>) -> Router {
 }
 
 fn page(State(app): S, file: &str, h: HeaderMap) -> Response {
-    app.site.respond(file, &h, StatusCode::OK)
+    app.site.respond(file, None, &h, StatusCode::OK)
 }
 
-async fn static_file(State(app): S, Path(path): Path<String>, h: HeaderMap) -> Response {
+#[derive(Deserialize)]
+struct StaticQ {
+    /// Content key the page linked the file with (see versioning.rs).
+    v: Option<String>,
+}
+
+async fn static_file(State(app): S, Path(path): Path<String>, Query(q): Query<StaticQ>, h: HeaderMap) -> Response {
     // Clean URLs: /search → search.html.
     let path = if app.site.get(&path).is_none() && app.site.get(&format!("{path}.html")).is_some() { format!("{path}.html") } else { path };
-    app.site.respond(&path, &h, StatusCode::OK)
+    app.site.respond(&path, q.v.as_deref(), &h, StatusCode::OK)
 }
 
 // ------------------------------------------------------------------ meta & account
@@ -734,8 +740,36 @@ async fn popular(State(app): S, auth: Auth) -> Json<Value> {
     list(&app, app.hub.popular(12), auth.viewer())
 }
 
-async fn mine(State(app): S, auth: Auth) -> R<Json<Value>> {
-    Ok(list(&app, app.hub.my_resources(auth.viewer())?, auth.viewer()))
+#[derive(Deserialize)]
+struct MineQ {
+    /// Matches title, category name, note or the original file name (case-insensitive; these are
+    /// the caller's own files, so their original names are theirs to search).
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+}
+
+/// The caller's uploads, newest first, a page at a time (some people have thousands: sending
+/// them all at once froze phones).
+async fn mine(State(app): S, auth: Auth, Query(q): Query<MineQ>) -> R<Json<Value>> {
+    let all = app.hub.my_resources(auth.viewer())?;
+    let total = all.len();
+    let needle = q.q.trim().to_lowercase();
+    let hits: Vec<&(Resource, Node)> = all
+        .iter()
+        .filter(|(r, _)| q.status.is_empty() || r.status.as_str() == q.status)
+        .filter(|(r, n)| {
+            needle.is_empty() || [r.name.stem(), n.name.clone(), r.note.clone(), r.original_name.clone()].iter().any(|x| x.to_lowercase().contains(&needle))
+        })
+        .collect();
+    let limit = q.limit.unwrap_or(30).clamp(1, 100);
+    let v = auth.viewer();
+    let items: Vec<Value> = hits.iter().skip(q.offset).take(limit).map(|(r, n)| resource_view(&app, r, n, &[], v)).collect();
+    Ok(Json(json!({ "items": items, "matched": hits.len(), "total": total })))
 }
 
 // ------------------------------------------------------------------ resources

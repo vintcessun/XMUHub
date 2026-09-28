@@ -3078,6 +3078,7 @@ dependencies = [
  "mimalloc",
  "mime_guess",
  "parking_lot",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

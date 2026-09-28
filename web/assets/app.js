@@ -769,6 +769,8 @@ const SOFT = /^\/(?:|browse|help|about|feedback|links|search|[nr]\/\d+\/?)$/;
 const here = () => location.pathname + location.search;
 const soft = (u) => u.origin === location.origin && SOFT.test(u.pathname) && SOFT.test(location.pathname);
 const templates = new Map();
+// Version of this app module (the server stamps it into every page, see versioning.rs).
+const BUILD = document.querySelector('meta[name="xmuhub-version"]')?.content || '';
 let navSeq = 0;
 let shown = here();
 let prevPage = '';
@@ -789,7 +791,10 @@ function template(path) {
     const main = doc.querySelector('main');
     const script = doc.querySelector('script[type="module"][src]');
     if (!main || !script) throw new Error('not a page');
-    return { title: doc.title, desc: doc.querySelector('meta[name="description"]')?.content || '', page: doc.body.dataset.page || '', main: main.innerHTML, script: script.getAttribute('src') };
+    return {
+      title: doc.title, desc: doc.querySelector('meta[name="description"]')?.content || '', page: doc.body.dataset.page || '',
+      main: main.innerHTML, script: script.getAttribute('src'), build: doc.querySelector('meta[name="xmuhub-version"]')?.content || '',
+    };
   });
   p.catch(() => templates.delete(k));
   templates.set(k, { p, at: Date.now() });
@@ -829,7 +834,10 @@ async function render({ y = 0, hash = '' } = {}) {
   let t;
   try {
     t = await template(location.pathname);
-    t.src = `${t.script}?v=${seq}`;
+    // A newer deploy: load the page for real rather than run its scripts next to old ones.
+    if (t.build !== BUILD) { location.reload(); return; }
+    // A fresh query makes import() run the page module again; the script is already versioned.
+    t.src = `${t.script}${t.script.includes('?') ? '&' : '?'}r=${seq}`;
     await preloadModule(t.src);
   } catch {
     location.reload();

@@ -89,26 +89,62 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
     try { await api(`/me/tokens/${b.dataset.del}`, { method: 'DELETE' }); toast('已删除，使用它的客户端将无法再连接'); loadTokens(); } catch (err) { toast(err.message, true); }
   };
 
-  try {
-    const rs = await api('/mine');
-    if (!rs.length) {
-      $('#mine').innerHTML = '<div class="empty"><b>还没有上传过资料</b><a href="/upload">去上传</a></div>';
-      return;
-    }
-    const render = () => {
-      const q = $('#mq').value.trim().toLowerCase();
-      const st = $('#ms').value;
-      const hit = rs.filter((r) => (!st || r.status === st) && (!q || [r.title, r.node.name, r.note].some((x) => (x || '').toLowerCase().includes(q))));
-      $('#mcount').textContent = q || st ? `找到 ${hit.length} / ${rs.length} 份` : `共 ${rs.length} 份`;
-      $('#mine').innerHTML = hit.length ? hit.map((r) => resourceItem(r)).join('') : '<div class="empty">没有符合条件的资料</div>';
-    };
-    $('#mq').oninput = render;
-    $('#ms').onchange = render;
-    render();
-  } catch (e) {
-    $('#mine').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
-  }
+  loadMine();
 })();
+
+// ---------------------------------------------------------------- my uploads, a page at a time
+//
+// Some people have uploaded thousands of files; rendering them all at once froze phones. The
+// server filters and pages the list; more is fetched as the end of the list scrolls into view.
+
+const PAGE = 30;
+let mineSeq = 0;
+let mineShown = 0;
+let mineMatched = 0;
+let mineLoading = false;
+const mineMore = new IntersectionObserver((entries) => {
+  if (entries.some((e) => e.isIntersecting)) loadMine(true);
+}, { rootMargin: '600px' });
+
+async function loadMine(more = false) {
+  if (more && (mineLoading || mineShown >= mineMatched)) return;
+  const my = more ? mineSeq : ++mineSeq;
+  mineLoading = true;
+  const q = $('#mq').value.trim();
+  const st = $('#ms').value;
+  const params = new URLSearchParams({ offset: String(more ? mineShown : 0), limit: String(PAGE) });
+  if (q) params.set('q', q);
+  if (st) params.set('status', st);
+  try {
+    const r = await api(`/mine?${params}`);
+    if (my !== mineSeq) return; // a newer search started meanwhile
+    const list = $('#mine');
+    document.getElementById('minemore')?.remove();
+    if (!more) {
+      mineShown = 0;
+      list.innerHTML = '';
+      if (!r.total) { list.innerHTML = '<div class="empty"><b>还没有上传过资料</b><a href="/upload">去上传</a></div>'; $('#mcount').textContent = ''; return; }
+      if (!r.matched) { list.innerHTML = '<div class="empty">没有符合条件的资料</div>'; }
+    }
+    mineMatched = r.matched;
+    mineShown += r.items.length;
+    list.insertAdjacentHTML('beforeend', r.items.map((x) => resourceItem(x)).join(''));
+    $('#mcount').textContent = q || st ? `找到 ${r.matched} / ${r.total} 份` : `共 ${r.total} 份`;
+    if (mineShown < mineMatched) {
+      list.insertAdjacentHTML('beforeend', `<div id="minemore" class="small muted" style="text-align:center;padding:12px">已显示 ${mineShown} / ${mineMatched}，继续往下滚动加载更多</div>`);
+      mineMore.observe(document.getElementById('minemore'));
+    }
+  } catch (e) {
+    if (!more) $('#mine').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
+    else toast(e.message, true);
+  } finally {
+    if (my === mineSeq) mineLoading = false;
+  }
+}
+
+let mineTimer = 0;
+$('#mq').oninput = () => { clearTimeout(mineTimer); mineTimer = setTimeout(() => loadMine(), 300); };
+$('#ms').onchange = () => loadMine();
 
 async function loadTokens() {
   try {

@@ -1,0 +1,8 @@
+{
+  "prefetch": [
+    {
+      "where": { "or": [{ "href_matches": "/me" }, { "href_matches": "/upload" }, { "href_matches": "/upload?*" }] },
+      "eagerness": "moderate"
+    }
+  ]
+}

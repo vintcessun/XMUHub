@@ -158,6 +158,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     tracing::info!(upload_via = if relay.is_some() { "server relay" } else if github.is_some() { "worker" } else { "local" });
 
     let site = Arc::new(web::Site::load(&cfg.web_dir)?);
+    let csp = site.csp();
     let app = Arc::new(api::App {
         hub: hub.clone(),
         site,
@@ -203,7 +204,9 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         });
     }
 
-    let router = api::router(app.clone()).layer(tower_http::trace::TraceLayer::new_for_http());
+    let router = api::router(app.clone())
+        .layer(axum::middleware::from_fn_with_state(csp, web::security_headers))
+        .layer(tower_http::trace::TraceLayer::new_for_http());
     let listener = listener(cfg.bind).await?;
     axum::serve(listener, router).with_graceful_shutdown(shutdown()).await?;
     hub.flush_downloads()?;

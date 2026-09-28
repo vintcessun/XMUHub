@@ -295,20 +295,9 @@ export async function layout(active) {
     sessionStorage.setItem('ludao.top', top.innerHTML);
     sessionStorage.setItem('ludao.foot', foot.innerHTML);
   } catch { /* storage blocked */ }
-  speculate();
+  // Prefetching /me and /upload on hover: see assets/speculation-rules.json (sent by the
+  // server in a Speculation-Rules header, since the CSP doesn't allow inline rules).
   return user;
-}
-
-/** Lets the browser fetch the pages that still open with a full load (upload, account)
- * while the pointer rests on their link (Chrome/Edge). The other pages switch in place. */
-function speculate() {
-  if (document.querySelector('script[type="speculationrules"]') || !HTMLScriptElement.supports?.('speculationrules')) return;
-  const s = document.createElement('script');
-  s.type = 'speculationrules';
-  s.textContent = JSON.stringify({
-    prefetch: [{ where: { or: [{ href_matches: '/me' }, { href_matches: '/upload' }, { href_matches: '/upload?*' }] }, eagerness: 'moderate' }],
-  });
-  document.head.append(s);
 }
 
 // ---------------------------------------------------------------- downloads
@@ -324,11 +313,38 @@ function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+let hasherLib = null;
+/** hash-wasm (vendored), for SHA-256 computed chunk by chunk while a part streams in. */
+function loadHasher() {
+  if (window.hashwasm?.createSHA256) return Promise.resolve(window.hashwasm);
+  if (!hasherLib) {
+    hasherLib = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/vendor/sha256.umd.min.js';
+      s.onload = () => (window.hashwasm?.createSHA256 ? resolve(window.hashwasm) : reject(new Error('加载校验组件失败')));
+      s.onerror = () => { hasherLib = null; reject(new Error('加载校验组件失败')); };
+      document.head.appendChild(s);
+    });
+  }
+  return hasherLib;
+}
+
+/** A part whose bytes don't match the SHA-256 in the download plan. */
+export class IntegrityError extends Error {
+  constructor() { super('文件校验失败（内容与记录不符）'); this.integrity = true; }
+}
+
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
 /**
  * Fetches one part, trying each URL in turn. A mirror that is reachable but crawling
- * (under ~150 KB/s after a few seconds) is abandoned for the next one.
+ * (under ~150 KB/s after a few seconds) is abandoned for the next one, and so is one whose
+ * bytes don't match the part's SHA-256 from the download plan.
  */
 export async function fetchPart(part, urls, onBytes, alive = () => true) {
+  const want = String(part.sha256 || '').toLowerCase();
+  // Hashed as the bytes arrive (no second copy); WebCrypto on the whole part if hash-wasm can't load.
+  const hw = want ? await loadHasher().catch(() => null) : null;
   let lastErr;
   for (const [i, url] of urls.entries()) {
     if (!alive()) throw new Error('已取消');
@@ -342,6 +358,8 @@ export async function fetchPart(part, urls, onBytes, alive = () => true) {
       const res = await fetch(url, { signal: ctl.signal, mode: 'cors', credentials: url.startsWith('/') ? 'same-origin' : 'omit', referrerPolicy: 'no-referrer' });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
+      const hash = hw ? await hw.createSHA256() : null;
+      hash?.init();
       const chunks = [];
       const t0 = performance.now();
       let got = 0;
@@ -349,6 +367,7 @@ export async function fetchPart(part, urls, onBytes, alive = () => true) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value);
+        hash?.update(value);
         got += value.length;
         onBytes(got);
         // The preview was closed or the page switched: stop downloading.
@@ -357,8 +376,15 @@ export async function fetchPart(part, urls, onBytes, alive = () => true) {
         const secs = (performance.now() - t0) / 1000;
         if (hasNext && secs > 6 && got / secs < 150 * 1024) { ctl.abort(); throw new Error('镜像太慢'); }
       }
+      clearTimeout(timer);
       if (got !== part.size) throw new Error('大小不符');
-      return new Blob(chunks);
+      const blob = new Blob(chunks);
+      // A mirror serving other bytes (tampered, or an error page of the right size) counts as failed.
+      if (want) {
+        const got256 = hash ? hash.digest('hex') : hex(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()));
+        if (got256 !== want) throw new IntegrityError();
+      }
+      return blob;
     } catch (e) {
       lastErr = e;
       onBytes(0);
@@ -391,8 +417,12 @@ export async function downloadResource(id, onProgress = () => {}) {
     saveBlob(new Blob(blobs, { type: plan.mime || 'application/octet-stream' }), plan.filename);
     return { ok: true };
   } catch (e) {
+    // Usually the fetch failed only because the mirror sends no CORS headers: then the browser
+    // downloads from it directly. Never send the user to a mirror whose bytes just failed the
+    // checksum; use the plain GitHub address (the last one) instead.
     if (single) {
-      location.href = plan.parts[0].urls[0];
+      const urls = plan.parts[0].urls;
+      location.href = e && e.integrity ? urls[urls.length - 1] : urls[0];
       return { ok: true, fallback: true };
     }
     return { ok: false, plan, error: e };

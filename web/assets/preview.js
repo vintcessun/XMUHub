@@ -47,6 +47,29 @@ function script(src) {
 
 const note = (box, msg) => { box.innerHTML = `<div class="notice">${msg}</div>`; };
 
+/**
+ * Cleans HTML that a renderer built from the file's contents (Word, PowerPoint, Excel):
+ * links keep only http(s) / mailto / in-page targets, event-handler attributes and active
+ * elements are dropped. The CSP blocks script anyway; this also stops javascript: links.
+ */
+function sanitize(root) {
+  root.querySelectorAll('script, iframe, frame, object, embed, form, base, meta, link[rel="import"]').forEach((el) => el.remove());
+  for (const el of root.querySelectorAll('*')) {
+    for (const { name } of [...el.attributes]) {
+      if (/^on/i.test(name) || name.toLowerCase() === 'formaction') el.removeAttribute(name);
+    }
+    for (const attr of ['href', 'xlink:href']) {
+      if (!el.hasAttribute(attr)) continue;
+      const v = el.getAttribute(attr).trim();
+      if (v.startsWith('#')) continue;
+      let ok = false;
+      try { ok = ['http:', 'https:', 'mailto:'].includes(new URL(v, location.href).protocol); } catch { /* invalid */ }
+      if (!ok) el.removeAttribute(attr);
+      else if (el.tagName === 'A' && !v.toLowerCase().startsWith('mailto:')) { el.target = '_blank'; el.rel = 'noopener noreferrer'; }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- entry point
 
 export async function preview(id, box) {
@@ -209,6 +232,7 @@ async function word(box, blob) {
   box.innerHTML = '<div class="docx-host"></div>';
   const host = box.querySelector('.docx-host');
   await window.docx.renderAsync(blob, host, null, { inWrapper: true, ignoreLastRenderedPageBreak: true, experimental: true, useBase64URL: true });
+  sanitize(host);
   fitWidth(host, host.querySelector('.docx-wrapper'));
 }
 
@@ -235,7 +259,11 @@ async function sheet(box, blob, ext) {
     <div class="sheet-host"></div><p class="small faint" style="margin:6px 0 0">每个工作表最多显示前 2000 行。</p>`;
   const host = box.querySelector('.sheet-host');
   const show = (i) => {
-    host.innerHTML = X.utils.sheet_to_html(wb.Sheets[wb.SheetNames[i]], { header: '', footer: '' });
+    // Cleaned while still inert (a <template>), before it joins the page.
+    const t = document.createElement('template');
+    t.innerHTML = X.utils.sheet_to_html(wb.Sheets[wb.SheetNames[i]], { header: '', footer: '' });
+    sanitize(t.content);
+    host.replaceChildren(t.content);
     box.querySelectorAll('.sheet-tabs .chip').forEach((c) => c.classList.toggle('on', Number(c.dataset.i) === i));
   };
   box.querySelector('.sheet-tabs').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) show(Number(b.dataset.i)); };
@@ -308,6 +336,7 @@ async function slides(box, blob) {
   const width = Math.min(host.clientWidth || 800, 960);
   const viewer = window.pptxPreview.init(host, { width, height: Math.round((width * 9) / 16), mode: 'list' });
   await viewer.preview(await blob.arrayBuffer());
+  sanitize(host);
 }
 
 /** Microsoft's online viewer for the full layout of a legacy Office file. */

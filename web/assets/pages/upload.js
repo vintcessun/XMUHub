@@ -1,4 +1,4 @@
-import { api, esc, fmtSize, layout, loginUrl, meta, pathText, qs, sendPart, store, toast, tree, $ } from '../app.js';
+import { api, esc, fmtSize, layout, loginUrl, meta, pathText, pickFromTree, qs, sendPart, store, toast, tree, $ } from '../app.js';
 
 const state = { node: null, path: [], rows: [], busy: false };
 let M = null; // meta
@@ -12,7 +12,8 @@ let M = null; // meta
 
 const DRAFT_KEY = 'xmuhub.upload.draft';
 const DRAFT_TTL = 20 * 3600 * 1000; // the server drops unfinished uploads after 24 h
-const FIELDS = ['type_word', 'year', 'term', 'paper', 'with_answer', 'extra', 'note', 'subtitle'];
+// `node`: a category chosen for this one file, overriding the one picked for the batch.
+const FIELDS = ['type_word', 'year', 'term', 'paper', 'with_answer', 'extra', 'note', 'subtitle', 'node'];
 
 const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
 
@@ -231,9 +232,15 @@ function timeOf(r) {
   return r.term && /^\d{4}(-\d{4})?$/.test(r.year) ? `${r.year}${r.term}` : r.year;
 }
 
+/** The category a file goes to: its own, else the batch's. */
+const nodeOf = (r) => r.node || state.node;
+/** What the draft keeps of a node (enough to show it and name files). */
+const brief = (n) => ({ id: n.id, name: n.name, label: n.label, parent: n.parent ?? null });
+
 function genName(r) {
-  if (!state.node) return '（先选择分类）';
-  let s = state.node.label || state.node.name;
+  const n = nodeOf(r);
+  if (!n) return '（先选择分类）';
+  let s = n.label || n.name;
   const t = timeOf(r);
   if (t) s += `_${t}`;
   s += `_${r.type_word}`;
@@ -275,6 +282,7 @@ function rowHtml(r, i) {
       <span class="orig">${esc(r.file.name)} <span class="faint">· ${fmtSize(r.file.size)}${hashed}</span></span>
       ${r.done ? '' : `<button class="btn sm" data-x="del" type="button">移除</button>`}</div>
     <div class="gen">→ ${esc(genName(r))}</div>
+    ${r.done ? '' : `<div class="small fnode">分类：${r.node ? `<b>${esc(r.node.name)}</b>（这个文件单独设置） · <a href="#" data-x="unnode">跟随上面的分类</a> · ` : `<span class="faint">${state.node ? esc(state.node.name) : '跟随上面的分类'}</span> · `}<a href="#" data-x="node">${r.node ? '换一个' : '单独选分类'}</a></div>`}
     <div class="opts">
       <label>类型<select class="input" data-f="type_word">${types}</select></label>
       <label>学年 / 年份<select class="input" data-f="year"><option value="">不填</option>${yearOptions(r.year)}</select></label>
@@ -319,7 +327,22 @@ $('#rows').addEventListener('input', (e) => {
   saveDraft();
   if (f === 'extra') row.querySelector('.gen').textContent = `→ ${genName(r)}`;
 });
-$('#rows').addEventListener('click', (e) => {
+$('#rows').addEventListener('click', async (e) => {
+  const nb = e.target.closest('[data-x="node"], [data-x="unnode"]');
+  if (nb && !state.busy) {
+    e.preventDefault();
+    const i = Number(nb.closest('.frow').dataset.i);
+    const r = state.rows[i];
+    if (nb.dataset.x === 'unnode') r.node = null;
+    else {
+      const x = await pickFromTree(`「${r.file.name}」放到哪个分类`);
+      if (!x) return;
+      r.node = brief(x.node);
+    }
+    saveDraft();
+    updateRow(i);
+    return;
+  }
   const b = e.target.closest('[data-x="del"]');
   if (!b || state.busy) return;
   const [gone] = state.rows.splice(Number(b.closest('.frow').dataset.i), 1);
@@ -328,6 +351,20 @@ $('#rows').addEventListener('click', (e) => {
   renderRows();
 });
 
+$('#b_node').onclick = async () => {
+  const sel = state.rows.filter((r) => r.sel && !r.done);
+  if (!sel.length) return toast('先勾选文件', true);
+  const x = await pickFromTree(`把选中的 ${sel.length} 个文件放到哪个分类`);
+  if (!x) return;
+  for (const r of sel) r.node = brief(x.node);
+  saveDraft();
+  renderRows();
+};
+$('#browsepick').onclick = async (e) => {
+  e.preventDefault();
+  const x = await pickFromTree('选择上传到哪个分类');
+  if (x) pick(x.node, x.path);
+};
 $('#b_apply').onclick = () => {
   const v = { type_word: $('#b_type').value, year: $('#b_year').value, term: $('#b_term').value, paper: $('#b_paper').value };
   for (const r of state.rows) {
@@ -444,7 +481,7 @@ async function uploadRow(r, bar, base, total) {
     }
   }
   const body = {
-    upload_id: plan.upload_id, node: state.node.id, time: timeOf(r), type_word: r.type_word,
+    upload_id: plan.upload_id, node: nodeOf(r).id, time: timeOf(r), type_word: r.type_word,
     paper: r.paper, with_answer: r.with_answer, extra: r.extra, note: r.note,
     ...(r.subtitle && r.subtitle.trim() ? { subtitle: r.subtitle } : {}),
   };
@@ -467,9 +504,9 @@ async function uploadRow(r, bar, base, total) {
 }
 
 $('#submit').onclick = async () => {
-  if (!state.node) return toast('请先选择分类', true);
   const todo = state.rows.filter((r) => !r.done);
   if (!todo.length) return toast('请先添加文件', true);
+  if (todo.some((r) => !nodeOf(r))) return toast('请先选择分类', true);
   state.busy = true;
   $('#submit').disabled = true;
   $('#prog').hidden = false;

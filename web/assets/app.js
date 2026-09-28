@@ -486,6 +486,70 @@ export function pickNode(title = '选择分类') {
   });
 }
 
+/** Picks a category from the whole tree in a dialog (expand a section / college, or filter
+ * by name), without leaving the page. Resolves to { node, path } (path = its ancestors) or
+ * null. Sections only expand: files go into a college, group or course. */
+export async function pickFromTree(title = '在分类树里选') {
+  const t = await tree();
+  return new Promise((resolve) => {
+    const body = modal(title, { wide: true });
+    body.innerHTML = `<input class="input" placeholder="筛选：课程名、学院或俗称" autocomplete="off" style="margin-bottom:10px">
+      <ul class="tree picktree"></ul>`;
+    const input = body.querySelector('input');
+    const ul = body.querySelector('ul');
+    const open = new Set(t.children(0).map((n) => n.id));
+    let filter = '';
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; body.close(); resolve(v); };
+    const observer = new MutationObserver(() => { if (!body.isConnected) { observer.disconnect(); if (!done) { done = true; resolve(null); } } });
+    observer.observe(document.body, { childList: true });
+    const render = () => {
+      let shown = null;
+      if (filter) {
+        shown = new Set();
+        const f = filter.toLowerCase();
+        for (const n of t.list) {
+          if (![n.name, n.label, n.code, ...(n.aliases || [])].some((s) => s && s.toLowerCase().includes(f))) continue;
+          for (let x = n; x; x = t.byId.get(x.parent)) shown.add(x.id);
+        }
+      }
+      const li = (n) => {
+        const kids = t.children(n.id).filter((k) => !shown || shown.has(k.id));
+        const isOpen = shown ? true : open.has(n.id);
+        return `<li><div class="row-n${kids.length ? ' has-kids' : ''}" data-t="${n.id}">
+            ${kids.length ? `<button class="tw" type="button" data-t="${n.id}">${isOpen ? '▾' : '▸'}</button>` : '<span class="tw"></span>'}
+            <a class="n${n.count ? '' : ' zero'}" href="#" data-t="${n.id}">${esc(n.name)}</a>${n.own_level ? levelBadge(n) : ''}
+            ${n.status === 'pending' ? '<span class="badge pending">待确认</span>' : ''}
+            ${n.kind !== 'section' ? `<button class="btn sm pick${kids.length ? '' : ' primary'}" type="button" data-pick="${n.id}">选这里</button>` : ''}
+            <span class="c">${n.count || ''}</span></div>
+          ${kids.length && isOpen ? `<ul>${kids.map(li).join('')}</ul>` : ''}</li>`;
+      };
+      ul.innerHTML = t.children(0).filter((n) => !shown || shown.has(n.id)).map(li).join('') || '<li class="empty">没有匹配的分类</li>';
+    };
+    ul.onclick = (e) => {
+      const p = e.target.closest('[data-pick]');
+      const hit = p || e.target.closest('[data-t]');
+      if (!hit) return;
+      e.preventDefault();
+      const n = t.byId.get(Number(p ? p.dataset.pick : hit.dataset.t));
+      if (!n) return;
+      // A leaf (course) is picked by its name; anything with children expands instead.
+      if (p || (!t.children(n.id).length && n.kind !== 'section')) {
+        const path = [];
+        for (let x = t.byId.get(n.parent); x; x = t.byId.get(x.parent)) path.unshift(x);
+        finish({ node: n, path });
+        return;
+      }
+      if (filter) return;
+      open.has(n.id) ? open.delete(n.id) : open.add(n.id);
+      render();
+    };
+    input.oninput = () => { filter = input.value.trim(); render(); };
+    render();
+    input.focus();
+  });
+}
+
 /** Moves resources after asking for the target; resolves to the number moved (0 if cancelled). */
 export async function moveResources(ids) {
   if (!ids.length) { toast('先勾选资料', true); return 0; }

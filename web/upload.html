@@ -23,7 +23,7 @@
       <h2>1 · 选择分类</h2>
       <div id="nodepick">
         <div class="field suggest"><span>搜索课程或分类 <em>*</em></span><div class="row" style="flex-wrap:nowrap"><input class="input" id="nq" placeholder="课程名 / 代码 / 拼音首字母，如 wjf、A2-1" autocomplete="off"><button class="btn" id="newcourse" type="button" style="flex:none">＋ 新增课程</button></div><ul id="ns" hidden></ul></div>
-        <p class="small muted">也可以 <a href="/browse?pick=1" id="browsepick">在分类树里选</a>。找不到你的课程？点「新增课程」，选好所属学院或分组、填上课程名即可，审核员会确认。</p>
+        <p class="small muted">也可以 <a href="/browse?pick=1" id="browsepick">在分类树里选</a>（不离开本页，已选的文件不会丢）；一批文件属于不同课程时，可以在每个文件下面「单独选分类」，或勾选后「批量设置分类」。找不到你的课程？点「新增课程」，选好所属学院或分组、填上课程名即可，审核员会确认。</p>
         <div class="notice" style="margin-top:10px"><b>资料太多太杂，不知道放哪？</b> 直接 <a href="#" id="useinbox">放进「待整理」</a>，一次选很多文件也行，审核员会帮你归到正确的课程。在每个文件的备注里写一句是什么课、什么内容，整理起来会快很多。</div>
       </div>
       <div id="coursenew" hidden>
@@ -50,6 +50,7 @@
         <select class="input" id="b_paper"><option value="">卷别</option><option>A卷</option><option>B卷</option><option>C卷</option></select>
         <label class="small"><input type="checkbox" id="b_ans"> 含答案</label>
         <button class="btn sm" id="b_apply" type="button">应用</button>
+        <button class="btn sm" id="b_node" type="button" title="给勾选的文件单独选分类，一批里可以放到不同课程">批量设置分类</button>
         <span class="grow"></span><label class="small"><input type="checkbox" id="b_all" checked> 全选</label>
       </div>
       <div class="frows" id="rows"></div>

@@ -226,7 +226,7 @@ function fitWidth(host, inner) {
 }
 
 async function sheet(box, blob, ext) {
-  await script(`${V}/xlsx-0.18.5/xlsx.full.min.js`);
+  await script(`${V}/xlsx-0.20.3/xlsx.full.min.js`);
   const X = window.XLSX;
   const wb = ext === 'csv' || ext === 'tsv'
     ? X.read(await textOf(blob), { type: 'string', sheetRows: 2001, FS: ext === 'tsv' ? '\t' : undefined })
@@ -325,7 +325,7 @@ function officeViewer(box, plan, ext) {
 /** Shows the text of a .doc / .ppt (read from the binary format), with the full-layout
  * Microsoft viewer as an option when the file is a whole resource. */
 async function legacyText(box, blob, kind, plan) {
-  await script(`${V}/xlsx-0.18.5/xlsx.full.min.js`);
+  await script(`${V}/xlsx-0.20.3/xlsx.full.min.js`);
   const cfb = window.XLSX.CFB.read(new Uint8Array(await blob.arrayBuffer()), { type: 'array' });
   const s = kind === 'doc' ? docText(cfb) : pptText(cfb);
   if (!s.trim()) throw new Error('没有读到文字（可能是扫描件或加密文件）');

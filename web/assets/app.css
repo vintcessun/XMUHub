@@ -785,3 +785,34 @@ a, button { -webkit-tap-highlight-color: transparent; }
   @view-transition { navigation: none; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* Home: every category card and both lists get one compact height, so a long tag list
+   doesn't stretch its whole row; the overflow scrolls inside the card. Single column
+   (phones) goes back to fitting the content. */
+.home-lists { grid-template-columns: 1fr 1fr; }
+@media (min-width: 641px) {
+  #sections > .section-card { height: 272px; display: flex; flex-direction: column; }
+  #sections > .section-card .chips {
+    flex: 1; min-height: 0; overflow-y: auto; align-content: flex-start;
+    padding: 0 4px 16px 0; overscroll-behavior: contain; scrollbar-width: thin;
+    /* Fade the cut-off edge so it reads as "scroll for more"; the bottom padding keeps the
+       last row clear of it once scrolled to the end. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+  }
+}
+@media (min-width: 861px) {
+  .home-lists > .card { height: 660px; display: flex; flex-direction: column; }
+  .home-lists > .card > h2 { flex: none; }
+  .home-lists .list {
+    flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 6px 20px 0;
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  }
+  .home-lists .item .title, .home-lists .item .subtitle, .home-lists .item .note {
+    display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .home-lists .item .title { -webkit-line-clamp: 2; line-clamp: 2; }
+  .home-lists .item .subtitle, .home-lists .item .note { -webkit-line-clamp: 1; line-clamp: 1; }
+}
+@media (max-width: 860px) { .home-lists { grid-template-columns: 1fr; } }

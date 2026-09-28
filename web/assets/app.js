@@ -99,7 +99,7 @@ export const SLOGAN = '让每一份资料都被需要它的人找到';
 /** User group shown on the feedback page, e.g. 'QQ 群 123456789'; empty hides it. */
 export const REPO_URL = 'https://github.com/vintcessun/XMUHub';
 
-export const COMMUNITY = 'QQ 群：1106047582';
+export const COMMUNITY = 'QQ 群：1124715660';
 
 export const LEVELS = ['访客', '贡献者', '可信贡献者', '审核员', '管理员'];
 
@@ -235,7 +235,8 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span></div>`;
+    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
+    <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内删除。<a href="/about#copyright">版权声明</a></span></div>`;
   feedbackButton(active !== 'feedback');
   const user = await me();
   const navMe = top.querySelector('#nav-me');

@@ -741,6 +741,9 @@ html:not(.seen) body[data-page="home"] .foot, html:not(.seen) body[data-page="ho
 
 /* ---------- motion: page switches, content and dialogs ease in instead of popping */
 @view-transition { navigation: auto; }
+/* #anchor jumps stop below the sticky header instead of under it (two rows on phones). */
+main h2[id], main section[id] { scroll-margin-top: 76px; }
+@media (max-width: 720px) { main h2[id], main section[id] { scroll-margin-top: 116px; } }
 /* A scrollbar that comes and goes between a short and a long page shifts everything sideways. */
 html { scrollbar-gutter: stable; }
 .top { view-transition-name: top; }

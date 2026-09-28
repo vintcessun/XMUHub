@@ -366,18 +366,18 @@ systemctl --no-pager --full status $Service 2>&1 | head -n 8
 Write-Host "==> 替换 -> 重启（重启期间请求在端口上排队）..." -ForegroundColor DarkGray
 Invoke-Remote $deploy "替换/重启"
 
-# Cloudflare keeps pages for 2 minutes (a Cache Rule); drop them so everyone gets the new
-# version now. Scripts and styles need nothing: their URLs carry content hashes.
+# Cloudflare keeps pages for a day (a Cache Rule, see deploy/cloudflare.md): pages only change
+# with a deploy, and /n/… /r/… are thousands of URLs of the same shell. So a deploy empties
+# the zone's cache; versioned scripts and styles are simply fetched once more.
 if ($cf.CF_API_TOKEN) {
     try {
         $h = @{ Authorization = "Bearer $($cf.CF_API_TOKEN)" }
         $apex = ([Uri]$PublicUrl).Host.Split('.', 2)[1]
         $zone = (Invoke-RestMethod -Uri "https://api.cloudflare.com/client/v4/zones?name=$apex" -Headers $h).result[0].id
-        $pages = @("/", "/browse", "/search", "/help", "/about", "/feedback", "/links", "/upload", "/me", "/login", "/admin") | ForEach-Object { "$PublicUrl$_" }
-        $null = Invoke-RestMethod -Method Post -Uri "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" -Headers $h -ContentType "application/json" -Body (@{ files = $pages } | ConvertTo-Json)
-        Write-Host "==> 已清除 Cloudflare 上缓存的页面" -ForegroundColor DarkGray
+        $null = Invoke-RestMethod -Method Post -Uri "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" -Headers $h -ContentType "application/json" -Body '{"purge_everything":true}'
+        Write-Host "==> 已清空 Cloudflare 缓存" -ForegroundColor DarkGray
     } catch {
-        Write-Host "==> 清除 Cloudflare 页面缓存失败（最多 2 分钟后自然更新）：$($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "==> 清空 Cloudflare 缓存失败，请到后台 Caching → Purge Everything 手动清：$($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 

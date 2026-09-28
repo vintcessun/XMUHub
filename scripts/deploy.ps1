@@ -66,6 +66,9 @@ $cf = Read-EnvFile (Join-Path $Root ".secrets/cloudflare.env")
 $up = Read-EnvFile (Join-Path $Root ".secrets/upload.env")
 $mail = Read-EnvFile (Join-Path $Root ".secrets/mail.env")
 $WorkerName = if ($up.UPLOAD_WORKER_NAME) { $up.UPLOAD_WORKER_NAME } else { "xmuhub-upload" }
+# CF_UPLOAD_DOMAIN in .secrets/cloudflare.env (e.g. upload.vintces.icu, the Worker's custom domain)
+# switches uploads to the Worker on every deploy, so sync.ps1 keeps it too.
+if (-not $UploadWorkerUrl -and $cf.CF_UPLOAD_DOMAIN) { $UploadWorkerUrl = "https://$($cf.CF_UPLOAD_DOMAIN)" }
 
 # ================================================================ 1. Cloudflare Worker
 function Deploy-Worker {

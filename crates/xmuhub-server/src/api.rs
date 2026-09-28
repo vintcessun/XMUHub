@@ -280,6 +280,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/preview-name", post(preview_name))
         .route("/resources/move", post(move_resources))
         .route("/resources/{id}", get(resource).patch(patch_resource))
+        .route("/resources/{id}/change-request", get(resource_change_request).post(request_resource_change))
         .route("/resources/{id}/review", post(review))
         .route("/resources/{id}/report", post(report))
         .route("/resources/{id}/download", get(download_plan))
@@ -294,6 +295,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/uploads/{id}/parts/{index}", post(confirm_part))
         .route("/uploads/{id}/parts/{index}/renew", post(renew_part))
         .route("/review", get(review_queue))
+        .route("/review/change-requests", get(resource_change_requests))
+        .route("/review/change-requests/{id}", post(review_resource_change))
         .route("/review/nodes", get(pending_nodes))
         .route("/admin/reports", get(reports))
         .route("/admin/reports/{id}/handle", post(handle_report))
@@ -546,6 +549,8 @@ struct SearchQ {
     #[serde(rename = "type")]
     ty: Option<String>,
     tag: Option<String>,
+    #[serde(default)]
+    name_only: bool,
     // Strings, so an empty `within=` / `page=` from a form means "unset" instead of a 400.
     within: Option<String>,
     page: Option<String>,
@@ -553,12 +558,15 @@ struct SearchQ {
 
 async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<Value>> {
     const PAGE: usize = 20;
+    let courses_only = q.ty.as_deref() == Some("course");
     let filter = Filter {
         ty: match q.ty.as_deref() {
-            Some("node") => Some(DocType::Node),
+            Some("node" | "course") => Some(DocType::Node),
             Some("resource") => Some(DocType::Resource),
             _ => None,
         },
+        courses_only,
+        name_only: courses_only || q.name_only,
         within: q.within.as_deref().and_then(|w| w.trim().parse().ok()),
         tag: q.tag.as_deref().and_then(Tag::parse).and_then(|t| Tag::ALL.iter().position(|x| *x == t)).map(|i| i as u64),
     };
@@ -654,6 +662,46 @@ async fn review(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<Rev
     let (r, garbage) = blocking(move || hub.review(Viewer { user: user.as_ref() }, id, &b.action, &b.note)).await?;
     delete_later(&app, garbage);
     Ok(Json(json!({ "status": r.status.as_str() })))
+}
+
+#[derive(Deserialize)]
+struct ResourceChangeIn {
+    kind: String,
+    #[serde(default)]
+    value: String,
+}
+
+async fn request_resource_change(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ResourceChangeIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let q = blocking(move || hub.request_resource_change(Viewer { user: user.as_ref() }, id, &b.kind, &b.value)).await?;
+    Ok(Json(json!(q)))
+}
+
+async fn resource_change_request(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.resource_change_request(auth.viewer(), id)?)))
+}
+
+async fn resource_change_requests(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let items = app.hub.pending_resource_changes(auth.viewer())?;
+    Ok(Json(json!(items.iter().map(|(q, r)| json!({
+        "request": q, "title": r.name.stem(), "current_note": r.note,
+        "uploader": app.hub.uploader_name(q.uploader),
+    })).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct ResourceChangeReviewIn {
+    approve: bool,
+    #[serde(default)]
+    note: String,
+}
+
+async fn review_resource_change(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ResourceChangeReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let q = blocking(move || hub.review_resource_change(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
+    Ok(Json(json!(q)))
 }
 
 #[derive(Deserialize)]

@@ -221,7 +221,7 @@ export async function layout(active) {
   top.className = 'top';
   top.innerHTML = `<div class="wrap">
     <a class="brand" href="/"><img class="logo" src="/assets/logo.png" alt=""><span><b>鹭岛书阁</b><small>厦大资料库</small></span></a>
-    ${active === 'home' || active === 'search' ? '<span class="grow"></span>' : `<form action="/search" role="search"><input name="q" value="${esc(q)}" placeholder="搜索课程、资料…" aria-label="搜索"></form>`}
+    ${active === 'home' || active === 'search' ? '<span class="grow"></span>' : `<form action="/search" role="search"><input name="q" value="${esc(q)}" placeholder="搜索课程名称…" aria-label="搜索"></form>`}
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>
       <a href="/help" data-k="help">教程</a>

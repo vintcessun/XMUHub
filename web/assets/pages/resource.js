@@ -45,16 +45,17 @@ async function load() {
   const note = notes[r.status];
   $('#notice').innerHTML = (note ? `<div class="notice ${note[0]}">${note[1]}</div>` : '')
     + (r.uncertain ? '<div class="notice">这份资料的分类或内容尚未核实，欢迎审核员确认。</div>' : '');
-  $('#dl').disabled = r.status === 'rejected';
+  const me = await mePromise;
+  const unavailable = r.status === 'rejected' || (me?.level < 3 && (r.status === 'removed' || r.status === 'restricted'));
+  $('#dl').disabled = unavailable;
   // Small previewable files load their preview right away.
   const ext = (r.ext || '').toLowerCase();
   const previewable = !['caj', 'kdh', 'nh', 'exe', 'msi', 'apk', 'dmg'].includes(ext);
-  $('#pvcard').hidden = r.status === 'rejected';
-  if (previewable && r.size <= 8 * 1024 * 1024 && !$('#pvgo').hidden) { $('#pvgo').hidden = true; preview(id, $('#pv')); }
+  $('#pvcard').hidden = unavailable;
+  if (!unavailable && previewable && r.size <= 8 * 1024 * 1024 && !$('#pvgo').hidden) { $('#pvgo').hidden = true; preview(id, $('#pv')); }
   $('#dl').textContent = `下载 · ${fmtSize(r.size)}`;
 
-  const me = await mePromise;
-  if (me && (me.level >= 3 || (r.mine && (r.status === 'pending' || r.status === 'published')))) renderManage(r, me);
+  if (me && (me.level >= 3 || r.mine)) renderManage(r, me);
   if (me && me.level >= 3) loadHistory();
   loadSocial(me);
 }
@@ -65,7 +66,7 @@ $('#pvgo').onclick = () => { $('#pvgo').hidden = true; preview(id, $('#pv')); };
 
 // ---------------------------------------------------------------- ratings & comments
 
-const ACTIONS = { edit: '上传者修改了信息', approve: '通过', reject: '驳回', remove: '下架', restrict: '设为仅内部', restore: '恢复发布' };
+const ACTIONS = { edit: '上传者修改了信息', approve: '通过', reject: '驳回', remove: '下架', restrict: '设为仅内部', restore: '恢复发布', note_approved: '同意修改备注', note_rejected: '驳回备注申请', delete_approved: '同意删除', delete_rejected: '驳回删除申请' };
 
 async function loadHistory() {
   try {
@@ -167,8 +168,12 @@ $('#report').onclick = async (e) => {
 async function renderManage(r, me) {
   const box = $('#manage');
   box.hidden = false;
-  const m = await meta();
   const staff = me.level >= 3;
+  // Uploaders edit their pending and published files (a published one goes back to review).
+  const canEdit = staff || r.status === 'pending' || r.status === 'published';
+  const m = canEdit ? await meta() : null;
+  const request = !staff && r.mine ? await api(`/resources/${id}/change-request`) : null;
+  const pendingRequest = request?.status === 'pending';
   const actions = staff
     ? [
         (r.status !== 'published' || r.needs_review || r.uncertain) && ['approve', r.status === 'published' ? '确认无误' : '通过并公开', 'ok'],
@@ -183,11 +188,18 @@ async function renderManage(r, me) {
   const hint = staff ? '' : r.status === 'pending' ? '审核通过前可以随时修改。'
     : me.level >= 2 ? '保存后立即生效，审核员会再复核一遍。' : '保存后会重新提交审核，审核通过前暂时不公开。';
   let nodeId = r.node.id;
-  box.innerHTML = `<h3>${staff ? '审核' : '修改我的投稿'}</h3>
-    ${hint ? `<p class="small muted" style="margin-top:0">${hint}</p>` : ''}
-    ${actions.length ? `<label class="field"><span>备注（驳回 / 下架原因）</span><input class="input" id="note"></label>
+  box.innerHTML = `<h3>${staff ? '审核' : '管理我的投稿'}</h3>
+    ${actions.length ? `<label class="field"><span>备注（驳回 / 下架原因）</span><input class="input" id="review_note"></label>
       <div class="row" style="margin-bottom:16px">${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-a="${a}">${l}</button>`).join('')}</div>` : ''}
-    <details${staff ? '' : ' open'}><summary class="small">编辑信息</summary><div style="margin-top:12px">
+    ${!staff && r.mine ? `<div class="notice" style="margin-bottom:14px"><b>备注与删除申请</b><p class="small">申请由审核员同意后生效；删除获批后资料会下架。</p>
+      ${request ? `<p class="small">最近申请：${request.kind === 'note' ? '修改备注' : '删除资料'} · ${request.status === 'pending' ? '待审核' : request.status === 'approved' ? '已同意' : '已驳回'}${request.review_note ? ` · 审核意见：${esc(request.review_note)}` : ''}</p>` : ''}
+      ${pendingRequest ? '' : r.status === 'removed' || r.status === 'rejected' ? '<p class="small">这份资料当前不能提交新申请。</p>' : `<label class="field"><span>新备注（可留空以清除）</span><textarea class="input" id="change_note" maxlength="500">${esc(r.note)}</textarea></label>
+        <div class="row"><button class="btn sm" id="request_note" type="button">申请修改备注</button></div>
+        <label class="field" style="margin-top:12px"><span>删除理由</span><input class="input" id="delete_reason" maxlength="300" placeholder="请说明为什么要删除这份资料"></label>
+        <button class="btn sm danger" id="request_delete" type="button">申请删除资料</button>`}
+    </div>` : ''}
+    ${canEdit ? `<details${staff ? '' : ' open'}><summary class="small">编辑信息</summary><div style="margin-top:12px">
+      ${hint ? `<p class="small muted" style="margin-top:0">${hint}</p>` : ''}
       <label class="field"><span>小标题（公开显示，说明具体内容；默认取原文件名，看不懂就改掉，清空则不显示）</span><input class="input" id="f_sub" maxlength="80" value="${esc(r.subtitle || '')}"></label>
       <label class="field"><span>课程名（文件名第一段）</span><input class="input" id="f_course" value="${esc(n.course)}"></label>
       <div class="fields-2">
@@ -198,35 +210,46 @@ async function renderManage(r, me) {
       </div>
       <label class="small"><input type="checkbox" id="f_ans"${n.with_answer ? ' checked' : ''}> 含答案</label>
       <label class="field" style="margin-top:8px"><span>补充说明（括号内，如 201题、第1册）</span><input class="input" id="f_extra" value="${esc(n.extra)}"></label>
-      <label class="field"><span>备注（公开显示）</span><textarea class="input" id="f_note">${esc(r.note)}</textarea></label>
+      ${staff ? `<label class="field"><span>备注（公开显示）</span><textarea class="input" id="f_note">${esc(r.note)}</textarea></label>` : ''}
       ${staff ? `<label class="field"><span>移到分类 ID</span><input class="input" id="f_node" value="${r.node.id}"></label>
         <label class="small"><input type="checkbox" id="f_unc"${r.uncertain ? ' checked' : ''}> 待核实</label>`
         : `<div class="field"><span>所属分类</span><div class="row"><span id="f_nodename">${esc(r.node.name)}</span><button class="btn sm" id="f_pick" type="button">换一个分类</button></div></div>`}
       <div style="margin-top:10px"><button class="btn primary sm" id="f_save">保存</button></div>
-    </div></details>`;
+    </div></details>` : ''}`;
+  if (!staff && r.mine && !pendingRequest && r.status !== 'removed' && r.status !== 'rejected') {
+    const send = async (kind, value) => {
+      try {
+        await api(`/resources/${id}/change-request`, { method: 'POST', body: { kind, value } });
+        toast('申请已提交，等待审核员处理');
+        load();
+      } catch (e) { toast(e.message, true); }
+    };
+    $('#request_note').onclick = () => send('note', $('#change_note').value);
+    $('#request_delete').onclick = () => send('delete', $('#delete_reason').value);
+  }
   box.querySelectorAll('[data-a]').forEach((b) => {
     b.onclick = async () => {
       try {
-        const res = await api(`/resources/${id}/review`, { method: 'POST', body: { action: b.dataset.a, note: $('#note').value } });
+        const res = await api(`/resources/${id}/review`, { method: 'POST', body: { action: b.dataset.a, note: $('#review_note').value } });
         toast(`已处理：${res.status}`);
         load();
       } catch (e) { toast(e.message, true); }
     };
   });
-  if (!staff) {
+  if (canEdit && !staff) {
     $('#f_pick').onclick = async () => {
       const t = await pickNode('把这份资料放到哪个分类');
       if (t) { nodeId = t.id; $('#f_nodename').textContent = t.name; }
     };
   }
-  $('#f_save').onclick = async () => {
+  if (canEdit) $('#f_save').onclick = async () => {
     try {
       await api(`/resources/${id}`, {
         method: 'PATCH',
         body: {
           node: staff ? Number($('#f_node').value) : nodeId,
           course: $('#f_course').value, time: $('#f_time').value, type_word: $('#f_type').value, tag: $('#f_tag').value,
-          paper: $('#f_paper').value, with_answer: $('#f_ans').checked, extra: $('#f_extra').value, note: $('#f_note').value, subtitle: $('#f_sub').value,
+          paper: $('#f_paper').value, with_answer: $('#f_ans').checked, extra: $('#f_extra').value, note: staff ? $('#f_note').value : r.note, subtitle: $('#f_sub').value,
           admin: staff ? { uncertain: $('#f_unc').checked, free_type: true } : null,
         },
       });

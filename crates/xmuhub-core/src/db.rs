@@ -19,6 +19,7 @@ pub const REPORTS: TableDefinition<u64, &[u8]> = TableDefinition::new("reports")
 pub const UPLOADS: TableDefinition<u64, &[u8]> = TableDefinition::new("uploads.v2");
 pub const BLOBS: TableDefinition<&str, &[u8]> = TableDefinition::new("blobs");
 pub const REVIEWS: TableDefinition<u64, &[u8]> = TableDefinition::new("reviews");
+pub const RESOURCE_CHANGE_REQUESTS: TableDefinition<u64, &[u8]> = TableDefinition::new("resource_change_requests");
 /// Key: resource id ++ user id, both big-endian.
 pub const RATINGS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("ratings");
 pub const COMMENTS: TableDefinition<u64, &[u8]> = TableDefinition::new("comments");
@@ -60,6 +61,7 @@ pub struct Snapshot {
     pub blobs: Vec<Blob>,
     pub meta: Vec<(String, Vec<u8>)>,
     pub reviews: Vec<ReviewEvent>,
+    pub resource_change_requests: Vec<ResourceChangeRequest>,
     pub ratings: Vec<Rating>,
     pub comments: Vec<Comment>,
     pub feedback: Vec<Feedback>,
@@ -92,6 +94,7 @@ impl Db {
         txn.open_table(BLOBS)?;
         txn.open_table(META)?;
         txn.open_table(REVIEWS)?;
+        txn.open_table(RESOURCE_CHANGE_REQUESTS)?;
         txn.open_table(RATINGS)?;
         txn.open_table(COMMENTS)?;
         txn.open_table(FEEDBACK)?;
@@ -132,6 +135,9 @@ impl Db {
         }
         for row in txn.open_table(REVIEWS)?.iter()? {
             snap.reviews.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(RESOURCE_CHANGE_REQUESTS)?.iter()? {
+            snap.resource_change_requests.push(decode(row?.1.value())?);
         }
         for row in txn.open_table(RATINGS)?.iter()? {
             snap.ratings.push(decode(row?.1.value())?);
@@ -181,6 +187,7 @@ impl Db {
             blobs: snap.blobs,
             meta: snap.meta,
             reviews: snap.reviews,
+            resource_change_requests: snap.resource_change_requests,
             ratings: snap.ratings,
             comments: snap.comments,
             feedback: snap.feedback,
@@ -203,6 +210,8 @@ pub struct Dump {
     pub meta: Vec<(String, Vec<u8>)>,
     #[serde(default)]
     pub reviews: Vec<ReviewEvent>,
+    #[serde(default)]
+    pub resource_change_requests: Vec<ResourceChangeRequest>,
     #[serde(default)]
     pub ratings: Vec<Rating>,
     #[serde(default)]
@@ -289,6 +298,10 @@ impl Tx<'_> {
     }
     pub fn put_review(&self, e: &ReviewEvent) -> Result<()> {
         self.txn.open_table(REVIEWS)?.insert(e.id, encode(e).as_slice())?;
+        Ok(())
+    }
+    pub fn put_resource_change_request(&self, r: &ResourceChangeRequest) -> Result<()> {
+        self.txn.open_table(RESOURCE_CHANGE_REQUESTS)?.insert(r.id, encode(r).as_slice())?;
         Ok(())
     }
     pub fn put_rating(&self, r: &Rating) -> Result<()> {

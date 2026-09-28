@@ -27,14 +27,34 @@ async function retype(r, value) {
 }
 
 /** A reviewable list of resources with per-item and bulk actions. */
-async function queueUI(box, items, intro, actions) {
+async function queueUI(box, items, intro, actions, categoryFilters = false) {
   if (!items.length) {
     box.innerHTML = '<div class="card empty"><b>这里是空的</b>辛苦了 ☕</div>';
     return;
   }
-  const M = await meta();
+  const [M, categories] = await Promise.all([meta(), categoryFilters ? tree() : Promise.resolve(null)]);
   const byId = new Map(items.map((r) => [String(r.id), r]));
+  const locations = new Map();
+  const groups = new Map();
+  const courses = new Map();
+  if (categories) {
+    for (const r of items) {
+      const chain = [];
+      for (let n = categories.byId.get(r.node.id); n; n = categories.byId.get(n.parent)) chain.unshift(n);
+      // The first child of a section is the offering group. Some older college nodes
+      // have kind=course, so position is more reliable than kind for this level.
+      const group = chain[1] || chain[0];
+      const course = chain.slice(2).find((n) => n.kind === 'course');
+      locations.set(String(r.id), { group: group?.id || 0, course: course?.id || 0 });
+      if (group) groups.set(group.id, { node: group, section: chain[0] });
+      if (course) courses.set(course.id, { node: course, group: group?.id || 0 });
+    }
+  }
   box.innerHTML = `<section class="card"><p class="small muted">${intro}</p>
+    ${categories ? `<div class="bulkbar review-filters">
+      <label class="small" for="qgroup">学院 / 分组</label><select class="input" id="qgroup"><option value="">全部学院 / 分组</option>${[...groups.values()].sort((a, b) => a.section.name.localeCompare(b.section.name, 'zh-CN') || a.node.name.localeCompare(b.node.name, 'zh-CN')).map(({ node, section }) => `<option value="${node.id}">${esc(section.name)} / ${esc(node.name)}</option>`).join('')}</select>
+      <label class="small" for="qcourse">课程</label><select class="input" id="qcourse"><option value="">全部课程</option></select>
+      <span class="small muted" id="qshown"></span></div>` : ''}
     <div class="bulkbar"><label class="small"><input type="checkbox" id="qall"> 全选</label>
       ${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-bulk="${a}">批量${l}</button>`).join('')}
       <button class="btn sm" data-move type="button">批量移动分类</button>
@@ -54,8 +74,43 @@ async function queueUI(box, items, intro, actions) {
   const act = async (wrap, action) => {
     await api(`/resources/${wrap.dataset.id}/review`, { method: 'POST', body: { action, note: wrap.querySelector('[data-f="note"]').value } });
     wrap.remove();
+    updateVisible();
   };
+  const visibleRows = () => [...box.querySelectorAll('.list > [data-id]')].filter((w) => !w.hidden);
+  const updateVisible = () => {
+    if (!categories) return;
+    const group = box.querySelector('#qgroup').value;
+    const course = box.querySelector('#qcourse').value;
+    for (const wrap of box.querySelectorAll('.list > [data-id]')) {
+      const place = locations.get(wrap.dataset.id);
+      wrap.hidden = !!((group && String(place.group) !== group) || (course && String(place.course) !== course));
+      if (wrap.hidden) wrap.querySelector('.qsel').checked = false;
+    }
+    const shown = visibleRows();
+    box.querySelector('#qshown').textContent = `显示 ${shown.length} 份`;
+    box.querySelector('#qall').checked = shown.length > 0 && shown.every((w) => w.querySelector('.qsel').checked);
+  };
+  if (categories) {
+    const groupSelect = box.querySelector('#qgroup');
+    const courseSelect = box.querySelector('#qcourse');
+    const fillCourses = () => {
+      const group = groupSelect.value;
+      const available = [...courses.values()].filter((x) => !group || String(x.group) === group)
+        .sort((a, b) => a.node.name.localeCompare(b.node.name, 'zh-CN'));
+      courseSelect.innerHTML = `<option value="">全部课程</option>${available.map(({ node, group: id }) => `<option value="${node.id}">${group ? '' : `${esc(groups.get(id)?.node.name || '')} / `}${esc(node.name)}</option>`).join('')}`;
+      courseSelect.value = '';
+      updateVisible();
+    };
+    groupSelect.onchange = fillCourses;
+    courseSelect.onchange = updateVisible;
+    fillCourses();
+  }
   box.onchange = async (e) => {
+    if (e.target.matches('.qsel') && categories) {
+      const shown = visibleRows();
+      box.querySelector('#qall').checked = shown.length > 0 && shown.every((w) => w.querySelector('.qsel').checked);
+      return;
+    }
     const sel = e.target.closest('[data-f="type"]');
     if (!sel) return;
     const wrap = sel.closest('[data-id]');
@@ -77,7 +132,7 @@ async function queueUI(box, items, intro, actions) {
       return;
     }
     if (e.target.closest('[data-move]')) {
-      const picked = [...box.querySelectorAll('.qsel:checked')].map((c) => c.closest('[data-id]'));
+      const picked = visibleRows().filter((w) => w.querySelector('.qsel').checked);
       if (await moveResources(picked.map((w) => Number(w.dataset.id)))) show(current);
       return;
     }
@@ -86,16 +141,16 @@ async function queueUI(box, items, intro, actions) {
     try {
       if (one) { await act(one.closest('[data-id]'), one.dataset.a); toast('已处理'); }
       if (bulk) {
-        const picked = [...box.querySelectorAll('.qsel:checked')].map((c) => c.closest('[data-id]'));
+        const picked = visibleRows().filter((w) => w.querySelector('.qsel').checked);
         if (!picked.length) return toast('先勾选资料', true);
         bulk.disabled = true;
-        for (const w of picked) await act(w, bulk.dataset.bulk);
-        bulk.disabled = false;
+        try { for (const w of picked) await act(w, bulk.dataset.bulk); }
+        finally { bulk.disabled = false; }
         toast(`已处理 ${picked.length} 份`);
       }
     } catch (err) { toast(err.message, true); }
   };
-  box.querySelector('#qall').onchange = (e) => box.querySelectorAll('.qsel').forEach((c) => { c.checked = e.target.checked; });
+  box.querySelector('#qall').onchange = (e) => visibleRows().forEach((w) => { w.querySelector('.qsel').checked = e.target.checked; });
 }
 
 /** Bar + line chart as inline SVG: bars for daily counts, a line for the running total. */
@@ -155,7 +210,32 @@ const panels = {
   },
   async queue(box) {
     await queueUI(box, await api('/review'), '「待审核」来自贡献者，通过后才会公开；「待复核」来自可信贡献者，已公开。',
-      [['approve', '通过', 'ok'], ['reject', '驳回', 'danger']]);
+      [['approve', '通过', 'ok'], ['reject', '驳回', 'danger']], true);
+  },
+  async changes(box) {
+    const list = await api('/review/change-requests');
+    box.innerHTML = `<section class="card"><p class="small muted">上传者申请修改公开备注或删除自己的资料；同意后才会生效。删除获批后资料下架。</p>
+      ${list.length ? list.map(({ request: q, title, current_note, uploader }) => `<div class="item" data-id="${q.id}"><div class="body">
+        <div><a class="title" href="/r/${q.resource}" target="_blank">${esc(title)}</a></div>
+        <div class="meta"><span>${q.kind === 'note' ? '修改备注' : '删除资料'}</span><span>上传者：${esc(uploader)}</span><span>${ago(q.created_at)}</span></div>
+        ${q.kind === 'note' ? `<p class="small">原备注：${esc(current_note || '（无）')}</p><p class="small">申请改为：${esc(q.value || '（清空）')}</p>` : `<p class="small">删除理由：${esc(q.value)}</p>`}
+        <div class="row"><input class="input" data-review-note placeholder="审核意见（驳回时建议填写）" maxlength="300" style="max-width:320px">
+          <button class="btn sm ok" data-decision="approve" type="button">同意</button><button class="btn sm danger" data-decision="reject" type="button">驳回</button></div>
+      </div></div>`).join('') : '<div class="empty"><b>没有待处理的申请</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const button = e.target.closest('[data-decision]');
+      if (!button) return;
+      const row = button.closest('[data-id]');
+      button.disabled = true;
+      try {
+        await api(`/review/change-requests/${row.dataset.id}`, { method: 'POST', body: {
+          approve: button.dataset.decision === 'approve', note: row.querySelector('[data-review-note]').value,
+        } });
+        row.remove();
+        toast('申请已处理');
+        if (!box.querySelector('[data-id]')) box.querySelector('section').insertAdjacentHTML('beforeend', '<div class="empty"><b>没有待处理的申请</b></div>');
+      } catch (err) { button.disabled = false; toast(err.message, true); }
+    };
   },
   async uncertain(box) {
     await queueUI(box, await api('/review?status=pending&uncertain=true'), '导入时标注「不确定」的资料（扫描件或压缩包，分类未经内容核实）。打开确认后通过，或改分类后再通过。',
@@ -220,7 +300,7 @@ const panels = {
   },
   async log(box) {
     const list = await api('/admin/reviews');
-    const A = { edit: ['上传者修改', 'pending'], approve: ['通过', 'published'], reject: ['驳回', 'rejected'], remove: ['下架', 'removed'], restrict: ['仅内部', 'restricted'], restore: ['恢复发布', 'published'] };
+    const A = { edit: ['上传者修改', 'pending'], approve: ['通过', 'published'], reject: ['驳回', 'rejected'], remove: ['下架', 'removed'], restrict: ['仅内部', 'restricted'], restore: ['恢复发布', 'published'], note_approved: ['同意修改备注', 'published'], note_rejected: ['驳回备注申请', 'rejected'], delete_approved: ['同意删除', 'removed'], delete_rejected: ['驳回删除申请', 'rejected'] };
     box.innerHTML = `<section class="card scroll-x"><p class="small muted">最近 300 条审核操作（谁在什么时候通过、驳回或下架了哪份资料）。</p>
       ${list.length ? `<table class="table"><thead><tr><th>时间</th><th>审核人</th><th>操作</th><th>资料</th><th>备注</th></tr></thead><tbody>
       ${list.map((e) => `<tr><td class="small faint">${fmtDate(e.at, true)}</td><td>${esc(e.actor)}</td>

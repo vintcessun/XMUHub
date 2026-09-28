@@ -110,6 +110,22 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** Plain text → HTML with its links clickable: web addresses, and 「GitHub owner/repo」 (how
+ * imported files name their source repo). The text is escaped first, so nothing else in it
+ * can become markup; links open in a new tab and pass no referrer. */
+export function linkify(text) {
+  const a = (href, label) => `<a href="${href}" target="_blank" rel="noopener noreferrer nofollow">${label}</a>`;
+  return esc(text)
+    // Addresses are ASCII: the first CJK character (a 。 or the next sentence) ends one.
+    .replace(/https?:\/\/[^\s<\u0080-\uffff]+/g, (u) => {
+      // Trailing punctuation (and escaped quotes) belongs to the sentence, not the address.
+      const [, url, tail] = u.match(/^(.*?)((?:&quot;|&#39;|[.,;:!?)）。，、；：！？])*)$/);
+      return a(url, url) + tail;
+    })
+    .replace(/(^|[^\w./-])GitHub ([A-Za-z0-9_.-]+)\/([A-Za-z0-9_-][A-Za-z0-9_.-]*)/g,
+      (_, pre, owner, repo) => `${pre}${a(`https://github.com/${owner}/${repo}`, `GitHub ${owner}/${repo}`)}`);
+}
+
 export function fmtSize(n) {
   if (n == null) return '';
   const u = ['B', 'KB', 'MB', 'GB'];
@@ -167,6 +183,7 @@ export function resourceItem(r, { showNode = true } = {}) {
     `<span>${fmtSize(r.size)}</span>`,
     `<span>${r.downloads} 次下载</span>`,
     r.rating && r.rating.count ? `<span title="${r.rating.count} 人评分">${stars(r.rating.avg)} ${r.rating.avg}</span>` : '',
+    r.major ? `<span class="badge" title="适用专业">${esc(r.major)}</span>` : '',
     statusBadge(r),
   ].filter(Boolean);
   // First-page thumbnail when one has been made (see server thumbs.rs); else the type badge.
@@ -177,7 +194,7 @@ export function resourceItem(r, { showNode = true } = {}) {
     ${icon}
     <div class="body"><a class="title" href="/r/${r.id}">${esc(r.title)}</a>
       ${r.subtitle ? `<div class="subtitle">${esc(r.subtitle)}</div>` : ''}
-      ${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}
+      ${r.note ? `<div class="note">${linkify(r.note)}</div>` : ''}
       <div class="meta">${bits.join('')}</div></div>
     <button class="btn sm qpv" data-qpv="${r.id}" type="button" title="不用点进去，直接看内容">预览</button>
   </div>`;
@@ -279,7 +296,7 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
+    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/links">站外资源</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
     <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内删除。<a href="/about#copyright">版权声明</a></span></div>`;
   feedbackButton(active !== 'feedback');
   const user = await me();
@@ -748,7 +765,7 @@ document.addEventListener('click', (e) => {
  * URL, so refresh, bookmarks and back/forward work as before, and a refresh returns to the
  * same scroll position. Upload, account and admin pages still open with a full load.
  */
-const SOFT = /^\/(?:|browse|help|about|feedback|search|[nr]\/\d+\/?)$/;
+const SOFT = /^\/(?:|browse|help|about|feedback|links|search|[nr]\/\d+\/?)$/;
 const here = () => location.pathname + location.search;
 const soft = (u) => u.origin === location.origin && SOFT.test(u.pathname) && SOFT.test(location.pathname);
 const templates = new Map();

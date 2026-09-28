@@ -59,8 +59,10 @@ impl Hub {
     /// Creates pending, "to verify" resources that reference `scan`'s files in place.
     /// `mapping(group)` gives the target node for each file group; unmapped groups are skipped.
     /// Re-running is safe: a file already imported into the same node is skipped.
-    pub fn import_repo(&self, actor: Viewer, scan: &RepoScan, depth: usize, mapping: &dyn Fn(&str) -> Option<Id>) -> Result<ImportReport> {
+    /// `major` (专业, may be empty) labels every imported file, for repos kept per major.
+    pub fn import_repo(&self, actor: Viewer, scan: &RepoScan, depth: usize, major: &str, mapping: &dyn Fn(&str) -> Option<Id>) -> Result<ImportReport> {
         let me = actor.at_least(Level::Reviewer)?.clone();
+        let major = clean(major, 20);
         let license = if scan.license.is_empty() { String::new() } else { format!("，{} 许可", scan.license) };
         let note = format!("来源：GitHub {}/{}{license}", scan.owner, scan.repo);
         let files: Vec<(&RepoFile, Id)> = scan.files.iter().filter(|f| is_doc(&f.path)).filter_map(|f| Some((f, mapping(&group_of(&f.path, depth))?))).collect();
@@ -100,7 +102,11 @@ impl Hub {
                     let group = group_of(&f.path, depth);
                     let rel = f.path.strip_prefix(&group).unwrap_or(&f.path).trim_start_matches('/');
                     let (stem, ext) = rel.rsplit_once('.').map(|(s, e)| (s, e.to_lowercase())).unwrap_or((rel, String::new()));
-                    let g = guess_name(stem, &ext);
+                    let mut g = guess_name(stem, &ext);
+                    // Repos kept as 学期/课程/文件 put the time in a folder, not the file name.
+                    if g.time.is_empty() {
+                        g.time = guess_name(&group, "").time;
+                    }
                     let input = ResourceInput {
                         node,
                         course: String::new(),
@@ -112,6 +118,7 @@ impl Hub {
                         extra: g.extra,
                         note: note.clone(),
                         subtitle: None,
+                        major: None,
                     };
                     let extras = AdminExtras { free_type: true, ..Default::default() };
                     let (name, tag) = Self::build_name(st, &input, &extras, true, None)?;
@@ -138,6 +145,10 @@ impl Hub {
                         downloads: 0,
                     };
                     ids.push(r.id);
+                    if !major.is_empty() {
+                        tx.put_major(r.id, &major)?;
+                        st.majors.insert(r.id, major.clone());
+                    }
                     st.put_resource(tx, r)?;
                     created += 1;
                 }

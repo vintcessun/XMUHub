@@ -540,6 +540,20 @@ pub struct ApiToken {
     pub last_used: i64,
 }
 
+/// A recommended outside source (another GitHub repo, a netdisk collection, an account
+/// that shares materials), listed on the 站外资源 page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Link {
+    pub id: Id,
+    pub title: String,
+    pub url: String,
+    pub note: String,
+    /// Lower first.
+    pub sort: u32,
+    pub created_by: Id,
+    pub created_at: i64,
+}
+
 /// A reviewer's question to the uploader of a file under review, and the uploader's answer.
 /// The file waits (out of review batches) until it is answered.
 #[derive(Debug, Clone, Serialize, Deserialize)]

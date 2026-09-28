@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, fmtDate, fmtSize, layout, loginUrl, meta, pathId, pickNode, preview, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickNode, preview, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -18,7 +18,7 @@ async function load() {
   $('#subtitle').textContent = r.subtitle || '';
   $('#subtitle').hidden = !r.subtitle;
   $('#tags').innerHTML = `<span class="tag t-${esc(r.tag.code)}">${esc(r.tag.code)} ${esc(r.tag.label)}</span>${statusBadge(r)}<span>${r.downloads} 次下载</span>`;
-  $('#note').textContent = r.note || '';
+  $('#note').innerHTML = linkify(r.note || '');
   $('#note').hidden = !r.note;
   const n = r.name;
   const detail = [n.paper, n.with_answer && '含答案', n.extra].filter(Boolean).join('、');
@@ -27,11 +27,12 @@ async function load() {
     ['课程', esc(n.course)],
     ['时间', esc(n.time)],
     ['类型', esc(n.type_word) + (detail ? `（${esc(detail)}）` : '')],
+    r.major && ['适用专业', esc(r.major)],
     ['文件名', `<span class="mono">${esc(r.filename)}</span>`],
     ['大小', fmtSize(r.size)],
     ['上传于', fmtDate(r.created_at)],
     r.original_name && ['原文件名', `<span class="faint">${esc(r.original_name)}</span>`],
-    r.source && ['来源', `<span class="faint">${esc(r.source)}</span>`],
+    r.source && ['来源', sourceHtml(r.source)],
     r.uploader && ['上传者', `<span class="who-inline">${avatar(r.uploader.avatar, r.uploader.nickname, 20)}<span class="faint">${esc(r.uploader.nickname)}</span></span>`],
     r.reviewer && ['审核人', `<span class="faint">${esc(r.reviewer.nickname)}</span>`],
   ].filter((x) => x && x[1]);
@@ -212,6 +213,7 @@ async function renderManage(r, me) {
       </div>
       <label class="small"><input type="checkbox" id="f_ans"${n.with_answer ? ' checked' : ''}> 含答案</label>
       <label class="field" style="margin-top:8px"><span>补充说明（括号内，如 201题、第1册）</span><input class="input" id="f_extra" value="${esc(n.extra)}"></label>
+      <label class="field"><span>适用专业（选填：同一门课不同专业考的不一样时填，如 软件工程；清空则不标注）</span><input class="input" id="f_major" maxlength="20" value="${esc(r.major || '')}"></label>
       ${staff ? `<label class="field"><span>备注（公开显示）</span><textarea class="input" id="f_note">${esc(r.note)}</textarea></label>` : ''}
       ${staff ? `<div class="field"><span>所属分类</span><div class="row"><span id="f_nodename">${esc(r.node.name)}</span><span class="small faint">ID</span><input class="input" id="f_node" value="${r.node.id}" style="max-width:110px"><button class="btn sm" id="f_pick" type="button">选择分类</button></div></div>
         <label class="small"><input type="checkbox" id="f_unc"${r.uncertain ? ' checked' : ''}> 待核实</label>`
@@ -254,7 +256,7 @@ async function renderManage(r, me) {
         body: {
           node: staff ? Number($('#f_node').value) : nodeId,
           course: $('#f_course').value, time: $('#f_time').value, type_word: $('#f_type').value, tag: $('#f_tag').value,
-          paper: $('#f_paper').value, with_answer: $('#f_ans').checked, extra: $('#f_extra').value, note: staff ? $('#f_note').value : r.note, subtitle: $('#f_sub').value,
+          paper: $('#f_paper').value, with_answer: $('#f_ans').checked, extra: $('#f_extra').value, note: staff ? $('#f_note').value : r.note, subtitle: $('#f_sub').value, major: $('#f_major').value,
           admin: staff ? { uncertain: $('#f_unc').checked, free_type: true } : null,
         },
       });
@@ -285,6 +287,13 @@ function bindAnswers(r) {
       } catch (e) { toast(e.message, true); }
     };
   });
+}
+
+/** Where an imported file came from; a GitHub repo pinned to a commit links to that commit. */
+function sourceHtml(src) {
+  const m = /^github:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)@([0-9a-f]{6,40})$/.exec(src);
+  if (!m) return `<span class="faint">${esc(src)}</span>`;
+  return `<a href="https://github.com/${m[1]}/${m[2]}/tree/${m[3]}" target="_blank" rel="noopener noreferrer nofollow">GitHub ${esc(m[1])}/${esc(m[2])}</a> <span class="faint mono">@${esc(m[3].slice(0, 8))}</span>`;
 }
 
 if (!id) location.href = '/';

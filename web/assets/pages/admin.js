@@ -513,7 +513,7 @@ const panels = {
               <input class="input" data-f="id" placeholder="或填分类 ID" style="min-height:30px;max-width:120px;margin-top:4px"></td>
             <td><button class="btn sm" data-a="new" type="button">新建课程</button></td></tr>`;
         }).join('')}</tbody></table></div>
-        <div class="row" style="margin-top:12px"><button class="btn primary" id="gimp" type="button">导入已选择的组</button><span class="small muted" id="gsum"></span></div>`;
+        <div class="row" style="margin-top:12px"><input class="input" id="gmajor" maxlength="20" placeholder="适用专业（选填）" style="max-width:180px" title="整个仓库只属于某个专业时填，如 XMU-SE 填 软件工程"><button class="btn primary" id="gimp" type="button">导入已选择的组</button><span class="small muted" id="gsum"></span></div>`;
       const rows = [...res.querySelectorAll('tr[data-i]')];
       const chosenOf = (row) => Number(row.querySelector('[data-f="id"]').value) || Number(row.querySelector('[data-f="node"]').value) || 0;
       const sum = () => {
@@ -545,7 +545,7 @@ const panels = {
         const btn = res.querySelector('#gimp');
         btn.disabled = true;
         try {
-          const rep = await api('/admin/github/import', { method: 'POST', body: { scan_id: scan.scan_id, depth: scan.depth, mappings } });
+          const rep = await api('/admin/github/import', { method: 'POST', body: { scan_id: scan.scan_id, depth: scan.depth, mappings, major: res.querySelector('#gmajor').value.trim() } });
           res.querySelector('#gsum').textContent = `完成：新增 ${rep.created} 份资料（待核实），已存在跳过 ${rep.skipped_existing} 份，未选分类 ${rep.unmapped} 份`;
           toast('导入完成');
         } catch (err) { toast(err.message, true); }

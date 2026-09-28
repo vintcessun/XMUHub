@@ -36,6 +36,7 @@ fn input(node: Id, time: &str) -> ResourceInput {
         extra: String::new(),
         note: String::new(),
         subtitle: None,
+        major: None,
     }
 }
 

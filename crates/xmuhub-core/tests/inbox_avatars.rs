@@ -36,6 +36,7 @@ fn input(node: Id, course: &str) -> ResourceInput {
         extra: String::new(),
         note: "大一上高数".into(),
         subtitle: None,
+        major: None,
     }
 }
 

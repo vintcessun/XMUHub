@@ -8,6 +8,8 @@ const BUCKETS = [[1, '01 真题与答案'], [2, '02 提纲笔记'], [3, '03 题�
 let data = null;
 const params = new URLSearchParams(location.search);
 let bucket = Number(params.get('b')) || 0;
+// 适用专业 filter ('' = all, '-' = files not marked for a major).
+let major = '';
 
 /** Keeps the bucket / time filters in the address bar so a refresh keeps them. */
 function syncUrl() {
@@ -22,7 +24,8 @@ let staff = false;
 
 function renderList() {
   const time = $('#time').value;
-  const rs = data.resources.filter((r) => (!bucket || r.tag.bucket === bucket) && (!time || r.name.time === time));
+  const rs = data.resources.filter((r) => (!bucket || r.tag.bucket === bucket) && (!time || r.name.time === time)
+    && (!major || (major === '-' ? !r.major : r.major === major)));
   const bar = staff && rs.length ? `<div class="selbar"><label class="small"><input type="checkbox" id="selall"> 全选</label>
     <button class="btn sm" id="mvsel" type="button">移动选中到其他分类</button><span class="small faint" id="selcount"></span></div>` : '';
   $('#list').innerHTML = rs.length
@@ -78,6 +81,7 @@ async function load() {
     $('#time').innerHTML = '<option value="">全部时间</option>' + times.map((t) => `<option${t === wantTime ? ' selected' : ''}>${esc(t)}</option>`).join('');
     $('#time').hidden = !times.length;
   }
+  majorChips();
   renderList();
 
   const me = await mePromise;
@@ -109,6 +113,30 @@ $('#list').addEventListener('click', async (e) => {
 });
 
 /** 全部 / 本科 / 研究生 above the child cards, when both kinds are among them. */
+/** 全部 / 各专业 above the file list, when the same course has files for different majors
+ * (计组 for 计算机 and for 软件工程 cover different ground). */
+function majorChips() {
+  document.getElementById('mjchips')?.remove();
+  const majors = [...new Set(data.resources.map((r) => r.major).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const unmarked = data.resources.some((r) => !r.major);
+  if (majors.length + (unmarked ? 1 : 0) < 2) { major = ''; return; }
+  if (major && major !== '-' && !majors.includes(major)) major = '';
+  const bar = document.createElement('div');
+  bar.id = 'mjchips';
+  bar.className = 'chips';
+  bar.style.marginBottom = '12px';
+  const opts = [['', '全部专业'], ...majors.map((m) => [m, m]), ...(unmarked ? [['-', '未标注专业']] : [])];
+  bar.innerHTML = opts.map(([k, l]) => `<button class="chip${k === major ? ' on' : ''}" data-mj="${esc(k)}" type="button">${esc(l)}</button>`).join('');
+  $('#list').before(bar);
+  bar.onclick = (e) => {
+    const b = e.target.closest('[data-mj]');
+    if (!b) return;
+    major = b.dataset.mj;
+    bar.querySelectorAll('.chip').forEach((x) => x.classList.toggle('on', x === b));
+    renderList();
+  };
+}
+
 function levelChips(children) {
   document.getElementById('lvchips')?.remove();
   const grad = (c) => c.level === 2 || c.level === 3;

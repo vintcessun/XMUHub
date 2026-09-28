@@ -13,7 +13,7 @@ let M = null; // meta
 const DRAFT_KEY = 'xmuhub.upload.draft';
 const DRAFT_TTL = 20 * 3600 * 1000; // the server drops unfinished uploads after 24 h
 // `node`: a category chosen for this one file, overriding the one picked for the batch.
-const FIELDS = ['type_word', 'year', 'term', 'paper', 'with_answer', 'extra', 'note', 'subtitle', 'node'];
+const FIELDS = ['type_word', 'year', 'term', 'paper', 'with_answer', 'extra', 'note', 'subtitle', 'node', 'major'];
 
 const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
 
@@ -289,6 +289,7 @@ function rowHtml(r, i) {
       <label>学期<select class="input" data-f="term"><option value="">不填</option>${['秋', '春', '暑'].map((t) => `<option${t === r.term ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
       <label>卷别<select class="input" data-f="paper"><option value="">无</option>${M.papers.map((p) => `<option${p === r.paper ? ' selected' : ''}>${p}</option>`).join('')}</select></label>
       <label>补充（如 201题）<input class="input" data-f="extra" value="${esc(r.extra)}" maxlength="20"></label>
+      <label title="同一门课不同专业考的不一样时填">适用专业（选填）<input class="input" data-f="major" value="${esc(r.major || '')}" maxlength="20" placeholder="如 软件工程"></label>
       <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:8px"><input type="checkbox" data-f="with_answer"${r.with_answer ? ' checked' : ''}> 含答案</label>
       <label class="wide" style="grid-column:1/-1">小标题（选填，公开显示，说明具体内容；留空则在原文件名能看懂时自动使用它）<input class="input" data-f="subtitle" value="${esc(r.subtitle || '')}" maxlength="80" placeholder="${esc(r.file.name.replace(/\.[^.]+$/, ''))}"></label>
       <label class="wide" style="grid-column:1/-1">备注（选填，公开显示，如“只有选择题答案”）<input class="input" data-f="note" value="${esc(r.note)}" maxlength="500"></label>
@@ -366,7 +367,7 @@ $('#browsepick').onclick = async (e) => {
   if (x) pick(x.node, x.path);
 };
 $('#b_apply').onclick = () => {
-  const v = { type_word: $('#b_type').value, year: $('#b_year').value, term: $('#b_term').value, paper: $('#b_paper').value };
+  const v = { type_word: $('#b_type').value, year: $('#b_year').value, term: $('#b_term').value, paper: $('#b_paper').value, major: $('#b_major').value.trim() };
   for (const r of state.rows) {
     if (!r.sel || r.done) continue;
     for (const [k, x] of Object.entries(v)) if (x) r[k] = x;
@@ -484,6 +485,7 @@ async function uploadRow(r, bar, base, total) {
     upload_id: plan.upload_id, node: nodeOf(r).id, time: timeOf(r), type_word: r.type_word,
     paper: r.paper, with_answer: r.with_answer, extra: r.extra, note: r.note,
     ...(r.subtitle && r.subtitle.trim() ? { subtitle: r.subtitle } : {}),
+    ...(r.major && r.major.trim() ? { major: r.major.trim() } : {}),
   };
   let res;
   try {

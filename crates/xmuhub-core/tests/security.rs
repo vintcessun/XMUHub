@@ -39,8 +39,9 @@ fn input(node: Id) -> ResourceInput {
         paper: String::new(),
         with_answer: false,
         extra: String::new(),
-        note: String::new(),
+        note: String::new(),
         subtitle: None,
+        major: None,
     }
 }
 

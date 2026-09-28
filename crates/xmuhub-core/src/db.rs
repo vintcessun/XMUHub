@@ -36,6 +36,10 @@ pub const PUBLIC_UPLOADERS: TableDefinition<u64, u8> = TableDefinition::new("pub
 pub const AVATARS: TableDefinition<u64, &[u8]> = TableDefinition::new("avatars");
 /// id → Question (a reviewer asking a file's uploader something).
 pub const QUESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("questions");
+/// resource id → the major (专业) its content is for, e.g. 软件工程 (absent = any).
+pub const RESOURCE_MAJORS: TableDefinition<u64, &str> = TableDefinition::new("resource_majors");
+/// id → Link (a recommended outside source: another repo, a netdisk collection …).
+pub const LINKS: TableDefinition<u64, &[u8]> = TableDefinition::new("links");
 /// Free-form small state: id sequences, storage bucket cursors, settings.
 pub const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
@@ -80,6 +84,8 @@ pub struct Snapshot {
     pub public_uploaders: Vec<Id>,
     pub avatars: Vec<Avatar>,
     pub questions: Vec<Question>,
+    pub majors: Vec<(Id, String)>,
+    pub links: Vec<Link>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -116,6 +122,8 @@ impl Db {
         txn.open_table(PUBLIC_UPLOADERS)?;
         txn.open_table(AVATARS)?;
         txn.open_table(QUESTIONS)?;
+        txn.open_table(RESOURCE_MAJORS)?;
+        txn.open_table(LINKS)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -187,6 +195,13 @@ impl Db {
         for row in txn.open_table(QUESTIONS)?.iter()? {
             snap.questions.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(RESOURCE_MAJORS)?.iter()? {
+            let (k, v) = row?;
+            snap.majors.push((k.value(), v.value().to_string()));
+        }
+        for row in txn.open_table(LINKS)?.iter()? {
+            snap.links.push(decode(row?.1.value())?);
+        }
         Ok(snap)
     }
 
@@ -227,6 +242,8 @@ impl Db {
             public_uploaders: snap.public_uploaders,
             avatars: snap.avatars,
             questions: snap.questions,
+            majors: snap.majors,
+            links: snap.links,
         };
         serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
@@ -265,6 +282,10 @@ pub struct Dump {
     pub avatars: Vec<Avatar>,
     #[serde(default)]
     pub questions: Vec<Question>,
+    #[serde(default)]
+    pub majors: Vec<(Id, String)>,
+    #[serde(default)]
+    pub links: Vec<Link>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -377,6 +398,20 @@ impl Tx<'_> {
     pub fn put_node_level(&self, id: Id, level: u8) -> Result<()> {
         let mut t = self.txn.open_table(NODE_LEVELS)?;
         if level == 0 { t.remove(id)?; } else { t.insert(id, level)?; }
+        Ok(())
+    }
+    /// Sets (or, with "", clears) the major a resource is for.
+    pub fn put_major(&self, id: Id, major: &str) -> Result<()> {
+        let mut t = self.txn.open_table(RESOURCE_MAJORS)?;
+        if major.is_empty() { t.remove(id)?; } else { t.insert(id, major)?; }
+        Ok(())
+    }
+    pub fn put_link(&self, l: &Link) -> Result<()> {
+        self.txn.open_table(LINKS)?.insert(l.id, encode(l).as_slice())?;
+        Ok(())
+    }
+    pub fn del_link(&self, id: Id) -> Result<()> {
+        self.txn.open_table(LINKS)?.remove(id)?;
         Ok(())
     }
     pub fn put_question(&self, q: &Question) -> Result<()> {

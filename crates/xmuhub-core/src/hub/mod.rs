@@ -9,6 +9,7 @@ mod avatars;
 mod batches;
 mod imports;
 mod inbox;
+mod links;
 mod resources;
 mod social;
 mod stats;
@@ -109,6 +110,10 @@ pub(crate) struct State {
     avatars: HashMap<Id, Avatar>,
     /// reviewers' questions to uploaders, by id
     questions: HashMap<Id, Question>,
+    /// resource → major (专业) it is for
+    majors: HashMap<Id, String>,
+    /// recommended outside sources, by id
+    links: HashMap<Id, Link>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
     inbox: Option<Id>,
 }
@@ -173,6 +178,8 @@ impl State {
         st.public_uploaders = snap.public_uploaders.into_iter().collect();
         st.avatars = snap.avatars.into_iter().map(|a| (a.user, a)).collect();
         st.questions = snap.questions.into_iter().map(|q| (q.id, q)).collect();
+        st.majors = snap.majors.into_iter().collect();
+        st.links = snap.links.into_iter().map(|l| (l.id, l)).collect();
         st.thumbs = snap.thumbs.into_iter().map(|t| (t.key.clone(), t)).collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);

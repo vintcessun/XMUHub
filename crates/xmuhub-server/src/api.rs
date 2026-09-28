@@ -232,6 +232,7 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         "id": r.id,
         "title": r.name.stem(),
         "subtitle": app.hub.subtitle(r),
+        "major": app.hub.major_of(r.id),
         "filename": r.filename(),
         "ext": r.ext,
         "name": {
@@ -345,6 +346,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/questions", post(ask_uploader))
         .route("/questions/{id}/answer", post(answer_question))
         .route("/me/questions", get(my_questions))
+        .route("/links", get(links).post(add_link))
+        .route("/links/{id}", axum::routing::patch(update_link).delete(delete_link))
         .route("/admin/avatars", get(pending_avatars))
         .route("/admin/avatars/{user}", post(review_avatar))
         .route("/admin/reports", get(reports))
@@ -1065,6 +1068,43 @@ async fn review_queue(State(app): S, auth: Auth, Query(q): Query<QueueQ>) -> R<J
     Ok(Json(json!(items.iter().map(|(r, n)| resource_view(&app, r, n, &[], v)).collect::<Vec<_>>())))
 }
 
+// ------------------------------------------------------------------ 站外资源 (outside sources)
+
+async fn links(State(app): S) -> Json<Value> {
+    Json(json!(app.hub.links()))
+}
+
+#[derive(Deserialize)]
+struct LinkIn {
+    title: String,
+    url: String,
+    #[serde(default)]
+    note: String,
+    #[serde(default)]
+    sort: u32,
+}
+
+async fn add_link(State(app): S, auth: Auth, Json(b): Json<LinkIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let l = blocking(move || hub.add_link(Viewer { user: user.as_ref() }, &b.title, &b.url, &b.note, b.sort)).await?;
+    Ok(Json(json!(l)))
+}
+
+async fn update_link(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<LinkIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let l = blocking(move || hub.update_link(Viewer { user: user.as_ref() }, id, &b.title, &b.url, &b.note, b.sort)).await?;
+    Ok(Json(json!(l)))
+}
+
+async fn delete_link(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_link(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
 #[derive(Deserialize)]
 struct BatchQ {
     /// Only files under this section / college / group.
@@ -1253,11 +1293,20 @@ async fn gh_scan(State(app): S, auth: Auth, Json(b): Json<ScanIn>) -> R<Json<Val
     let groups: Vec<Value> = groups
         .into_iter()
         .map(|(key, (files, bytes, samples))| {
-            let leaf = key.rsplit('/').next().unwrap_or(&key).to_string();
-            let simplified: String = leaf.replace(['（', '('], " ").replace(['）', ')'], " ").split_whitespace().next().unwrap_or("").to_string();
-            let mut suggest = app.hub.suggest_nodes(&leaf, 5);
-            if suggest.is_empty() && !simplified.is_empty() {
-                suggest = app.hub.suggest_nodes(&simplified, 5);
+            // The course is usually named by a folder, not the files: try each folder of the
+            // group from the deepest up (学期/课程/期末 → 期末, 课程, 学期), plain and with any
+            // bracketed part dropped, and keep the first that finds something.
+            let mut suggest = Vec::new();
+            for seg in key.rsplit('/') {
+                let simplified: String = seg.replace(['（', '('], " ").replace(['）', ')'], " ").split_whitespace().next().unwrap_or("").to_string();
+                for q in [seg.to_string(), simplified] {
+                    if suggest.is_empty() && !q.is_empty() {
+                        suggest = app.hub.suggest_nodes(&q, 5);
+                    }
+                }
+                if !suggest.is_empty() {
+                    break;
+                }
             }
             json!({
                 "key": key, "files": files, "bytes": bytes, "samples": samples,
@@ -1286,6 +1335,9 @@ struct ImportIn {
     depth: usize,
     /// group key → node id
     mappings: std::collections::HashMap<String, Id>,
+    /// 专业 for every imported file (repos kept per major, e.g. XMU-SE).
+    #[serde(default)]
+    major: String,
 }
 
 async fn gh_import(State(app): S, auth: Auth, Json(b): Json<ImportIn>) -> R<Json<Value>> {
@@ -1296,7 +1348,7 @@ async fn gh_import(State(app): S, auth: Auth, Json(b): Json<ImportIn>) -> R<Json
     let depth = b.depth.clamp(1, 4);
     let report = blocking(move || {
         let map = b.mappings;
-        hub.import_repo(Viewer { user: user.as_ref() }, &scan, depth, &|g: &str| map.get(g).copied())
+        hub.import_repo(Viewer { user: user.as_ref() }, &scan, depth, &b.major, &|g: &str| map.get(g).copied())
     })
     .await?;
     Ok(Json(json!(report)))

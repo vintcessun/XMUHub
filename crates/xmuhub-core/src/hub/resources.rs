@@ -31,6 +31,15 @@ pub struct ResourceInput {
     /// Public subtitle describing the content; `None` keeps the current / automatic one.
     #[serde(default)]
     pub subtitle: Option<String>,
+    /// The major (专业) the content is for, when the same course differs by major (计组 for
+    /// 计算机 vs 软件工程); `None` keeps the current one, "" clears it.
+    #[serde(default)]
+    pub major: Option<String>,
+}
+
+/// A major label as stored: short, no separators.
+fn clean_major(s: &str) -> String {
+    clean(s, 20).chars().filter(|c| !"_/\\()（）【】[]".contains(*c)).collect::<String>().trim().to_string()
 }
 
 /// Fields only staff (and the importer) may set.
@@ -224,6 +233,10 @@ impl Hub {
             if let Some(sub) = &input.subtitle {
                 Self::set_subtitle(st, tx, &r, sub)?;
             }
+            if let Some(m) = input.major.as_deref().map(clean_major).filter(|m| !m.is_empty()) {
+                tx.put_major(r.id, &m)?;
+                st.majors.insert(r.id, m);
+            }
             st.put_resource(tx, r.clone())?;
             up.consumed = true;
             tx.put_upload(&up)?;
@@ -264,7 +277,9 @@ impl Hub {
             }
             // Saving without changing anything: no new review round, no log entry.
             let same_subtitle = input.subtitle.as_deref().is_none_or(|s| clean(s, 80) == st.subtitle(&r));
-            if !staff && node == r.node && name == r.name && tag == r.tag && same_subtitle {
+            let major = input.major.as_deref().map(clean_major);
+            let same_major = major.as_ref().is_none_or(|m| st.majors.get(&r.id).map(String::as_str).unwrap_or("") == m);
+            if !staff && node == r.node && name == r.name && tag == r.tag && same_subtitle && same_major {
                 return Ok((r, old_node));
             }
             r.node = node;
@@ -277,6 +292,10 @@ impl Hub {
             r.updated_at = now();
             if let Some(sub) = &input.subtitle {
                 Self::set_subtitle(st, tx, &r, sub)?;
+            }
+            if let Some(m) = major {
+                tx.put_major(r.id, &m)?;
+                if m.is_empty() { st.majors.remove(&r.id); } else { st.majors.insert(r.id, m); }
             }
             // A file moved into 「待整理」 waits to be sorted, whoever moved it.
             if st.inbox == Some(node) && r.status == Status::Published {
@@ -744,7 +763,7 @@ mod change_request_tests {
         let edited = ResourceInput {
             node: 4, course: "课程".into(), time: "2025".into(), type_word: "资料".into(),
             tag: String::new(), paper: String::new(), with_answer: false, extra: String::new(),
-            note: "新备注".into(), subtitle: None,
+            note: "新备注".into(), subtitle: None, major: None,
         };
         assert!(h.update_resource(mine, 5, edited, AdminExtras::default()).is_err());
         assert!(h.request_resource_change(stranger, 5, "note", "新备注").is_err());
@@ -788,5 +807,12 @@ mod tests {
         for bad in ["23-24", "2024秋季", "20240", "202406秋", "abc"] {
             assert!(!valid_time(bad), "{bad}");
         }
+    }
+}
+
+impl Hub {
+    /// The major (专业) a file is for, "" when it isn't major-specific.
+    pub fn major_of(&self, id: Id) -> String {
+        self.st.read().majors.get(&id).cloned().unwrap_or_default()
     }
 }

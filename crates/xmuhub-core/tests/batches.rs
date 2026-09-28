@@ -41,6 +41,7 @@ async fn upload(h: &Hub, dir: &std::path::Path, v: Viewer<'_>, node: Id, n: usiz
         extra: String::new(),
         note: String::new(),
         subtitle: None,
+        major: None,
     };
     h.create_resource(v, plan.upload_id, input, AdminExtras::default()).unwrap().id
 }

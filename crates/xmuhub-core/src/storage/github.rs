@@ -526,7 +526,7 @@ impl StorageBackend for GitHubBackend {
         }
         match a.digest.as_deref() {
             Some(d) if d != format!("sha256:{sha256}") => {
-                let _ = self.delete_asset(repo, id).await;
+                // Kept as uploaded: the system never deletes a material file, even a bad copy.
                 return Err(Error::Conflict("文件校验失败（sha256 不一致），请重新上传".into()));
             }
             None => tracing::warn!(asset = id, "github returned no digest; accepting size match"),
@@ -546,13 +546,6 @@ impl StorageBackend for GitHubBackend {
         match loc {
             Location::GitHub { repo, tag, name, .. } => self.mirrors.wrap(&self.github_url(repo, tag, name)),
             _ => vec![],
-        }
-    }
-
-    async fn delete(&self, loc: &Location) -> Result<()> {
-        match loc {
-            Location::GitHub { repo, asset_id, .. } if *asset_id != 0 => self.delete_asset(repo, *asset_id).await,
-            _ => Ok(()),
         }
     }
 }

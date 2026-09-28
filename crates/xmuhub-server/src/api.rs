@@ -690,8 +690,7 @@ struct ReviewIn {
 async fn review(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ReviewIn>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
-    let (r, garbage) = blocking(move || hub.review(Viewer { user: user.as_ref() }, id, &b.action, &b.note)).await?;
-    delete_later(&app, garbage);
+    let r = blocking(move || hub.review(Viewer { user: user.as_ref() }, id, &b.action, &b.note)).await?;
     Ok(Json(json!({ "status": r.status.as_str() })))
 }
 
@@ -887,26 +886,6 @@ async fn download_redirect(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<R
     }
     let url = plan.parts[0].urls.first().cloned().ok_or(Error::NotFound("下载地址"))?;
     Ok(Redirect::to(&url).into_response())
-}
-
-/// Deletes storage replicas in the background; failures are logged, not surfaced.
-pub fn delete_later(app: &Arc<App>, locs: Vec<xmuhub_core::model::Location>) {
-    if locs.is_empty() {
-        return;
-    }
-    let hub = app.hub.clone();
-    tokio::spawn(async move {
-        for l in locs {
-            match hub.storage.for_location(&l) {
-                Ok(b) => {
-                    if let Err(e) = b.delete(&l).await {
-                        tracing::warn!("delete {l:?}: {e}");
-                    }
-                }
-                Err(e) => tracing::warn!("{e}"),
-            }
-        }
-    });
 }
 
 // ------------------------------------------------------------------ uploads

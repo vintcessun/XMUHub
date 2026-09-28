@@ -187,8 +187,7 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ip: &str, name: &str, a: &Value)
         "review_resource" => {
             let (hub, user, id) = (app.hub.clone(), auth.user.clone(), arg_id(a, "id")?);
             let (action, note) = (arg_str(a, "action").to_string(), arg_str(a, "note").to_string());
-            let (r, garbage) = blocking(move || hub.review(Viewer { user: user.as_ref() }, id, &action, &note)).await?;
-            crate::api::delete_later(app, garbage);
+            let r = blocking(move || hub.review(Viewer { user: user.as_ref() }, id, &action, &note)).await?;
             json!({ "ok": true, "status": r.status.as_str() })
         }
         _ => return Err(format!("未知工具 {name}")),

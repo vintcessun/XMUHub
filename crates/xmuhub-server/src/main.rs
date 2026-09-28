@@ -258,7 +258,11 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
             tick.tick().await;
             let h = app2.hub.clone();
             match tokio::task::spawn_blocking(move || h.collect_garbage()).await {
-                Ok(Ok(garbage)) => api::delete_later(&app2, garbage),
+                Ok(Ok(n)) => {
+                    if n > 0 {
+                        tracing::info!("gc: forgot {n} stale uploads");
+                    }
+                }
                 Ok(Err(e)) => tracing::error!("gc: {e}"),
                 Err(e) => tracing::error!("gc task: {e}"),
             }

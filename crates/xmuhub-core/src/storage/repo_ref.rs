@@ -56,11 +56,6 @@ impl StorageBackend for RepoRefBackend {
             _ => vec![],
         }
     }
-
-    async fn delete(&self, _loc: &Location) -> Result<()> {
-        // Someone else's repository: never touched.
-        Ok(())
-    }
 }
 
 #[cfg(test)]

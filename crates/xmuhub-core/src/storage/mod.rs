@@ -47,8 +47,7 @@ pub trait StorageBackend: Send + Sync {
 
     /// Download URLs for a stored part, best first.
     fn download_urls(&self, loc: &Location) -> Vec<String>;
-
-    async fn delete(&self, loc: &Location) -> Result<()>;
+    // Deliberately no `delete`: material files are never deleted through the system (AGENTS.md §4).
 }
 
 /// All configured backends; uploads go to the primary one.

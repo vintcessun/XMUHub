@@ -211,24 +211,17 @@ impl Hub {
         })
     }
 
-    /// Drops stale uploads; returns orphaned storage locations for the caller to delete.
-    pub fn collect_garbage(&self) -> Result<Vec<Location>> {
+    /// Forgets stale upload records. Files already sent stay in storage (a finished upload's
+    /// blob stays in the database too): material files are never deleted through the system.
+    pub fn collect_garbage(&self) -> Result<usize> {
         let cutoff = now() - UPLOAD_TTL;
         self.mutate(|st, tx| {
-            let stale: Vec<Upload> = st.uploads.values().filter(|u| u.created_at < cutoff).cloned().collect();
-            let mut garbage = Vec::new();
-            for u in stale {
-                st.uploads.remove(&u.id);
-                tx.del_upload(u.id)?;
-                if u.finished {
-                    // If nothing ended up using the blob, drop it.
-                    garbage.extend(Self::release_blob(st, tx, &u.key)?);
-                } else {
-                    // Parts sent for an upload that never finished are not in any blob.
-                    garbage.extend(u.parts.into_iter().filter(|p| p.done).map(|p| p.target));
-                }
+            let stale: Vec<Id> = st.uploads.values().filter(|u| u.created_at < cutoff).map(|u| u.id).collect();
+            for id in &stale {
+                st.uploads.remove(id);
+                tx.del_upload(*id)?;
             }
-            Ok(garbage)
+            Ok(stale.len())
         })
     }
 

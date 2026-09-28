@@ -232,7 +232,7 @@ impl Hub {
         let r = self.mutate(|st, tx| {
             let mut r = st.resources.get(&id).cloned().ok_or(Error::NotFound("资料"))?;
             // Uploaders may fix their own files while waiting and after publication (the edit
-            // then goes back to review below). Rejected files no longer have their blob.
+            // then goes back to review below). Rejected files are for staff to restore.
             let own = r.uploader == me.id && matches!(r.status, Status::Pending | Status::Published);
             if !staff && !own {
                 return Err(Error::Forbidden);
@@ -350,14 +350,16 @@ impl Hub {
         Ok(ids.len())
     }
 
-    /// approve / reject / remove / restore / restrict. Returns storage locations that became
-    /// unreferenced for the caller to delete (network I/O stays outside the write lock).
-    pub fn review(&self, actor: Viewer, id: Id, action: &str, note: &str) -> Result<(Resource, Vec<Location>)> {
+    /// approve / reject / remove / restore / restrict. None of them touches the stored file:
+    /// material files are never deleted through the system, so every decision can be undone.
+    pub fn review(&self, actor: Viewer, id: Id, action: &str, note: &str) -> Result<Resource> {
         let me = actor.at_least(Level::Reviewer)?.clone();
-        let (r, garbage) = self.mutate(|st, tx| {
+        let r = self.mutate(|st, tx| {
             let mut r = st.resources.get(&id).cloned().ok_or(Error::NotFound("资料"))?;
             match action {
                 "approve" | "restore" => {
+                    // Files rejected back when rejection still deleted them have no blob left.
+                    if !st.blobs.contains_key(&r.blob) { return Err(bad("这份资料的文件已不在存储中，无法恢复，请重新上传")); }
                     r.status = Status::Published;
                     r.needs_review = false;
                     r.uncertain = false;
@@ -395,11 +397,10 @@ impl Hub {
             let e = ReviewEvent { id: st.next_id(tx)?, resource: r.id, actor: me.id, action: action.to_string(), note: r.review_note.clone(), at: now() };
             tx.put_review(&e)?;
             st.reviews.push(e);
-            let garbage = if r.status == Status::Rejected { Self::release_blob(st, tx, &r.blob)? } else { Vec::new() };
-            Ok((r, garbage))
+            Ok(r)
         })?;
         self.reindex(&[r.node], &[r.id]);
-        Ok((r, garbage))
+        Ok(r)
     }
 
     pub fn request_resource_change(&self, actor: Viewer, id: Id, kind: &str, value: &str) -> Result<ResourceChangeRequest> {
@@ -484,19 +485,6 @@ impl Hub {
         })?;
         if changed { self.reindex(&[], &[q.resource]); }
         Ok(q)
-    }
-
-    /// Drops a blob no live resource or open upload uses; returns its replicas for deletion.
-    /// Removed/restricted resources keep their blob so the decision can be undone.
-    pub(super) fn release_blob(st: &mut State, tx: &Tx, key: &str) -> Result<Vec<Location>> {
-        let used = st.resources.values().any(|r| r.blob == key && r.status != Status::Rejected)
-            || st.uploads.values().any(|u| u.key == key && !u.consumed);
-        if used {
-            return Ok(Vec::new());
-        }
-        let Some(b) = st.blobs.remove(key) else { return Ok(Vec::new()) };
-        tx.del_blob(key)?;
-        Ok(b.parts.into_iter().flat_map(|p| p.replicas).collect())
     }
 
     pub fn resource(&self, viewer: Viewer, id: Id) -> Result<(Resource, Node, Vec<Node>)> {

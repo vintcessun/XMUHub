@@ -71,11 +71,4 @@ impl StorageBackend for LocalBackend {
             _ => vec![],
         }
     }
-
-    async fn delete(&self, loc: &Location) -> Result<()> {
-        if let Location::Local { path } = loc {
-            let _ = tokio::fs::remove_file(self.path_of(path)?).await;
-        }
-        Ok(())
-    }
 }

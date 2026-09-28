@@ -90,9 +90,15 @@ async fn uploader_edits_go_back_to_review() {
     assert_eq!(r.status, Status::Published);
     assert!(r.needs_review);
 
-    // Rejected files (their blob is released) can't be edited back into review.
+    // Rejected files can't be edited back into review by the uploader...
     h.review(staff, id, "reject", "").unwrap();
     assert!(h.update_resource(Viewer { user: Some(&trusted) }, id, input(course2, "2023"), AdminExtras::default()).is_err());
+    // ...but nothing is ever deleted: rejected and removed files both come back intact.
+    h.review(staff, id, "restore", "").unwrap();
+    assert!(h.download(staff, id, false).is_ok());
+    h.review(staff, id, "remove", "").unwrap();
+    h.review(staff, id, "restore", "").unwrap();
+    assert!(h.download(staff, id, false).is_ok());
 
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);

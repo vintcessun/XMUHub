@@ -38,7 +38,7 @@ async function load() {
   $('#kv').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
   const notes = {
     pending: ['warn', '这份资料正在等待审核，通过后才会对所有人可见。'],
-    rejected: ['bad', `这份资料未通过审核。${r.review_note ? '原因：' + esc(r.review_note) : ''}${r.mine ? '<br>文件已经删除，修改后请重新上传。' : ''}`],
+    rejected: ['bad', `这份资料未通过审核。${r.review_note ? '原因：' + esc(r.review_note) : ''}${r.mine ? '<br>如有疑问可以联系审核员，或修改后重新上传。' : ''}`],
     removed: ['bad', `这份资料已下架。${r.review_note ? '原因：' + esc(r.review_note) : ''}`],
     restricted: ['warn', '这份资料标记为「仅内部」，不对外公开、也不会被搜索到。'],
   };

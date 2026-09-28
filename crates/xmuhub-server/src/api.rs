@@ -48,6 +48,8 @@ pub struct App {
     pub scans: parking_lot::Mutex<std::collections::HashMap<String, xmuhub_core::storage::github::RepoScan>>,
     /// Human check for sign-ups from uncommon mail domains (None = not configured).
     pub turnstile: Option<crate::captcha::Turnstile>,
+    /// Signs receipts for things submitted without an account (feedback).
+    pub secret: Vec<u8>,
 }
 
 type S = State<Arc<App>>;
@@ -324,6 +326,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/reviews", get(resource_reviews))
         .route("/comments/{id}", axum::routing::delete(delete_comment))
         .route("/feedback", post(feedback))
+        .route("/feedback/mine", get(my_feedback))
         .route("/uploads", post(begin_upload))
         .route("/uploads/{id}", get(upload_plan))
         .route("/uploads/{id}/parts/{index}", post(confirm_part))
@@ -915,8 +918,29 @@ async fn feedback(State(app): S, auth: Auth, h: HeaderMap, Json(b): Json<Feedbac
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let ip = client_ip(&h);
-    blocking(move || hub.submit_feedback(Viewer { user: user.as_ref() }, &b.body, &b.contact, &b.page, &ip)).await?;
-    Ok(Json(json!({ "ok": true })))
+    let f = blocking(move || hub.submit_feedback(Viewer { user: user.as_ref() }, &b.body, &b.contact, &b.page, &ip)).await?;
+    // The receipt lets the sender (even without an account) see the reply later.
+    Ok(Json(json!({ "ok": true, "id": f.id, "key": xmuhub_core::ticket::receipt(&app.secret, "feedback", f.id) })))
+}
+
+#[derive(Deserialize)]
+struct MyFeedbackQ {
+    /// `id.key` pairs from feedback sent in this browser, comma separated.
+    #[serde(default)]
+    k: String,
+}
+
+/// The sender's own feedback with the admins' replies: what this browser sent (by receipt)
+/// and, when signed in, everything sent from the account.
+async fn my_feedback(State(app): S, auth: Auth, Query(q): Query<MyFeedbackQ>) -> Json<Value> {
+    let ids: Vec<Id> = q
+        .k
+        .split(',')
+        .take(50)
+        .filter_map(|p| p.split_once('.'))
+        .filter_map(|(id, key)| id.parse::<Id>().ok().filter(|id| xmuhub_core::ticket::check_receipt(&app.secret, "feedback", *id, key)))
+        .collect();
+    Json(json!(app.hub.my_feedback(auth.viewer(), &ids)))
 }
 
 async fn feedback_list(State(app): S, auth: Auth, Query(q): Query<ReportsQ>) -> R<Json<Value>> {

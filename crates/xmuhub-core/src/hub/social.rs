@@ -34,6 +34,16 @@ pub struct CommentView {
     pub can_delete: bool,
 }
 
+/// A piece of feedback as its sender sees it: whether it was handled, and the admins' reply.
+#[derive(Debug, Clone, Serialize)]
+pub struct FeedbackStatus {
+    pub id: Id,
+    pub body: String,
+    pub created_at: i64,
+    pub handled: bool,
+    pub reply: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReviewView {
     pub id: Id,
@@ -201,13 +211,36 @@ impl Hub {
         Ok(v)
     }
 
+    /// Feedback as its sender sees it: the given ids (their receipts already checked by the
+    /// caller) plus everything the signed-in viewer sent, newest first.
+    pub fn my_feedback(&self, viewer: Viewer, ids: &[Id]) -> Vec<FeedbackStatus> {
+        let st = self.st.read();
+        let me = viewer.id();
+        let mut v: Vec<FeedbackStatus> = st
+            .feedback
+            .values()
+            .filter(|f| ids.contains(&f.id) || (me.is_some() && f.user == me))
+            .map(|f| FeedbackStatus {
+                id: f.id,
+                body: f.body.chars().take(300).collect(),
+                created_at: f.created_at,
+                handled: f.handled,
+                reply: f.handled_note.clone(),
+            })
+            .collect();
+        v.sort_by_key(|f| std::cmp::Reverse(f.id));
+        v.truncate(50);
+        v
+    }
+
     pub fn handle_feedback(&self, actor: Viewer, id: Id, note: &str) -> Result<()> {
         let me = actor.at_least(Level::Admin)?.id;
         self.mutate(|st, tx| {
             let mut f = st.feedback.get(&id).cloned().ok_or(Error::NotFound("反馈"))?;
             f.handled = true;
             f.handled_by = Some(me);
-            f.handled_note = clean(note, 300);
+            // Shown to the sender as the reply.
+            f.handled_note = clean(note, 500);
             tx.put_feedback(&f)?;
             st.feedback.insert(id, f);
             Ok(())

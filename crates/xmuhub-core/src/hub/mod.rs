@@ -34,7 +34,7 @@ pub use inbox::INBOX_NAME;
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
 pub use stats::DayStats;
 pub use thumbs::ThumbJob;
-pub use social::{CommentView, RatingSummary, ReviewView};
+pub use social::{CommentView, FeedbackStatus, RatingSummary, ReviewView};
 pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePage, NodePatch};

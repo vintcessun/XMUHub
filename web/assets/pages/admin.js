@@ -307,8 +307,8 @@ const panels = {
       ${list.length ? list.map((f) => `<div class="item" data-id="${f.id}"><div class="body">
         <div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(f.body)}</div>
         <div class="meta"><span>${ago(f.created_at)}</span>${f.nickname ? `<span>${esc(f.nickname)}</span>` : '<span>未登录</span>'}${f.contact ? `<span>联系：${esc(f.contact)}</span>` : ''}${f.page ? `<span class="faint">${esc(f.page)}</span>` : ''}
-          ${f.handled ? `<span class="badge published">已处理${f.handled_by ? ` · ${esc(f.handled_by)}` : ''}</span>${f.handled_note ? `<span>${esc(f.handled_note)}</span>` : ''}` : ''}</div>
-        ${f.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="处理说明（选填）" style="max-width:260px;min-height:30px;padding:3px 8px"><button class="btn sm ok" data-a="done">标记已处理</button></div>`}
+          ${f.handled ? `<span class="badge published">已处理${f.handled_by ? ` · ${esc(f.handled_by)}` : ''}</span>${f.handled_note ? `<span>回复：${esc(f.handled_note)}</span>` : ''}` : ''}</div>
+        ${f.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="回复反馈人（选填，对方在反馈页能看到）" maxlength="500" style="max-width:360px;min-height:30px;padding:3px 8px"><button class="btn sm ok" data-a="done">回复并标记已处理</button></div>`}
       </div></div>`).join('') : '<div class="empty"><b>没有待处理的反馈</b></div>'}</section>`;
     box.querySelector('#fball').onchange = (e) => panels.feedback(box, e.target.checked);
     box.onclick = async (e) => {

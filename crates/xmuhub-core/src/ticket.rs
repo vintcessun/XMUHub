@@ -42,3 +42,31 @@ pub fn verify(secret: &[u8], s: &str) -> Result<Ticket> {
     }
     Ok(t)
 }
+
+/// A receipt for something submitted without an account (feedback): whoever holds it can
+/// look that item up later. Derived from the secret, so nothing is stored and it can't be
+/// guessed from the id.
+pub fn receipt(secret: &[u8], kind: &str, id: u64) -> String {
+    let tag = mac(secret, format!("{kind}:{id}").as_bytes()).finalize().into_bytes();
+    hex::encode(&tag[..12])
+}
+
+/// Whether `given` is the receipt for `kind` `id` (constant-time).
+pub fn check_receipt(secret: &[u8], kind: &str, id: u64, given: &str) -> bool {
+    let want = receipt(secret, kind, id);
+    want.len() == given.len() && want.bytes().zip(given.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
+
+#[cfg(test)]
+mod receipt_tests {
+    use super::*;
+
+    #[test]
+    fn receipts_verify_only_for_their_item() {
+        let r = receipt(b"secret", "feedback", 42);
+        assert!(check_receipt(b"secret", "feedback", 42, &r));
+        assert!(!check_receipt(b"secret", "feedback", 43, &r));
+        assert!(!check_receipt(b"other", "feedback", 42, &r));
+        assert!(!check_receipt(b"secret", "feedback", 42, ""));
+    }
+}

@@ -77,6 +77,9 @@
 - [ ] 有没有改已有的数据库记录结构？
 - [ ] 有没有把密钥或管理员邮箱写进仓库？
 - [ ] `cargo clippy --workspace --all-targets` 是否零警告？`cargo test --workspace` 是否全部通过？
+- [ ] `node scripts/check-web.mjs`（JS 语法、导入的名字是否真的被导出、页面引用的文件是否存在）和 `node scripts/check-rules.mjs`（本文件的硬性规则）是否通过？
+
+以上检查在 GitHub Actions（`.github/workflows/ci.yml`）里对每次推送和 PR 自动运行，没通过的不要合并。`check-rules.mjs` 报「新文件用了网络请求」时，不要为了过检查去改写法，先问负责人；确认只是元数据请求后，由负责人把文件加进 `scripts/allowed-network-code.txt`。
 - [ ] Rust 改了的话，是否按完整部署发布？
 
 违反第 1 条的改动，即使「能用」「有上限」「只是兜底」，也会被直接回退。

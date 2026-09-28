@@ -1,0 +1,18 @@
+# Rust files allowed to use network-fetch / body-streaming APIs (reqwest::, bytes_stream,
+# .bytes(), Body::from_stream, StreamBody, .chunk()). scripts/check-rules.mjs fails CI when any
+# other file uses them, so that a change which could make the server fetch or relay material
+# files (AGENTS.md §1) gets a deliberate review. Adding a line here needs the owner's OK:
+# say in the PR what the new code fetches and why it is not a material file.
+#
+# path                                           why
+crates/xmuhub-core/src/error.rs                  # From<reqwest::Error> conversion only
+crates/xmuhub-core/src/hub/resources.rs          # str::bytes() in time-format validation
+crates/xmuhub-core/src/hub/uploads.rs            # str::bytes() in sha256 hex validation
+crates/xmuhub-core/src/ticket.rs                 # str::bytes() in constant-time comparison
+crates/xmuhub-core/src/storage/github.rs         # GitHub API: metadata, releases, probe file, metadata backups
+crates/xmuhub-core/src/storage/mirrors.rs        # mirror health probe (downloads the 256 KB probe file, discarded)
+crates/xmuhub-core/src/storage/repo_ref.rs       # GitHub API listing of referenced repos (metadata only)
+crates/xmuhub-core/tests/worker_live.rs          # ignored live test of the upload Worker
+crates/xmuhub-server/src/main.rs                 # builds the HTTP clients
+crates/xmuhub-server/src/relay.rs                # the one approved upload relay (AGENTS.md §1)
+crates/xmuhub-server/src/captcha.rs              # Cloudflare Turnstile verification (tiny JSON)

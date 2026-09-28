@@ -6,8 +6,11 @@ layout('me').then((u) => { if (u) location.replace(next()); });
 
 function next() {
   const n = qs.get('next') || '/me';
-  // Only same-site paths, never an absolute URL (open-redirect guard).
-  return n.startsWith('/') && !n.startsWith('//') ? n : '/me';
+  // Only same-origin targets (open-redirect guard); the URL parser handles //host, /\host, tabs etc.
+  try {
+    const u = new URL(n, location.origin);
+    return u.origin === location.origin ? u.pathname + u.search + u.hash : '/me';
+  } catch { return '/me'; }
 }
 
 let mode = qs.get('mode') || 'login';

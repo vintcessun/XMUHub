@@ -144,7 +144,7 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ip: &str, name: &str, a: &Value)
             x["url"] = json!(format!("https://xmu.vintces.icu/r/{}", r.id));
             x
         }
-        "get_download_links" => json!(app.hub.download(v, arg_id(a, "id")?, true).map_err(|e| e.to_string())?),
+        "get_download_links" => json!(app.hub.download(v, arg_id(a, "id")?, Some(ip)).map_err(|e| e.to_string())?),
         "list_recent" | "list_popular" => {
             let limit = a.get("limit").and_then(Value::as_u64).unwrap_or(12).clamp(1, 50) as usize;
             let list = if name == "list_recent" { app.hub.recent(limit) } else { app.hub.popular(limit) };
@@ -231,7 +231,14 @@ async fn handle_one(app: &Arc<App>, auth: &Auth, ip: &str, msg: &Value) -> Optio
     })
 }
 
+/// Calls in one batch request (each can be a search or a lookup).
+const MAX_BATCH: usize = 10;
+
 pub async fn post(State(app): State<Arc<App>>, auth: Auth, h: HeaderMap, body: axum::body::Bytes) -> Response {
+    // Only a personal token identifies the caller here. A browser cookie is ignored: this
+    // endpoint takes plain JSON without the anti-CSRF header, so honouring cookies would let
+    // another page (a sibling subdomain, say) act as a signed-in reviewer.
+    let auth = if auth.session.is_some() { Auth { user: None, session: None } } else { auth };
     let Ok(msg) = serde_json::from_slice::<Value>(&body) else {
         return (StatusCode::BAD_REQUEST, Json(json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": "parse error" } }))).into_response();
     };
@@ -239,7 +246,7 @@ pub async fn post(State(app): State<Arc<App>>, auth: Auth, h: HeaderMap, body: a
     let reply = match &msg {
         Value::Array(batch) => {
             let mut out = Vec::new();
-            for m in batch.iter().take(50) {
+            for m in batch.iter().take(MAX_BATCH) {
                 if let Some(r) = handle_one(&app, &auth, &ip, m).await {
                     out.push(r);
                 }

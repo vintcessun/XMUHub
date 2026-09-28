@@ -1,5 +1,6 @@
 mod alloc;
 mod api;
+mod captcha;
 mod config;
 mod mailer;
 mod mcp;
@@ -176,6 +177,14 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         secure_cookie: cfg.secure_cookie,
         github: github.clone(),
         scans: Default::default(),
+        turnstile: if cfg.turnstile_sitekey.is_empty() || cfg.turnstile_secret.is_empty() {
+            tracing::warn!("Turnstile not configured: uncommon mail domains can sign up without a human check");
+            None
+        } else {
+            // Straight to Cloudflare, never through the GitHub API proxy.
+            let http = reqwest::Client::builder().user_agent("XMUHub/0.1 (+https://xmu.vintces.icu)").build()?;
+            Some(captcha::Turnstile::new(cfg.turnstile_sitekey.clone(), cfg.turnstile_secret.clone(), http))
+        },
     });
     if let Some(gh) = &github {
         transfer::spawn(hub.clone(), gh.clone());

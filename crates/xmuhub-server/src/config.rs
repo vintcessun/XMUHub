@@ -63,6 +63,9 @@ pub struct Config {
     /// Cap on bytes the server relays to GitHub per day (only when no Worker is used).
     pub relay_daily_bytes: u64,
     pub relay_concurrency: usize,
+    /// Cloudflare Turnstile keys (site key is public, secret isn't); both empty = no human check.
+    pub turnstile_sitekey: String,
+    pub turnstile_secret: String,
 }
 
 impl Config {
@@ -113,6 +116,8 @@ impl Config {
             },
             relay_daily_bytes: var_or("RELAY_DAILY_MB", "5120").parse::<u64>()? * 1024 * 1024,
             relay_concurrency: var_or("RELAY_CONCURRENCY", "4").parse()?,
+            turnstile_sitekey: var_or("TURNSTILE_SITEKEY", ""),
+            turnstile_secret: var_or("TURNSTILE_SECRET", ""),
         })
     }
 }

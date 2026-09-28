@@ -10,6 +10,8 @@ const COMMENT_MAX: usize = 500;
 const COMMENT_GAP: i64 = 10;
 const COMMENTS_PER_DAY: usize = 60;
 const FEEDBACK_OPEN_PER_IP: usize = 10;
+/// Unhandled feedback site-wide: past this, new feedback waits until admins catch up.
+const FEEDBACK_OPEN_MAX: usize = 300;
 
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct RatingSummary {
@@ -24,6 +26,8 @@ pub struct CommentView {
     pub nickname: String,
     /// Mirror URLs of the commenter's approved picture (empty = none).
     pub avatar: Vec<String>,
+    /// 「审核员」 / 「管理员」 for staff, so a look-alike nickname can't pass for them.
+    pub role: &'static str,
     pub body: String,
     pub created_at: i64,
     pub mine: bool,
@@ -92,10 +96,17 @@ impl Hub {
             .flatten()
             .filter_map(|id| st.comments.get(id))
             .filter(|c| c.deleted_by.is_none())
+            // A banned account's comments disappear with it (and come back if unbanned).
+            .filter(|c| st.users.get(&c.user).is_some_and(|u| !u.banned))
             .map(|c| CommentView {
                 id: c.id,
                 nickname: st.users.get(&c.user).map(|u| u.nickname.clone()).unwrap_or_default(),
                 avatar: st.avatars.get(&c.user).map(|a| self.picture_urls(&st, &a.current)).unwrap_or_default(),
+                role: match st.users.get(&c.user).map(|u| u.level) {
+                    Some(Level::Admin) => "管理员",
+                    Some(Level::Reviewer) => "审核员",
+                    _ => "",
+                },
                 body: c.body.clone(),
                 created_at: c.created_at,
                 mine: me == Some(c.user),
@@ -154,6 +165,9 @@ impl Hub {
         self.mutate(|st, tx| {
             if st.feedback.values().filter(|f| f.ip == ip && !f.handled).count() >= FEEDBACK_OPEN_PER_IP {
                 return Err(Error::TooMany("你提交的反馈较多，请等待处理".into()));
+            }
+            if st.feedback.values().filter(|f| !f.handled).count() >= FEEDBACK_OPEN_MAX {
+                return Err(Error::TooMany("待处理的反馈太多了，请稍后再提交，或到 QQ 群联系管理员".into()));
             }
             let f = Feedback {
                 id: st.next_id(tx)?,

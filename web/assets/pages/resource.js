@@ -102,7 +102,7 @@ async function loadSocial(me) {
   $('#cbody').oninput = () => store.set(DK, $('#cbody').value.trim() ? $('#cbody').value : null);
   $('#chint').textContent = '';
   $('#clist').innerHTML = (!me ? `<p class="small muted"><a href="${loginUrl()}">登录</a>后可以发表评论</p>` : '') +
-    (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who">${avatar(c.avatar, c.nickname, 24)}<b>${esc(c.nickname)}</b><span class="faint">${ago(c.created_at)}</span>
+    (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who">${avatar(c.avatar, c.nickname, 24)}<b>${esc(c.nickname)}</b>${c.role ? `<span class="badge published">${esc(c.role)}</span>` : ''}<span class="faint">${ago(c.created_at)}</span>
         <span class="grow"></span>${c.can_delete ? '<a href="#" data-del class="small">删除</a>' : ''}</div><div class="text">${esc(c.body)}</div></div>`).join('')
       : '<p class="small faint">还没有评论</p>');
   $('#clist').onclick = async (e) => {

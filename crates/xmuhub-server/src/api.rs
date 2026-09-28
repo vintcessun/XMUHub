@@ -23,7 +23,12 @@ use xmuhub_core::{Error, Hub};
 use crate::mailer::Mailer;
 use crate::web::Site;
 
-pub const SESSION_COOKIE: &str = "xh_sid";
+/// Session cookie. Over HTTPS it carries the `__Host-` prefix: the browser then only takes
+/// it from this exact host (Secure, Path=/, no Domain), so a sibling subdomain can't plant
+/// one to sign a visitor into someone else's account. Plain `xh_sid` is what local HTTP
+/// development uses, and is still read so sessions made before the switch keep working.
+pub const SESSION_COOKIE: &str = "__Host-xh_sid";
+const LEGACY_SESSION_COOKIE: &str = "xh_sid";
 /// Non-GET API calls must carry this header. Browsers never attach custom headers to
 /// cross-site form posts, so together with SameSite=Lax cookies it stops CSRF.
 pub const CSRF_HEADER: &str = "x-xmuhub";
@@ -41,6 +46,8 @@ pub struct App {
     pub github: Option<Arc<xmuhub_core::storage::github::GitHubBackend>>,
     /// Repository scans awaiting the admin's mapping, by scan id.
     pub scans: parking_lot::Mutex<std::collections::HashMap<String, xmuhub_core::storage::github::RepoScan>>,
+    /// Human check for sign-ups from uncommon mail domains (None = not configured).
+    pub turnstile: Option<crate::captcha::Turnstile>,
 }
 
 type S = State<Arc<App>>;
@@ -138,7 +145,7 @@ impl FromRequestParts<Arc<App>> for Auth {
             }
             return Ok(Auth { user: app.hub.token_user(given), session: None });
         }
-        let session = cookie_value(&parts.headers, SESSION_COOKIE).map(str::to_string);
+        let session = cookie_value(&parts.headers, SESSION_COOKIE).or_else(|| cookie_value(&parts.headers, LEGACY_SESSION_COOKIE)).map(str::to_string);
         let user = session.as_deref().and_then(|s| app.hub.session_user(s));
         Ok(Auth { user, session })
     }
@@ -148,24 +155,43 @@ fn constant_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// Client IP as seen by the reverse proxy (we only ever listen on loopback).
+/// The visitor's address as nginx saw it (X-Real-IP, which nginx sets itself and takes
+/// from Cloudflare only for Cloudflare's own ranges). X-Forwarded-For is never trusted: its
+/// first entry is whatever the client wrote. We only ever listen on loopback.
+pub fn real_ip(h: &HeaderMap) -> String {
+    h.get("x-real-ip").and_then(|v| v.to_str().ok()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "local".into())
+}
+
+/// The key per-visitor limits count by: the IPv4 address, or the /64 an IPv6 address is in
+/// (one household or phone gets a whole /64 and can hop inside it freely).
 pub fn client_ip(h: &HeaderMap) -> String {
-    h.get("x-real-ip")
-        .or_else(|| h.get("x-forwarded-for"))
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "local".into())
+    let ip = real_ip(h);
+    match ip.parse::<std::net::Ipv6Addr>() {
+        Ok(v6) if v6.to_ipv4_mapped().is_none() => {
+            let s = v6.segments();
+            format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+        }
+        _ => ip,
+    }
 }
 
 fn session_cookie(app: &App, secret: &str, max_age: i64) -> HeaderValue {
-    let secure = if app.secure_cookie { "; Secure" } else { "" };
-    HeaderValue::from_str(&format!("{SESSION_COOKIE}={secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")).unwrap()
+    // `__Host-` cookies must be Secure, which plain-HTTP development can't set.
+    let (name, secure) = if app.secure_cookie { (SESSION_COOKIE, "; Secure") } else { (LEGACY_SESSION_COOKIE, "") };
+    HeaderValue::from_str(&format!("{name}={secret}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")).unwrap()
+}
+
+/// Clears a pre-`__Host-` session cookie (sent alongside a new one, and on sign-out).
+fn legacy_cookie_gone() -> HeaderValue {
+    HeaderValue::from_static("xh_sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
 }
 
 fn with_session(app: &App, secret: &str, body: Value) -> Response {
     let mut res = Json(body).into_response();
     res.headers_mut().insert(header::SET_COOKIE, session_cookie(app, secret, xmuhub_core::hub::SESSION_TTL));
+    if app.secure_cookie {
+        res.headers_mut().append(header::SET_COOKIE, legacy_cookie_gone());
+    }
     res
 }
 
@@ -385,18 +411,31 @@ struct CodeIn {
     email: String,
     #[serde(default)]
     purpose: String,
+    /// Turnstile token, for sign-ups that need a human check.
+    #[serde(default)]
+    captcha: String,
 }
 
-async fn send_code(State(app): S, h: HeaderMap, Json(b): Json<CodeIn>) -> R<Json<Value>> {
-    let mailer = app.mailer.as_ref().ok_or_else(|| bad("站点暂未开放邮件验证，请联系管理员"))?;
+async fn send_code(State(app): S, h: HeaderMap, Json(b): Json<CodeIn>) -> R<Response> {
     let purpose = if b.purpose == "reset" { CodePurpose::Reset } else { CodePurpose::Register };
+    // Signing up with an uncommon mail domain (or a +alias) takes a human check first; the
+    // answer names the site key so the page can show the widget and ask again.
+    if purpose == CodePurpose::Register
+        && let Some(t) = &app.turnstile
+        && xmuhub_core::hub::normalize_email(&b.email).is_ok_and(|e| xmuhub_core::hub::needs_captcha(&e))
+        && !t.verify(&b.captcha, &real_ip(&h)).await
+    {
+        let msg = if b.captcha.is_empty() { "用这个邮箱注册需要先完成人机验证" } else { "人机验证没有通过，请再试一次" };
+        return Ok((StatusCode::BAD_REQUEST, Json(json!({ "error": msg, "captcha": t.sitekey }))).into_response());
+    }
+    let mailer = app.mailer.as_ref().ok_or_else(|| bad("站点暂未开放邮件验证，请联系管理员"))?;
     let (email, code) = app.hub.request_code(&b.email, purpose, &client_ip(&h))?;
     if let Err(e) = mailer.send_code(&email, &code, if purpose == CodePurpose::Reset { "reset" } else { "register" }).await {
         tracing::warn!("send code to {email}: {e}");
         app.hub.cancel_code(&email, purpose);
         return Err(ApiError(Error::Upstream("验证码邮件发送失败，请稍后重试".into())));
     }
-    Ok(Json(json!({ "sent": true })))
+    Ok(Json(json!({ "sent": true })).into_response())
 }
 
 #[derive(Deserialize)]
@@ -434,6 +473,7 @@ async fn logout(State(app): S, auth: Auth) -> R<Response> {
     }
     let mut res = Json(json!({ "ok": true })).into_response();
     res.headers_mut().insert(header::SET_COOKIE, session_cookie(&app, "", 0));
+    res.headers_mut().append(header::SET_COOKIE, legacy_cookie_gone());
     Ok(res)
 }
 
@@ -655,7 +695,9 @@ async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<V
     };
     let page = q.page.as_deref().and_then(|p| p.trim().parse::<usize>().ok()).unwrap_or(1).clamp(1, 50);
     let v = auth.viewer();
-    let (items, total) = app.hub.search(v, q.q.as_deref().unwrap_or(""), filter, PAGE, (page - 1) * PAGE)?;
+    // Off the two async worker threads: a search takes CPU time.
+    let (hub, user, text) = (app.hub.clone(), auth.user.clone(), q.q.clone().unwrap_or_default());
+    let (items, total) = blocking(move || hub.search(Viewer { user: user.as_ref() }, &text, filter, PAGE, (page - 1) * PAGE)).await?;
     let items: Vec<Value> = items
         .iter()
         .map(|i| match i {
@@ -808,9 +850,10 @@ struct PlanQ {
 /// `?peek=1` is for in-page previews: not counted as a download, and each part lists the
 /// mirrors that allow cross-origin reads. File bytes never pass through this server (see
 /// AGENTS.md): if no mirror is readable, the page says so and offers the download instead.
-async fn download_plan(State(app): S, auth: Auth, Path(id): Path<Id>, Query(q): Query<PlanQ>) -> R<Json<Value>> {
+async fn download_plan(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<Id>, Query(q): Query<PlanQ>) -> R<Json<Value>> {
     let peek = matches!(q.peek.as_deref(), Some("1" | "true"));
-    let plan = app.hub.download(auth.viewer(), id, !peek)?;
+    let who = client_ip(&h);
+    let plan = app.hub.download(auth.viewer(), id, (!peek).then_some(who.as_str()))?;
     let mut v = json!(plan);
     if peek {
         for (i, p) in plan.parts.iter().enumerate() {
@@ -930,8 +973,8 @@ async fn resource_reviews(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Js
 }
 
 /// Plain link for sharing / wget: 302 to the best mirror of a single-part file.
-async fn download_redirect(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Response> {
-    let plan = app.hub.download(auth.viewer(), id, true)?;
+async fn download_redirect(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<Id>) -> R<Response> {
+    let plan = app.hub.download(auth.viewer(), id, Some(&client_ip(&h)))?;
     if plan.parts.len() != 1 {
         // Multi-part files need the page to stitch them together.
         return Ok(Redirect::to(&format!("/r/{id}")).into_response());

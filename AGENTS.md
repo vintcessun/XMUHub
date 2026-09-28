@@ -54,6 +54,7 @@
 
 - 纯静态网页 + ES module，**没有构建步骤**，不要引入 npm 构建、打包器、框架。
 - 第三方库放在 `web/vendor/<名字>-<版本>/`，固定版本、核对 npm 的 sha512，不要从运行时 CDN 加载。
+  唯一的例外是注册页的 Cloudflare Turnstile（`challenges.cloudflare.com/turnstile/v0/api.js`）：它按设计只能从 Cloudflare 加载，只在用非常用邮箱注册、服务器要求人机验证时才加载，负责人同意过。
 
 ## 6.5 代码质量：Clippy 零警告
 

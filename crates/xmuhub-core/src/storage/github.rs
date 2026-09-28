@@ -54,10 +54,11 @@ pub fn parse_repo_url(s: &str) -> Result<(String, String, Option<String>)> {
     let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
     let rest = rest.strip_prefix("github.com/").or_else(|| rest.strip_prefix("www.github.com/")).unwrap_or(rest);
     let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
-    let ok = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    // `..` would step out of the API path the parts are pasted into.
+    let ok = |p: &str| !p.is_empty() && !p.contains("..") && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
     match parts.as_slice() {
         [o, r] if ok(o) && ok(r) => Ok((o.to_string(), r.to_string(), None)),
-        [o, r, "tree", b, ..] if ok(o) && ok(r) => Ok((o.to_string(), r.to_string(), Some(b.to_string()))),
+        [o, r, "tree", b, ..] if ok(o) && ok(r) && !b.contains("..") => Ok((o.to_string(), r.to_string(), Some(b.to_string()))),
         _ => Err(bad("请输入 GitHub 仓库地址，例如 https://github.com/owner/repo")),
     }
 }

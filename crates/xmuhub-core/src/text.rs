@@ -179,7 +179,7 @@ pub fn auto_subtitle(original: &str, generated_stem: &str) -> String {
     static JUNK: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)^(img|dsc|dcim|scan|screenshot|mmexport|wx_camera|photo|image|video|pxl|vid|微信图片|屏幕截图|截图|扫描全能王|新建|未命名|无标题|untitled|document|文档|副本|download|file)[\s_\-\d]*").unwrap()
     });
-    static PRIVATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"勿外传|仅内部|内部资料|密码|(?:^|\D)1[3-9]\d{9}(?:\D|$)|@").unwrap());
+    static PRIVATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"勿外传|仅内部|内部资料|密码|(?:^|\D)1[3-9]\d{9}(?:\D|$)|@|\d{10,}").unwrap());
     let last = original.rsplit(['/', '\\']).next().unwrap_or(original);
     let stem = match last.rsplit_once('.') {
         Some((s, e)) if e.len() <= 5 && e.chars().all(|c| c.is_ascii_alphanumeric()) => s,

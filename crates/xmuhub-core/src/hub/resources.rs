@@ -190,7 +190,15 @@ impl Hub {
                 .unwrap_or_default();
             // 「待整理」 files always wait for a reviewer to sort them, whoever uploads them.
             let inbox = st.inbox == Some(node);
-            let status = if inbox { Status::Pending } else { status_override.unwrap_or(if me.level.publishes_directly() { Status::Published } else { Status::Pending }) };
+            // Re-uploading the exact bytes of a file that was taken down or rejected (an instant
+            // "upload" by hash) must not bring it back past review.
+            let revived = st.resources.values().any(|x| x.blob == up.key && matches!(x.status, Status::Removed | Status::Rejected))
+                && !st.resources.values().any(|x| x.blob == up.key && matches!(x.status, Status::Published | Status::Pending));
+            let status = if inbox || (revived && !staff) {
+                Status::Pending
+            } else {
+                status_override.unwrap_or(if me.level.publishes_directly() { Status::Published } else { Status::Pending })
+            };
             let r = Resource {
                 id: st.next_id(tx)?,
                 node,
@@ -205,7 +213,7 @@ impl Hub {
                 size: up.size,
                 mime: up.mime.clone(),
                 status,
-                needs_review: me.level == Level::Trusted && !inbox,
+                needs_review: me.level == Level::Trusted && status == Status::Published,
                 review_note: String::new(),
                 uploader: me.id,
                 reviewed_by: None,
@@ -254,6 +262,11 @@ impl Hub {
             if name.base() == r.name.base() && node == r.node && extras.version.is_none() {
                 name.version = r.name.version;
             }
+            // Saving without changing anything: no new review round, no log entry.
+            let same_subtitle = input.subtitle.as_deref().is_none_or(|s| clean(s, 80) == st.subtitle(&r));
+            if !staff && node == r.node && name == r.name && tag == r.tag && same_subtitle {
+                return Ok((r, old_node));
+            }
             r.node = node;
             r.name = name;
             r.tag = tag;
@@ -264,6 +277,11 @@ impl Hub {
             r.updated_at = now();
             if let Some(sub) = &input.subtitle {
                 Self::set_subtitle(st, tx, &r, sub)?;
+            }
+            // A file moved into 「待整理」 waits to be sorted, whoever moved it.
+            if st.inbox == Some(node) && r.status == Status::Published {
+                r.status = Status::Pending;
+                r.needs_review = false;
             }
             if !staff {
                 // An edited published file is checked again, by the same rule as a new upload:
@@ -630,7 +648,10 @@ impl Hub {
     // ---------------------------------------------------------------- downloads
 
     /// Download plan. `count` = false for previews, which don't bump the counter.
-    pub fn download(&self, viewer: Viewer, id: Id, count: bool) -> Result<DownloadPlan> {
+    /// The mirrors for a file. `counter` (the visitor's IP or /64, or a user) makes it count
+    /// as a download, once per visitor per file per day, so the 「下载最多」 list can't be
+    /// pushed up by fetching one link in a loop. `None` (previews) doesn't count.
+    pub fn download(&self, viewer: Viewer, id: Id, counter: Option<&str>) -> Result<DownloadPlan> {
         let plan = {
             let st = self.st.read();
             let r = st
@@ -650,11 +671,21 @@ impl Hub {
                     .collect(),
             }
         };
-        if count {
-            if let Some(r) = self.st.write().resources.get_mut(&id) {
-                r.downloads += 1;
+        if let Some(who) = counter {
+            let day = now() / 86400;
+            let first = {
+                let mut seen = self.download_seen.lock();
+                if seen.len() > 200_000 {
+                    seen.retain(|_, d| *d == day);
+                }
+                seen.insert((id, who.to_string()), day) != Some(day)
+            };
+            if first {
+                if let Some(r) = self.st.write().resources.get_mut(&id) {
+                    r.downloads += 1;
+                }
+                self.dirty_downloads.lock().insert(id);
             }
-            self.dirty_downloads.lock().insert(id);
         }
         Ok(plan)
     }
@@ -737,7 +768,7 @@ mod change_request_tests {
         let remove = h.request_resource_change(mine, 5, "delete", "内容有误").unwrap();
         h.review_resource_change(staff, remove.id, true, "").unwrap();
         assert_eq!(h.resource(mine, 5).unwrap().0.status, Status::Removed);
-        assert!(matches!(h.download(mine, 5, false), Err(Error::NotFound("资料"))));
+        assert!(matches!(h.download(mine, 5, None), Err(Error::NotFound("资料"))));
         assert!(h.request_resource_change(mine, 5, "note", "再改").is_err());
         drop(h);
         drop(db);

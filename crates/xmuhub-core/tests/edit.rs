@@ -95,10 +95,18 @@ async fn uploader_edits_go_back_to_review() {
     assert!(h.update_resource(Viewer { user: Some(&trusted) }, id, input(course2, "2023"), AdminExtras::default()).is_err());
     // ...but nothing is ever deleted: rejected and removed files both come back intact.
     h.review(staff, id, "restore", "").unwrap();
-    assert!(h.download(staff, id, false).is_ok());
+    assert!(h.download(staff, id, None).is_ok());
     h.review(staff, id, "remove", "").unwrap();
     h.review(staff, id, "restore", "").unwrap();
-    assert!(h.download(staff, id, false).is_ok());
+    assert!(h.download(staff, id, None).is_ok());
+
+    // One visitor fetching the same file again the same day counts once.
+    let before = h.resource(staff, id).unwrap().0.downloads;
+    for _ in 0..3 {
+        h.download(staff, id, Some("1.2.3.4")).unwrap();
+    }
+    h.download(staff, id, Some("5.6.7.8")).unwrap();
+    assert_eq!(h.resource(staff, id).unwrap().0.downloads, before + 2);
 
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);

@@ -34,20 +34,57 @@ function tick() {
   else { b.disabled = false; b.textContent = '获取验证码'; }
 }
 
-$('#sendcode').onclick = async () => {
+// Signing up with an uncommon mail domain takes a Cloudflare Turnstile check first: the
+// server answers with its site key, the widget appears, and passing it sends the code.
+let captchaToken = '';
+let captchaWidget = null;
+function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = () => resolve(window.turnstile);
+    s.onerror = () => reject(new Error('人机验证加载失败，请检查网络后刷新重试'));
+    document.head.appendChild(s);
+  });
+}
+async function showCaptcha(sitekey) {
+  $('#captchabox').hidden = false;
+  const ts = await loadTurnstile();
+  if (captchaWidget !== null) { ts.reset(captchaWidget); return; }
+  captchaWidget = ts.render('#captcha', {
+    sitekey,
+    language: 'zh-cn',
+    callback: (token) => { captchaToken = token; sendCode(); },
+    'expired-callback': () => { captchaToken = ''; },
+    'error-callback': () => { captchaToken = ''; },
+  });
+}
+
+async function sendCode() {
   const email = $('#email').value.trim();
   if (!email) return toast('请先填写邮箱', true);
   $('#sendcode').disabled = true;
   try {
-    await api('/auth/code', { method: 'POST', body: { email, purpose: mode === 'reset' ? 'reset' : 'register' } });
+    await api('/auth/code', { method: 'POST', body: { email, purpose: mode === 'reset' ? 'reset' : 'register', captcha: captchaToken } });
     toast('验证码已发送，请查收邮件（也看看垃圾箱）');
+    $('#captchabox').hidden = true;
     cooldown = 60;
     tick();
   } catch (e) {
-    toast(e.message, true);
     $('#sendcode').disabled = false;
+    // A token works once: a new attempt needs a fresh check.
+    captchaToken = '';
+    if (e.data && e.data.captcha) {
+      try { await showCaptcha(e.data.captcha); } catch (err) { toast(err.message, true); }
+      if (!e.message.includes('需要先完成')) toast(e.message, true);
+      return;
+    }
+    toast(e.message, true);
   }
-};
+}
+$('#sendcode').onclick = sendCode;
 
 $('#f').onsubmit = async (e) => {
   e.preventDefault();

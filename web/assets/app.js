@@ -7,7 +7,8 @@ export const store = {
 };
 
 export class ApiError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+  /** `data`: the whole JSON error body (some carry more than the message, e.g. `captcha`). */
+  constructor(status, message, data = null) { super(message); this.status = status; this.data = data; }
 }
 
 // API calls in flight; a page switch waits for them so the new page shows up already filled in.
@@ -50,7 +51,7 @@ async function request(path, method, headers, body, signal) {
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
-  if (!res.ok) throw new ApiError(res.status, (data && data.error) || `请求失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new ApiError(res.status, (data && data.error) || `请求失败（HTTP ${res.status}）`, data);
   return data;
 }
 

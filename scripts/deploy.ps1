@@ -6,7 +6,7 @@
 .DESCRIPTION
     前置：先运行 scripts/build-alinux3.ps1 生成 `run`。密钥读自 .secrets/*.env（不入库）：
       .secrets/github.env      GH_STORE_USER, GH_STORE_TOKEN
-      .secrets/cloudflare.env  CF_ACCOUNT_ID, CF_API_TOKEN
+      .secrets/cloudflare.env  CF_ACCOUNT_ID, CF_API_TOKEN, CF_UPLOAD_DOMAIN, TURNSTILE_SITEKEY, TURNSTILE_SECRET
       .secrets/upload.env      UPLOAD_TICKET_SECRET, UPLOAD_WORKER_NAME
 
     步骤：
@@ -193,6 +193,8 @@ UPLOAD_WORKER_URL=$UploadWorkerUrl
 RELAY_DAILY_MB=5120
 RELAY_CONCURRENCY=4
 UPLOAD_TICKET_SECRET=$($up.UPLOAD_TICKET_SECRET)
+TURNSTILE_SITEKEY=$($cf.TURNSTILE_SITEKEY)
+TURNSTILE_SECRET=$($cf.TURNSTILE_SECRET)
 XMUHUB_SCRIPT_TOKEN=$($up.XMUHUB_SCRIPT_TOKEN)
 XMUHUB_ADMINS_FILE=$RemoteBase/admins.txt
 SMTP_HOST=$($mail.SMTP_HOST)

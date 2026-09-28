@@ -28,7 +28,7 @@ use crate::model::*;
 use crate::search::{DocType, Placement, Search};
 use crate::storage::Storage;
 
-pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL};
+pub use accounts::{CodePurpose, Registration, SESSION_TTL, SYSTEM_EMAIL, needs_captcha, normalize_email};
 pub use avatars::{AVATAR_MAX_BYTES, PendingAvatar};
 pub use inbox::INBOX_NAME;
 pub use imports::{DOC_EXTS, ImportReport, Unpersisted, group_of, is_doc};
@@ -41,6 +41,10 @@ pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
 
 const SEQ_KEY: &str = "seq";
+/// Longest search query looked at (characters); the rest is ignored.
+pub const SEARCH_MAX_CHARS: usize = 64;
+/// The home page's counters are recomputed at most this often (seconds).
+const STATS_TTL: i64 = 60;
 /// Id of the hidden 「待整理」 node (see inbox.rs), once created.
 const INBOX_KEY: &str = "inbox_node";
 
@@ -385,6 +389,10 @@ pub struct Hub {
     /// user id → (day, files, bytes)
     quota: Mutex<HashMap<Id, (i64, u32, u64)>>,
     dirty_downloads: Mutex<HashSet<Id>>,
+    /// (resource, visitor) → day it was last counted as a download
+    download_seen: Mutex<HashMap<(Id, String), i64>>,
+    /// (computed at, value) of `stats()`, which walks every resource and blob
+    stats_cache: Mutex<Option<(i64, Stats)>>,
     auth: accounts::AuthState,
 }
 
@@ -400,6 +408,8 @@ impl Hub {
             writer: Mutex::new(()),
             quota: Mutex::new(HashMap::new()),
             dirty_downloads: Mutex::new(HashSet::new()),
+            download_seen: Mutex::new(HashMap::new()),
+            stats_cache: Mutex::new(None),
             auth: accounts::AuthState::new(Vec::new()),
         };
         hub.set_admins(admins)?;
@@ -535,7 +545,20 @@ impl Hub {
         }
     }
 
+    /// Site counters for the home page (served from a cache refreshed every `STATS_TTL`).
     pub fn stats(&self) -> Stats {
+        let now = now();
+        if let Some((at, s)) = &*self.stats_cache.lock()
+            && now - at < STATS_TTL
+        {
+            return s.clone();
+        }
+        let s = self.compute_stats();
+        *self.stats_cache.lock() = Some((now, s.clone()));
+        s
+    }
+
+    fn compute_stats(&self) -> Stats {
         let st = self.st.read();
         Stats {
             nodes: st.nodes.values().filter(|n| {
@@ -554,7 +577,10 @@ impl Hub {
     }
 
     pub fn search(&self, viewer: Viewer, q: &str, filter: crate::search::Filter, limit: usize, offset: usize) -> Result<(Vec<SearchItem>, usize)> {
-        let (hits, total) = self.search.search(q, filter, limit, offset)?;
+        // Course names and keywords are short; a pasted page of text would only turn into
+        // thousands of search terms (and CPU time) for nothing.
+        let q: String = q.chars().take(SEARCH_MAX_CHARS).collect();
+        let (hits, total) = self.search.search(&q, filter, limit, offset)?;
         let st = self.st.read();
         let path_of = |id: Id| -> Vec<Node> { st.ancestors(id).iter().filter_map(|a| st.nodes.get(a).cloned()).collect() };
         let items = hits

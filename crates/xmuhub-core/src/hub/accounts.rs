@@ -20,8 +20,39 @@ const CODE_COOLDOWN: i64 = 60;
 const CODE_MAX_ATTEMPTS: u32 = 5;
 const CODES_PER_EMAIL_DAY: u32 = 10;
 const CODES_PER_IP_HOUR: u32 = 20;
+/// Whole site, per day: keeps a flood of sign-ups from using up the mail service's quota.
+const CODES_PER_DAY: u32 = 600;
 const LOGIN_FAILS_WINDOW: i64 = 15 * 60;
 const LOGIN_FAILS_MAX: u32 = 8;
+/// Successful sign-ins per account per hour (each one makes a session).
+const LOGINS_PER_HOUR: u32 = 30;
+/// Sessions kept per account; signing in again drops the oldest.
+const SESSIONS_PER_USER: usize = 20;
+/// Password hashes computed at once. Each takes ~20 MB and a blocking thread for a moment;
+/// more than this means someone is hammering the sign-in form.
+const HASHES_AT_ONCE: u32 = 3;
+/// In-memory counters are pruned of stale entries once they grow past this.
+const COUNTER_CAP: usize = 20_000;
+
+/// Mail providers people actually use, plus the university's own. Signing up with any
+/// other domain (or a `+tag` alias) needs a human check first (Cloudflare Turnstile).
+const COMMON_EMAIL_DOMAINS: &[&str] = &[
+    "qq.com", "vip.qq.com", "foxmail.com", "163.com", "vip.163.com", "126.com", "vip.126.com", "yeah.net", "188.com",
+    "sina.com", "sina.cn", "vip.sina.com", "sohu.com", "139.com", "189.cn", "wo.cn", "aliyun.com", "88.com",
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "live.cn", "msn.com", "icloud.com",
+    "me.com", "mac.com", "yahoo.com", "proton.me", "protonmail.com",
+    "xmu.edu.cn", "stu.xmu.edu.cn",
+];
+
+/// Whether signing up with `email` (already normalized) needs a human check first.
+pub fn needs_captcha(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else { return true };
+    let common = COMMON_EMAIL_DOMAINS.contains(&domain) || domain.ends_with(".xmu.edu.cn");
+    !common || local.contains('+')
+}
+
+/// Names nobody but staff may pick: they would pass for the site or its staff.
+const RESERVED_NICKNAMES: &[&str] = &["管理员", "审核员", "站长", "官方", "鹭岛书阁", "客服", "admin", "administrator", "moderator", "system", "xmuhub"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodePurpose {
@@ -49,6 +80,28 @@ pub(super) struct AuthState {
     per_ip: Mutex<HashMap<String, (i64, u32)>>,
     /// email or ip → (window start, failures)
     fails: Mutex<HashMap<String, (i64, u32)>>,
+    /// (day, codes sent site-wide)
+    per_day: Mutex<(i64, u32)>,
+    /// user → (hour, successful sign-ins)
+    logins: Mutex<HashMap<Id, (i64, u32)>>,
+    /// password hashes being computed right now
+    hashing: Mutex<u32>,
+}
+
+/// Holds one of the `HASHES_AT_ONCE` slots while a password hash is computed.
+struct HashSlot<'a>(&'a Mutex<u32>);
+impl Drop for HashSlot<'_> {
+    fn drop(&mut self) {
+        *self.0.lock() -= 1;
+    }
+}
+
+/// Drops entries whose window is over once a counter map gets big (keys are client IPs,
+/// emails …, so an attacker could otherwise grow it without bound).
+fn prune<K: std::hash::Hash + Eq, V>(m: &mut HashMap<K, V>, live: impl Fn(&V) -> bool) {
+    if m.len() > COUNTER_CAP {
+        m.retain(|_, v| live(v));
+    }
 }
 
 impl AuthState {
@@ -59,7 +112,19 @@ impl AuthState {
             per_email: Mutex::new(HashMap::new()),
             per_ip: Mutex::new(HashMap::new()),
             fails: Mutex::new(HashMap::new()),
+            per_day: Mutex::new((0, 0)),
+            logins: Mutex::new(HashMap::new()),
+            hashing: Mutex::new(0),
         }
+    }
+
+    fn hash_slot(&self) -> Result<HashSlot<'_>> {
+        let mut n = self.hashing.lock();
+        if *n >= HASHES_AT_ONCE {
+            return Err(Error::TooMany("登录的人太多了，请稍后再试".into()));
+        }
+        *n += 1;
+        Ok(HashSlot(&self.hashing))
     }
 
     fn too_many_fails(&self, keys: &[&str]) -> bool {
@@ -71,6 +136,7 @@ impl AuthState {
     fn record_fail(&self, keys: &[&str]) {
         let now = now();
         let mut f = self.fails.lock();
+        prune(&mut f, |(start, _)| now - start < LOGIN_FAILS_WINDOW);
         for k in keys {
             let e = f.entry(k.to_string()).or_insert((now, 0));
             if now - e.0 >= LOGIN_FAILS_WINDOW {
@@ -82,6 +148,16 @@ impl AuthState {
 
     fn clear_fails(&self, key: &str) {
         self.fails.lock().remove(key);
+    }
+
+    /// Takes back a failure counted ahead of a check that then succeeded.
+    fn unrecord_fail(&self, keys: &[&str]) {
+        let mut f = self.fails.lock();
+        for k in keys {
+            if let Some(e) = f.get_mut(*k) {
+                e.1 = e.1.saturating_sub(1);
+            }
+        }
     }
 }
 
@@ -138,11 +214,15 @@ fn verify_password(p: &str, phc: &str) -> bool {
     PasswordHash::new(phc).is_ok_and(|h| Argon2::default().verify_password(p.as_bytes(), &h).is_ok())
 }
 
-fn clean_nickname(n: &str) -> Result<String> {
+fn clean_nickname(n: &str, staff: bool) -> Result<String> {
     let n = clean(n, 20);
     // Single-character nicknames are fine (澈); only whitespace-only is rejected.
     if n.is_empty() {
         return Err(bad("请填写昵称"));
+    }
+    let folded: String = n.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
+    if !staff && RESERVED_NICKNAMES.iter().any(|r| folded.contains(r)) {
+        return Err(bad("这个昵称容易被误认为本站或工作人员，换一个吧"));
     }
     Ok(n)
 }
@@ -150,7 +230,8 @@ fn clean_nickname(n: &str) -> Result<String> {
 impl Hub {
     // ------------------------------------------------------------ verification codes
 
-    /// Issues a 6-digit code for `email` and returns it for the caller to mail.
+    /// Issues a 6-digit code for `email` and returns it for the caller to mail. The caller
+    /// checks the human test (`needs_captcha`) before this for sign-ups that need one.
     pub fn request_code(&self, email: &str, purpose: CodePurpose, ip: &str) -> Result<(String, String)> {
         let email = normalize_email(email)?;
         let exists = self.st.read().user_by_email.contains_key(&email);
@@ -167,8 +248,16 @@ impl Hub {
             return Err(Error::TooMany(format!("请 {} 秒后再获取验证码", CODE_COOLDOWN - (now - c.sent_at))));
         }
         {
+            let day = now / 86400;
+            let d = a.per_day.lock();
+            if d.0 == day && d.1 >= CODES_PER_DAY {
+                return Err(Error::TooMany("今天发出的验证码已经太多了，请明天再来，或联系管理员".into()));
+            }
+        }
+        {
             let hour = now / 3600;
             let mut m = a.per_ip.lock();
+            prune(&mut m, |(h, _)| *h == hour);
             let e = m.entry(ip.to_string()).or_insert((hour, 0));
             if e.0 != hour {
                 *e = (hour, 0);
@@ -181,6 +270,7 @@ impl Hub {
         {
             let day = now / 86400;
             let mut m = a.per_email.lock();
+            prune(&mut m, |(d, _)| *d == day);
             let e = m.entry(email.clone()).or_insert((day, 0));
             if e.0 != day {
                 *e = (day, 0);
@@ -190,8 +280,18 @@ impl Hub {
             }
             e.1 += 1;
         }
+        {
+            let day = now / 86400;
+            let mut d = a.per_day.lock();
+            if d.0 != day {
+                *d = (day, 0);
+            }
+            d.1 += 1;
+        }
         let code = format!("{:06}", u32::from_le_bytes(rand::random::<[u8; 4]>()) % 1_000_000);
-        a.codes.lock().insert((email.clone(), purpose), Code { hash: sha(&code), expires: now + CODE_TTL, sent_at: now, attempts: 0 });
+        let mut codes = a.codes.lock();
+        prune(&mut codes, |c| c.expires > now);
+        codes.insert((email.clone(), purpose), Code { hash: sha(&code), expires: now + CODE_TTL, sent_at: now, attempts: 0 });
         Ok((email, code))
     }
 
@@ -223,6 +323,15 @@ impl Hub {
     // ------------------------------------------------------------ sessions
 
     fn new_session(st: &mut State, tx: &Tx, user: Id, ip: &str) -> Result<String> {
+        // Keep the newest few per account: signing in in a loop can't pile sessions up.
+        let mut mine: Vec<(i64, [u8; 32])> = st.sessions.values().filter(|s| s.user == user).map(|s| (s.created_at, s.hash)).collect();
+        if mine.len() >= SESSIONS_PER_USER {
+            mine.sort_unstable();
+            for (_, h) in &mine[..=mine.len() - SESSIONS_PER_USER] {
+                st.sessions.remove(h);
+                tx.del_session(h)?;
+            }
+        }
         let secret = hex::encode(rand::random::<[u8; 32]>());
         let s = Session { hash: sha(&secret), user, created_at: now(), expires_at: now() + SESSION_TTL, ip: clean(ip, 64) };
         tx.put_session(&s)?;
@@ -288,13 +397,17 @@ impl Hub {
     pub fn register(&self, r: Registration, ip: &str) -> Result<(String, User)> {
         let email = normalize_email(&r.email)?;
         check_password(&r.password)?;
-        let nickname = clean_nickname(&r.nickname)?;
+        // Someone on the admin list is staff from the start and may use a staff-looking name.
+        let level = self.role_for(&email, Level::Contributor);
+        let nickname = clean_nickname(&r.nickname, level >= Level::Reviewer)?;
         if self.st.read().user_by_email.contains_key(&email) {
             return Err(Error::Conflict("这个邮箱已经注册过了".into()));
         }
         self.take_code(&email, CodePurpose::Register, &r.code)?;
-        let password = hash_password(&r.password)?;
-        let level = self.role_for(&email, Level::Contributor);
+        let password = {
+            let _slot = self.auth.hash_slot()?;
+            hash_password(&r.password)?
+        };
         self.mutate(|st, tx| {
             if st.user_by_email.contains_key(&email) {
                 return Err(Error::Conflict("这个邮箱已经注册过了".into()));
@@ -323,6 +436,10 @@ impl Hub {
         if self.auth.too_many_fails(&[&email, &ip_key]) {
             return Err(Error::TooMany("登录失败次数太多，请 15 分钟后再试或找回密码".into()));
         }
+        let slot = self.auth.hash_slot()?;
+        // Counted before the (slow) check and taken back on success, so a burst of guesses
+        // can't all get past the limit while their hashes are still being computed.
+        self.auth.record_fail(&[&email, &ip_key]);
         let user = {
             let st = self.st.read();
             st.user_by_email.get(&email).and_then(|id| st.users.get(id).cloned())
@@ -337,14 +454,28 @@ impl Hub {
                 false
             }
         };
+        drop(slot);
         let Some(user) = user.filter(|_| ok) else {
-            self.auth.record_fail(&[&email, &ip_key]);
             return Err(bad("邮箱或密码不正确"));
         };
+        self.auth.unrecord_fail(&[&ip_key]);
         if user.banned {
             return Err(Error::Forbidden);
         }
         self.auth.clear_fails(&email);
+        {
+            let hour = now() / 3600;
+            let mut m = self.auth.logins.lock();
+            prune(&mut m, |(h, _)| *h == hour);
+            let e = m.entry(user.id).or_insert((hour, 0));
+            if e.0 != hour {
+                *e = (hour, 0);
+            }
+            if e.1 >= LOGINS_PER_HOUR {
+                return Err(Error::TooMany("这个账号登录太频繁了，请稍后再试".into()));
+            }
+            e.1 += 1;
+        }
         let level = self.role_for(&email, user.level);
         self.mutate(|st, tx| {
             let mut u = st.users[&user.id].clone();
@@ -373,29 +504,48 @@ impl Hub {
         Ok(())
     }
 
+    /// Revokes every personal API token of `user` (after a password change or reset: a token
+    /// made by whoever had the old password must stop working too).
+    fn drop_tokens(st: &mut State, tx: &Tx, user: Id) -> Result<()> {
+        let doomed: Vec<Id> = st.tokens.values().filter(|t| t.user == user).map(|t| t.id).collect();
+        for id in doomed {
+            if let Some(t) = st.tokens.remove(&id) {
+                st.token_by_hash.remove(&t.hash);
+            }
+            tx.del_token(id)?;
+        }
+        Ok(())
+    }
+
     pub fn reset_password(&self, email: &str, code: &str, password: &str, ip: &str) -> Result<(String, User)> {
         let email = normalize_email(email)?;
         check_password(password)?;
         let id = *self.st.read().user_by_email.get(&email).ok_or_else(|| bad("这个邮箱还没有注册"))?;
         self.take_code(&email, CodePurpose::Reset, code)?;
-        let hash = hash_password(password)?;
+        let hash = {
+            let _slot = self.auth.hash_slot()?;
+            hash_password(password)?
+        };
         self.auth.clear_fails(&email);
         self.mutate(|st, tx| {
             let mut u = st.users[&id].clone();
             u.password = hash;
             st.put_user(tx, u.clone())?;
-            // A reset signs out every other device.
+            // A reset signs out every other device and revokes API tokens.
             Self::drop_sessions(st, tx, id, None)?;
+            Self::drop_tokens(st, tx, id)?;
             let secret = Self::new_session(st, tx, id, ip)?;
             Ok((secret, u))
         })
     }
 
     pub fn update_profile(&self, me: &User, session: &str, nickname: Option<&str>, old_password: Option<&str>, new_password: Option<&str>) -> Result<User> {
-        let nickname = nickname.map(clean_nickname).transpose()?;
+        let staff = me.level >= Level::Reviewer;
+        let nickname = nickname.map(|n| clean_nickname(n, staff)).transpose()?;
         let new_hash = match new_password {
             Some(p) => {
                 check_password(p)?;
+                let _slot = self.auth.hash_slot()?;
                 if !old_password.is_some_and(|o| verify_password(o, &me.password)) {
                     return Err(bad("原密码不正确"));
                 }
@@ -412,6 +562,7 @@ impl Hub {
             if let Some(h) = new_hash {
                 u.password = h;
                 Self::drop_sessions(st, tx, u.id, Some(keep))?;
+                Self::drop_tokens(st, tx, u.id)?;
             }
             st.put_user(tx, u.clone())?;
             Ok(u)
@@ -453,13 +604,6 @@ impl Hub {
             // (admins can't ban admins, reviewers can't touch reviewers).
             if u.level >= me.level {
                 return Err(bad("不能修改同级或更高级别的账号"));
-            }
-            if me.level < Level::Admin {
-                // Reviewers manage contributors only, and cannot mint more reviewers.
-                let ok = u.level < Level::Reviewer && level.is_none_or(|l| l < Level::Reviewer);
-                if !ok {
-                    return Err(Error::Forbidden);
-                }
             }
             if let Some(l) = level {
                 u.level = l;

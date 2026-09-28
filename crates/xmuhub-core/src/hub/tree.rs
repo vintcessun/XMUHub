@@ -85,6 +85,10 @@ impl Hub {
     pub fn node(&self, viewer: Viewer, id: Id) -> Result<NodePage> {
         let st = self.st.read();
         let n = st.resolve(id).ok_or(Error::NotFound("分类"))?;
+        // 「待整理」 is a sorting area for staff, not a page.
+        if st.inbox == Some(n.id) && !viewer.staff() {
+            return Err(Error::NotFound("分类"));
+        }
         let path = st.ancestors(n.id).iter().filter_map(|a| st.nodes.get(a).cloned()).collect();
         let children = st.children.get(&n.id).into_iter().flatten().filter_map(|c| st.nodes.get(c)).map(|c| Self::info(&st, c)).collect();
         let mut resources: Vec<Resource> = st

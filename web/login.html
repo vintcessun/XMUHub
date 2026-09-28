@@ -19,7 +19,8 @@
     <div class="tabs" id="tabs"><button data-t="login" class="on">登录</button><button data-t="register">注册</button><button data-t="reset">找回密码</button></div>
     <form id="f" autocomplete="on">
       <label class="field"><span>邮箱</span><input class="input" id="email" type="email" autocomplete="email" required></label>
-      <div id="codebox" hidden><label class="field"><span>邮箱验证码</span><div class="row" style="flex-wrap:nowrap"><input class="input" id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button class="btn" id="sendcode" type="button" style="flex:none">获取验证码</button></div></label></div>
+      <div id="codebox" hidden><label class="field"><span>邮箱验证码</span><div class="row" style="flex-wrap:nowrap"><input class="input" id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button class="btn" id="sendcode" type="button" style="flex:none">获取验证码</button></div></label>
+        <div id="captchabox" hidden style="margin:-4px 0 14px"><p class="small muted" style="margin:0 0 8px">这个邮箱不在常用邮箱之列，请先完成人机验证（通过后会自动发送验证码）。用 QQ、163、Gmail 或厦大邮箱注册则不需要。</p><div id="captcha"></div></div></div>
       <div id="nickbox" hidden><label class="field"><span>昵称（仅审核员和评论区可见，一个字也行）</span><input class="input" id="nickname" maxlength="20"></label></div>
       <label class="field"><span id="pwlabel">密码</span><input class="input" id="password" type="password" autocomplete="current-password" minlength="8" required></label>
       <div id="pw2box" hidden><label class="field"><span>再次输入密码</span><input class="input" id="password2" type="password" autocomplete="new-password" minlength="8"></label></div>

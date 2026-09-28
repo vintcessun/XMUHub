@@ -277,7 +277,7 @@ impl Status {
 }
 
 /// Structured name parts; the file name is generated from these (课程_时间_类型).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NameParts {
     /// Course segment, normally the node's label.
     pub course: String,

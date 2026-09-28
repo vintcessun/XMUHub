@@ -39,7 +39,7 @@ async function load() {
   const notes = {
     pending: ['warn', '这份资料正在等待审核，通过后才会对所有人可见。'],
     rejected: ['bad', `这份资料未通过审核。${r.review_note ? '原因：' + esc(r.review_note) : ''}${r.mine ? '<br>文件已经删除，修改后请重新上传。' : ''}`],
-    removed: ['bad', `这份资料已下架。${r.review_note ? '原因：' + esc(r.review_note) : ''}`],
+    removed: ['bad', `这份资料已下架，文件已删除。${r.review_note ? '原因：' + esc(r.review_note) : ''}`],
     restricted: ['warn', '这份资料标记为「仅内部」，不对外公开、也不会被搜索到。'],
   };
   const note = notes[r.status];
@@ -178,9 +178,11 @@ async function renderManage(r, me) {
     ? [
         (r.status !== 'published' || r.needs_review || r.uncertain) && ['approve', r.status === 'published' ? '确认无误' : '通过并公开', 'ok'],
         (r.status === 'pending' || r.status === 'restricted' || r.needs_review || r.uncertain) && ['reject', '驳回', 'danger'],
-        r.status === 'published' && ['remove', '下架', 'danger'],
-        r.status !== 'restricted' && ['restrict', '设为仅内部', ''],
-        (r.status === 'removed' || r.status === 'rejected' || r.status === 'restricted') && ['restore', '恢复发布', ''],
+        (r.status === 'published' || r.status === 'restricted') && ['remove', '下架并删除文件', 'danger'],
+        // Taken down before takedowns deleted the file: its old links still work until this is pressed.
+        r.status === 'removed' && r.has_file && ['remove', '删除文件（让旧链接失效）', 'danger'],
+        r.status !== 'restricted' && r.has_file && ['restrict', '设为仅内部', ''],
+        r.has_file && (r.status === 'removed' || r.status === 'rejected' || r.status === 'restricted') && ['restore', '恢复发布', ''],
       ].filter(Boolean)
     : [];
   const n = r.name;
@@ -190,8 +192,9 @@ async function renderManage(r, me) {
   let nodeId = r.node.id;
   box.innerHTML = `<h3>${staff ? '审核' : '管理我的投稿'}</h3>
     ${actions.length ? `<label class="field"><span>备注（驳回 / 下架原因）</span><input class="input" id="review_note"></label>
+      <p class="small muted" style="margin-top:0">驳回和下架会从存储里删除文件，之前复制出去的下载链接也会失效，不能恢复；只想暂时隐藏请用「设为仅内部」。</p>
       <div class="row" style="margin-bottom:16px">${actions.map(([a, l, c]) => `<button class="btn sm ${c}" data-a="${a}">${l}</button>`).join('')}</div>` : ''}
-    ${!staff && r.mine ? `<div class="notice" style="margin-bottom:14px"><b>备注与删除申请</b><p class="small">申请由审核员同意后生效；删除获批后资料会下架。</p>
+    ${!staff && r.mine ? `<div class="notice" style="margin-bottom:14px"><b>备注与删除申请</b><p class="small">申请由审核员同意后生效；删除获批后资料下架，文件随之删除。</p>
       ${request ? `<p class="small">最近申请：${request.kind === 'note' ? '修改备注' : '删除资料'} · ${request.status === 'pending' ? '待审核' : request.status === 'approved' ? '已同意' : '已驳回'}${request.review_note ? ` · 审核意见：${esc(request.review_note)}` : ''}</p>` : ''}
       ${pendingRequest ? '' : r.status === 'removed' || r.status === 'rejected' ? '<p class="small">这份资料当前不能提交新申请。</p>' : `<label class="field"><span>新备注（可留空以清除）</span><textarea class="input" id="change_note" maxlength="500">${esc(r.note)}</textarea></label>
         <div class="row"><button class="btn sm" id="request_note" type="button">申请修改备注</button></div>
@@ -229,6 +232,7 @@ async function renderManage(r, me) {
   }
   box.querySelectorAll('[data-a]').forEach((b) => {
     b.onclick = async () => {
+      if (b.dataset.a === 'remove' && !confirm('下架会删除这份文件，旧的下载链接随之失效，之后无法恢复。确定吗？')) return;
       try {
         const res = await api(`/resources/${id}/review`, { method: 'POST', body: { action: b.dataset.a, note: $('#review_note').value } });
         toast(`已处理：${res.status}`);

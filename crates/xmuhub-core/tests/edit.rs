@@ -97,3 +97,37 @@ async fn uploader_edits_go_back_to_review() {
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn takedown_deletes_the_file() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-takedown-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("files")).unwrap();
+    let db = Arc::new(Db::open(&dir.join("t.redb"), 1 << 20).unwrap());
+    let storage = Storage::new(vec![Arc::new(LocalBackend { dir: dir.join("files"), secret: b"k".to_vec() })]);
+    let h = Hub::open(db, storage, Limits::default(), vec!["a@example.invalid".into()]).unwrap();
+
+    let admin = register(&h, "a@example.invalid", "admin");
+    let staff = Viewer { user: Some(&admin) };
+    let section = node(&h, staff, None, "section", "专业课");
+    let course = node(&h, staff, Some(section), "course", "数据结构");
+
+    // Restricting keeps the file, so it can be published again.
+    let kept = upload(&h, &dir, staff, course, b"kept").await;
+    let (_, garbage) = h.review(staff, kept, "restrict", "").unwrap();
+    assert!(garbage.is_empty());
+    h.review(staff, kept, "restore", "").unwrap();
+    assert!(h.download(staff, kept, false).is_ok());
+
+    // Removing hands the stored copy back for deletion; it can't be restored afterwards.
+    let gone = upload(&h, &dir, staff, course, b"gone").await;
+    let (_, garbage) = h.review(staff, gone, "remove", "侵权").unwrap();
+    assert_eq!(garbage.len(), 1);
+    let r = h.resource(staff, gone).unwrap().0;
+    assert!(!h.has_file(&r));
+    assert!(h.download(staff, gone, false).is_err());
+    assert!(h.review(staff, gone, "restore", "").is_err());
+
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}

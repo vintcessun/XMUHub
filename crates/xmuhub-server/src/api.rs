@@ -228,6 +228,7 @@ pub(crate) fn resource_view(app: &App, r: &Resource, node: &Node, path: &[Node],
         "mine": mine,
     });
     if staff {
+        v["has_file"] = json!(app.hub.has_file(r));
         // 分类规则 §5.6–5.7: uploader, source and original name are staff-only.
         v["original_name"] = json!(r.original_name);
         v["source"] = json!(r.source);
@@ -731,7 +732,8 @@ struct ResourceChangeReviewIn {
 async fn review_resource_change(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ResourceChangeReviewIn>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
-    let q = blocking(move || hub.review_resource_change(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
+    let (q, garbage) = blocking(move || hub.review_resource_change(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
+    delete_later(&app, garbage);
     Ok(Json(json!(q)))
 }
 

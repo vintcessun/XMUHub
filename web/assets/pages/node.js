@@ -44,7 +44,9 @@ async function load() {
   const n = data.node;
   if (n.id !== id) history.replaceState(history.state, '', `/n/${n.id}${location.search}`);
   document.title = `${n.name} · 鹭岛书阁`;
-  $('#crumbs').innerHTML = ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
+  const up = data.path.length ? `/n/${data.path[data.path.length - 1].id}` : '/browse';
+  $('#crumbs').innerHTML = `<a class="uplevel" href="${up}">‹ 返回上一级</a>`
+    + ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
   $('#name').textContent = nodeTitle(n);
   $('#info').innerHTML = [
     n.code && `<span class="mono">${esc(n.code)}</span>`,

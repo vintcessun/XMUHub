@@ -485,6 +485,9 @@ main { padding-top: 36px; padding-bottom: 72px; }
 .page-head .muted { max-width: 740px; line-height: 1.7; }
 .crumbs { margin-bottom: 10px; }
 .crumbs a:hover { color: var(--navy); }
+/* 「返回上一级」 in front of the breadcrumbs on course and file pages. */
+.crumbs .uplevel { display: inline-flex; align-items: center; margin-right: 10px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); font-weight: 600; }
+.crumbs .uplevel:hover { text-decoration: none; border-color: var(--navy-2); color: var(--navy); }
 
 .btn { height: 40px; padding-inline: 17px; border-radius: 10px; font-weight: 550; box-shadow: 0 1px 1px rgba(70, 48, 31, .035); }
 .btn:hover { background: var(--surface-2); color: var(--text); }

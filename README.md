@@ -111,7 +111,15 @@ python scripts/import_archive.py 资料库备份.zip --base https://xmu.vintces.
 登录后在「我的」页面创建个人令牌（`xmh_…`，只显示一次，可随时删除）。令牌以本人身份和权限访问：
 
 - **MCP**：`https://xmu.vintces.icu/mcp`（Streamable HTTP，JSON 响应），请求头 `Authorization: Bearer xmh_…`；不带令牌也能搜索、浏览和取下载地址。
-  工具：`search`、`get_tree`、`get_category`、`get_resource`、`get_download_links`、`list_recent`、`list_popular`、`get_comments`、`post_comment`、`rate_resource`、`submit_feedback`、`whoami`，审核员另有 `review_queue`、`review_resource`。
+  网页上能做的 MCP 都能做：
+  - 浏览下载：`search`、`get_tree`、`get_category`、`get_resource`、`get_download_links`、`list_recent`、`list_popular`、`site_info`；
+  - 上传：`suggest_category`、`create_category`、`begin_upload`、`get_upload`、`confirm_upload_part`、`renew_upload_part`、`preview_name`、`publish_upload`、`my_uploads`、`edit_resource`、`request_resource_change`；
+  - 互动：`get_comments`、`post_comment`、`rate_resource`、`report_resource`、`submit_feedback`、`whoami`；
+  - 求资料：`list_wants`、`get_want`、`post_want`、`reply_want`、`vote_want`、`set_want_status`；
+  - 审核员：`review_queue`、`review_resource`、`move_resources`、`review_want`；
+  - 其余网页操作（管理员页面等）：`list_api` 列出接口，`call_api` 以令牌身份调用（在服务器进程内走同一套路由和权限，登录注册、令牌管理、文件字节接口除外）。
+
+  文件字节同样不经过服务器：下载时客户端按 `get_download_links` 的镜像地址自己下载并校验 sha256；上传时客户端在本地切分卷、算 sha256，把每卷发到 `begin_upload` 给出的目标（上传 Worker，或经负责人同意的中转），再确认、提交。
 - **REST API**：同一令牌可直接调用 `/api/…`（带 Bearer 的请求免 `X-XMUHub` 头）。令牌不能再创建令牌。
 - `/mcp` 只认令牌、不认浏览器 Cookie，一次批量最多 10 个调用。修改或找回密码后，账号的所有令牌都会失效。
 

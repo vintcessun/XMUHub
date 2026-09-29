@@ -454,7 +454,7 @@ pub(crate) fn clean(s: &str, max: usize) -> String {
 
 pub struct Hub {
     db: Arc<Db>,
-    pub search: Search,
+    pub search: Arc<Search>,
     pub storage: Storage,
     pub limits: Limits,
     st: RwLock<State>,
@@ -474,9 +474,25 @@ pub struct Hub {
 impl Hub {
     pub fn open(db: Arc<Db>, storage: Storage, limits: Limits, admins: Vec<String>) -> Result<Hub> {
         let st = State::from_db(&db)?;
+        let search = Arc::new(Search::new()?);
+        // Background tick: pending search changes become visible within a second.
+        let weak = Arc::downgrade(&search);
+        std::thread::Builder::new()
+            .name("search-commit".into())
+            .spawn(move || {
+                while let Some(s) = {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    weak.upgrade()
+                } {
+                    if let Err(e) = s.flush() {
+                        tracing::error!("search commit: {e}");
+                    }
+                }
+            })
+            .map_err(|e| Error::Internal(e.to_string()))?;
         let hub = Hub {
             db,
-            search: Search::new()?,
+            search,
             storage,
             limits,
             st: RwLock::new(st),
@@ -559,11 +575,16 @@ impl Hub {
         // The in-memory update is quick; the commit waits for the disk. Readers only wait
         // for the former — holding the state lock through the fsync stalled every page
         // (and, on the server's two async threads, every request) behind each write.
+        let t = std::time::Instant::now();
         let res = self.db.begin().and_then(|txn| {
             let r = f(&mut self.st.write(), &txn.tx())?;
             txn.commit()?;
             Ok(r)
         });
+        // With the timing log (deploy/nginx/README.md) this tells a slow disk from a queue.
+        if t.elapsed() > std::time::Duration::from_millis(500) {
+            tracing::warn!(ms = t.elapsed().as_millis() as u64, "slow database write");
+        }
         if res.is_err() {
             // Memory may hold changes the database never got: start over from the database.
             match State::from_db(&self.db) {
@@ -615,10 +636,7 @@ impl Hub {
                 _ => self.search.remove(DocType::Node, *nid),
             }
         }
-        drop(st);
-        if let Err(e) = self.search.commit() {
-            tracing::error!("search commit: {e}");
-        }
+        // Committed by the background tick (or the next search), not here: see Search::flush.
     }
 
     /// Site counters for the home page (served from a cache refreshed every `STATS_TTL`).

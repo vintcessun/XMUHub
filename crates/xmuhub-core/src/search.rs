@@ -4,6 +4,8 @@
 //! Text is pre-tokenised by `crate::text` and joined with spaces, so the index only
 //! needs Tantivy's whitespace tokenizer and queries are built from exact terms.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use parking_lot::Mutex;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::{BooleanQuery, BoostQuery, Occur, Query, TermQuery};
@@ -78,6 +80,10 @@ pub struct Search {
     f: Fields,
     writer: Mutex<IndexWriter>,
     reader: IndexReader,
+    /// Changes staged since the last commit. Writes don't commit (it made every upload,
+    /// new course or review wait, and during a batch upload each one queued behind the
+    /// others); [`Search::flush`] does, from a background tick and before every search.
+    dirty: AtomicBool,
 }
 
 fn key(ty: DocType, id: Id) -> u64 {
@@ -114,7 +120,7 @@ impl Search {
         let index = Index::create_in_ram(sb.build());
         let writer = index.writer_with_num_threads(1, WRITER_BUDGET)?;
         let reader = index.reader_builder().reload_policy(ReloadPolicy::Manual).try_into()?;
-        Ok(Search { f, writer: Mutex::new(writer), reader })
+        Ok(Search { f, writer: Mutex::new(writer), reader, dirty: AtomicBool::new(false) })
     }
 
     pub fn put_node(&self, n: &Node, at: &Placement, weight: u64, is_course: bool, level: u8) -> Result<()> {
@@ -139,6 +145,7 @@ impl Search {
         let w = self.writer.lock();
         w.delete_term(Term::from_field_u64(f.key, key(DocType::Node, n.id)));
         w.add_document(doc)?;
+        self.dirty.store(true, Ordering::Release);
         Ok(())
     }
 
@@ -166,21 +173,40 @@ impl Search {
         let w = self.writer.lock();
         w.delete_term(Term::from_field_u64(f.key, key(DocType::Resource, r.id)));
         w.add_document(doc)?;
+        self.dirty.store(true, Ordering::Release);
         Ok(())
     }
 
     pub fn remove(&self, ty: DocType, id: Id) {
         self.writer.lock().delete_term(Term::from_field_u64(self.f.key, key(ty, id)));
+        self.dirty.store(true, Ordering::Release);
     }
 
     /// Makes pending changes visible to searches.
     pub fn commit(&self) -> Result<()> {
+        let t = std::time::Instant::now();
         self.writer.lock().commit()?;
         self.reader.reload()?;
+        if t.elapsed() > std::time::Duration::from_millis(500) {
+            tracing::warn!(ms = t.elapsed().as_millis() as u64, "slow search commit");
+        }
+        Ok(())
+    }
+
+    /// Commits if anything changed since the last commit.
+    pub fn flush(&self) -> Result<()> {
+        if self.dirty.swap(false, Ordering::AcqRel)
+            && let Err(e) = self.commit()
+        {
+            self.dirty.store(true, Ordering::Release);
+            return Err(e);
+        }
         Ok(())
     }
 
     pub fn search(&self, q: &str, filter: Filter, limit: usize, offset: usize) -> Result<(Vec<Hit>, usize)> {
+        // A search right after a write sees it (the background tick may not have run yet).
+        self.flush()?;
         let strict = self.run(&query_units(q), false, filter, limit, offset)?;
         if strict.1 > 0 {
             return Ok(strict);
@@ -323,5 +349,33 @@ mod tests {
         assert_eq!(count(&index, "算法", files), 0);
         // Other API callers keep the existing broader search behavior.
         assert_eq!(count(&index, "重点整理", Filter { ty: Some(DocType::Resource), ..Default::default() }), 1);
+    }
+}
+
+#[cfg(test)]
+mod deferred_commit_tests {
+    use super::*;
+
+    fn node(id: Id, name: &str) -> Node {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "parent": null, "kind": "Course", "code": "", "name": name, "label": "",
+            "aliases": [], "bucketed": false, "sort": 0, "status": "Active", "created_by": 1, "created_at": 0
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn writes_stage_and_searches_see_them() {
+        let s = Search::new().unwrap();
+        let at = Placement { node: 7, ancestors: &[], path_text: "", aliases_text: "" };
+        s.put_node(&node(7, "微积分"), &at, 100, true, 0).unwrap();
+        assert!(s.dirty.load(Ordering::Acquire), "a write only stages");
+        assert_eq!(s.reader.searcher().num_docs(), 0, "not committed by the write");
+        let (hits, total) = s.search("微积分", Filter::default(), 10, 0).unwrap();
+        assert_eq!((hits.len(), total), (1, 1), "a search commits what is pending first");
+        assert!(!s.dirty.load(Ordering::Acquire));
+        s.remove(DocType::Node, 7);
+        s.flush().unwrap();
+        assert_eq!(s.search("微积分", Filter::default(), 10, 0).unwrap().1, 0);
     }
 }

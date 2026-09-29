@@ -249,8 +249,7 @@ function courseIn(name, t) {
       // 「微积分I」 is not in 「微积分III」: a name ending in a Roman numeral may not run on
       // into another one (「线代」 still matches 「线代I」).
       if (/[ivxⅠ-ⅿ]$/i.test(w) && /^[ivxⅠ-ⅿ]/i.test(stem.slice(at + w.length))) continue;
-      // Same length: two courses share a name (电工技术 in two colleges); take the fuller one.
-      if (w.length === len && best && (n.count || 0) <= (best.count || 0)) continue;
+      if (w.length === len && best) continue;
       best = n;
       len = w.length;
     }
@@ -259,6 +258,16 @@ function courseIn(name, t) {
 }
 /** Course names too general to file by (a 「教材」 course; 「未分层（微积分）」 placeholders). */
 const GENERIC = /^(教材|资料|课件|笔记|未分层)/;
+
+/** Courses sharing `c`'s name in other colleges (电工技术 is taught by two); which one a file
+ * belongs to can't be told from its name. */
+const sameName = (a, b) => a.name.toLowerCase() === b.name.toLowerCase();
+const twinsOf = (c, t) => t.list.filter((n) => n.kind === 'course' && n.status === 'active' && n.id !== c.id && sameName(n, c));
+/** The course a node lies in (itself, or the course above a level). */
+function courseOf(t, id) {
+  for (let n = t.byId.get(id); n; n = t.byId.get(n.parent)) if (n.kind === 'course') return n;
+  return null;
+}
 
 /** Whether node `id` is `anc` or lies under it. */
 function within(t, id, anc) {
@@ -309,10 +318,16 @@ async function addFiles(files) {
       // A file named after a course goes there when no category was picked; against one the
       // uploader picked it is only a suggestion (see courseIn).
       const c = courseIn(f.name, t);
-      if (c && !state.node) {
+      const twins = c ? twinsOf(c, t) : [];
+      const mine = state.node && courseOf(t, state.node.id);
+      if (!c || (mine && sameName(mine, c))) { /* nothing to add */ }
+      else if (twins.length) {
+        // Several colleges teach a course of this name: don't guess which.
+        if (!state.node) row.status = `「${esc(c.name)}」有 ${twins.length + 1} 门同名课程（不同学院），请点「单独选分类」选一下；不选就放进「待整理」`;
+      } else if (!state.node) {
         row.node = brief(c);
         row.status = `按文件名放到了「${esc(c.name)}」，不对的话点「换一个」`;
-      } else if (c && !within(t, state.node.id, c.id)) row.guess = brief(c);
+      } else if (!within(t, state.node.id, c.id)) row.guess = brief(c);
     }
     state.rows.push(row);
   }

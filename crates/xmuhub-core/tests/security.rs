@@ -132,7 +132,7 @@ async fn content_abuse_is_contained() {
     assert_eq!(h.resource(staff, again).unwrap().0.status, Status::Pending);
 
     // A banned account's comments disappear with it.
-    let other = upload(&h, &dir, staff, course, b"commented file").await;
+    let other = upload(&h, &dir, me, course, b"commented file").await;
     h.add_comment(me, other, "广告广告广告").unwrap();
     assert_eq!(h.comments(staff, other).unwrap().len(), 1);
     h.update_user(staff, student.id, None, Some(true)).unwrap();
@@ -147,4 +147,26 @@ async fn content_abuse_is_contained() {
 
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn staff_uploads_wait_for_another_reviewer() {
+    let (h, dir) = open("staffupload");
+    let (_, admin) = register(&h, "a@example.invalid", "admin");
+    let (_, second) = register(&h, "r@example.invalid", "reviewer");
+    let staff = Viewer { user: Some(&admin) };
+    h.update_user(staff, second.id, Some(Level::Reviewer), None).unwrap();
+    let second = h.user(second.id).unwrap();
+    let reviewer = Viewer { user: Some(&second) };
+    let section = h.create_node(staff, NodeInput { parent: None, kind: "section".into(), code: String::new(), name: "专业课".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
+    let course = h.create_node(staff, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "数据结构".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
+
+    let id = upload(&h, &dir, staff, course, b"admin's own file").await;
+    assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Pending, "no review exemption for staff");
+    assert!(h.review(staff, id, "approve", "").is_err(), "not by its own uploader");
+    assert!(h.review_batch(staff, None, true).unwrap().is_empty(), "nor handed to them in a batch");
+    assert_eq!(h.review_batch(reviewer, None, true).unwrap().len(), 1);
+    h.review(reviewer, id, "approve", "").unwrap();
+    assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Published);
+    let _ = std::fs::remove_dir_all(dir);
 }

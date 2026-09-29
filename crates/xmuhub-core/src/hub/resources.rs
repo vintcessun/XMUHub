@@ -398,6 +398,9 @@ impl Hub {
             let mut r = st.resources.get(&id).cloned().ok_or(Error::NotFound("资料"))?;
             match action {
                 "approve" | "restore" => {
+                    if r.uploader == me.id {
+                        return Err(bad("自己上传的资料要由其他审核员审核"));
+                    }
                     if st.inbox == Some(r.node) {
                         return Err(bad("这份资料还在「待整理」里，请先移到正确的课程再通过"));
                     }

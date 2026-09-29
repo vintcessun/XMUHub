@@ -845,6 +845,21 @@ export function referrer() {
   return prevPage || document.referrer.replace(location.origin, '');
 }
 
+/**
+ * 「‹ 返回」 on course and file pages goes back to wherever the reader came from on this site,
+ * at the same scroll position (a search, the home page, a long list); opened straight from a
+ * shared link it goes up a level (its href) instead.
+ */
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a.uplevel');
+  if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const from = referrer();
+  if (!from.startsWith('/') || from.startsWith('/login') || history.length < 2) return;
+  e.preventDefault();
+  e.stopPropagation();
+  history.back();
+}, true);
+
 /** <main>, title and script of a page type; /n/1 and /n/2 share one. Refetched after a while. */
 function template(path) {
   const k = path.replace(/^\/([nr])\/\d+\/?$/, '/$1/');

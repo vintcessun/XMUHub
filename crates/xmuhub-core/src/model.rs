@@ -41,9 +41,11 @@ impl Level {
         })
     }
 
-    /// Whether uploads at this level are published before review.
+    /// Whether uploads at this level are published before review (and checked afterwards).
+    /// Only trusted contributors: reviewers' and admins' own uploads wait for another reviewer
+    /// like everyone else's (the owner's call, 2026-09).
     pub fn publishes_directly(self) -> bool {
-        self >= Level::Trusted
+        self == Level::Trusted
     }
 }
 

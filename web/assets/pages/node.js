@@ -47,7 +47,7 @@ async function load() {
   if (n.id !== id) history.replaceState(history.state, '', `/n/${n.id}${location.search}`);
   document.title = `${n.name} · 鹭岛书阁`;
   const up = data.path.length ? `/n/${data.path[data.path.length - 1].id}` : '/browse';
-  $('#crumbs').innerHTML = `<a class="uplevel" href="${up}">‹ 返回上一级</a>`
+  $('#crumbs').innerHTML = `<a class="uplevel" title="回到上一页" href="${up}">‹ 返回</a>`
     + ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');
   $('#name').innerHTML = esc(nodeTitle(n)) + levelBadge(n);
   $('#info').innerHTML = [

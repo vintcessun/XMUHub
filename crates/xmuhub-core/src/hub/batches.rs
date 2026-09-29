@@ -74,6 +74,8 @@ impl Hub {
                 .resources
                 .values()
                 .filter(|r| Self::batchable(&st, r) && !claims.contains_key(&r.id) && !passed.is_some_and(|p| p.contains(&r.id)))
+                // Nobody reviews their own uploads.
+                .filter(|r| r.uploader != me)
                 .filter(|r| within.is_none_or(|w| r.node == w || st.ancestors(r.node).contains(&w)))
                 .map(|r| (rand::random::<u64>(), r.id))
                 .collect();

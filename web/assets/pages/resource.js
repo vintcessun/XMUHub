@@ -13,7 +13,7 @@ async function load() {
     return;
   }
   document.title = `${r.title} · 鹭岛书阁`;
-  $('#crumbs').innerHTML = `<a class="uplevel" href="/n/${r.node.id}">‹ 返回上一级</a>` + ['<a href="/browse">分类</a>', ...r.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`), `<a href="/n/${r.node.id}">${esc(r.node.name)}</a>`].join(' / ');
+  $('#crumbs').innerHTML = `<a class="uplevel" title="回到上一页" href="/n/${r.node.id}">‹ 返回</a>` + ['<a href="/browse">分类</a>', ...r.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`), `<a href="/n/${r.node.id}">${esc(r.node.name)}</a>`].join(' / ');
   $('#title').textContent = r.title;
   $('#subtitle').textContent = r.subtitle || '';
   $('#subtitle').hidden = !r.subtitle;

@@ -227,6 +227,33 @@ function guess(name) {
   return g;
 }
 
+/**
+ * The course a file name names, if any: the longest course name / label / alias found in it.
+ * A batch often mixes courses (a folder of old papers), and naming every file after the
+ * batch's category turned 「C语言_2018_期中」 into 「微积分I_2018_期中」.
+ */
+function courseIn(name, t) {
+  const stem = name.replace(/\.[^.]+$/, '').toLowerCase();
+  let best = null;
+  let len = 1; // single characters match too much
+  for (const n of t.list) {
+    if (n.kind !== 'course' || n.status !== 'active') continue;
+    for (const w of new Set([n.name, n.label, ...(n.aliases || [])])) {
+      if (!w || w.length <= len) continue;
+      const at = stem.indexOf(w.toLowerCase());
+      // 「微积分I」 is not in 「微积分III」: a Roman numeral may not go on after the match.
+      if (at >= 0 && !/^[ivxⅠ-ⅿ]/i.test(stem.slice(at + w.length))) { best = n; len = w.length; }
+    }
+  }
+  return best;
+}
+
+/** Whether node `id` is `anc` or lies under it. */
+function within(t, id, anc) {
+  for (let n = t.byId.get(id); n; n = t.byId.get(n.parent)) if (n.id === anc) return true;
+  return false;
+}
+
 function timeOf(r) {
   if (!r.year) return '';
   return r.term && /^\d{4}(-\d{4})?$/.test(r.year) ? `${r.year}${r.term}` : r.year;
@@ -252,7 +279,8 @@ function genName(r) {
 
 // ---------------------------------------------------------------- rows
 
-function addFiles(files) {
+async function addFiles(files) {
+  const t = await tree().catch(() => null);
   for (const f of files) {
     if (!f.size) { toast(`${f.name} 是空文件，已跳过`, true); continue; }
     if (f.size > M.limits.max_file) { toast(`${f.name} 太大了`, true); continue; }
@@ -265,6 +293,13 @@ function addFiles(files) {
       if (Array.isArray(saved.parts)) row.parts = saved.parts;
       if (saved.upload_id) row.upload_id = saved.upload_id;
       row.status = saved.upload_id ? '已恢复上次填写的信息，上传会从断点继续' : '已恢复上次填写的信息';
+    } else if (t) {
+      // A file named after another course goes there, not to the batch's category.
+      const c = courseIn(f.name, t);
+      if (c && !(state.node && within(t, state.node.id, c.id))) {
+        row.node = brief(c);
+        row.status = `按文件名放到了「${esc(c.name)}」，不对的话点「换一个」`;
+      }
     }
     state.rows.push(row);
   }

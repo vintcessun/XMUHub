@@ -316,6 +316,7 @@ export async function layout(active) {
     <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/links">站外资源</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
     <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内删除。<a href="/about#copyright">版权声明</a></span></div>`;
   feedbackButton(active !== 'feedback');
+  topButton();
   const user = await me();
   const navMe = top.querySelector('#nav-me');
   if (user) {
@@ -633,6 +634,25 @@ export async function moveResources(ids) {
     toast(`已移动 ${r.moved} 份到「${n.name}」`);
     return r.moved;
   } catch (e) { toast(e.message, true); return 0; }
+}
+
+// ---------------------------------------------------------------- back to top
+
+/** 「回到顶部」 above the 反馈 button, once a long page has scrolled two screens down. */
+function topButton() {
+  if (document.querySelector('.topfab')) return;
+  const b = document.createElement('button');
+  b.className = 'topfab';
+  b.type = 'button';
+  b.textContent = '↑';
+  b.title = '回到顶部';
+  b.setAttribute('aria-label', '回到顶部');
+  b.hidden = true;
+  b.onclick = () => window.scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  document.body.appendChild(b);
+  let raf = 0;
+  const update = () => { raf = 0; b.hidden = window.scrollY < window.innerHeight * 2; };
+  window.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(update); }, { passive: true });
 }
 
 // ---------------------------------------------------------------- feedback button

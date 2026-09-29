@@ -427,7 +427,14 @@ pre.textview { max-height: min(75vh, 900px); overflow: auto; background: var(--s
 .archive-list a.on { font-weight: 700; }
 .fbfab { position: fixed; right: 16px; bottom: 16px; z-index: 40; border: 0; border-radius: 999px; padding: 10px 16px; background: var(--navy); color: var(--on-navy); box-shadow: var(--shadow); cursor: pointer; font-size: 14px; }
 @media (max-width: 640px) { .fbfab { right: 12px; bottom: 12px; padding: 8px 13px; font-size: 13px; } }
-@media print { .fbfab { display: none; } }
+.topfab {
+  position: fixed; right: 16px; bottom: 68px; z-index: 40; width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); box-shadow: var(--shadow);
+  font-size: 20px; line-height: 1; cursor: pointer; -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px);
+}
+.topfab[hidden] { display: none; }
+@media (max-width: 640px) { .topfab { right: 12px; bottom: 58px; width: 40px; height: 40px; font-size: 18px; } }
+@media print { .fbfab, .topfab { display: none; } }
 .item .qpv { align-self: center; flex: none; margin-left: auto; }
 .qpv-nav { display: inline-flex; gap: 6px; align-items: center; margin-left: 10px; flex-wrap: wrap; }
 .modal-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

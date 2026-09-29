@@ -74,7 +74,9 @@ window.addEventListener('beforeunload', (e) => {
   $('#droptip').textContent = `支持任意格式：PDF、Word、PPT、Excel、图片、压缩包等；单个文件最大 ${fmtSize(M.limits.max_file)}，大文件自动分卷上传`;
   $('#b_type').innerHTML += M.type_words.map((t) => `<option>${t.word}</option>`).join('');
   $('#b_year').innerHTML += yearOptions('');
-  const startNode = Number(qs.get('node')) || draft.node;
+  // Last time's category comes back only to resume unfinished files; a fresh upload starts
+  // empty, or a new batch silently lands in whatever course was picked days ago.
+  const startNode = Number(qs.get('node')) || (Object.keys(draft.files || {}).length ? draft.node : null);
   if (startNode) {
     try { const d = await api(`/nodes/${startNode}`); pick(d.node, d.path); } catch { /* ignore */ }
   }
@@ -266,7 +268,7 @@ const brief = (n) => ({ id: n.id, name: n.name, label: n.label, parent: n.parent
 
 function genName(r) {
   const n = nodeOf(r);
-  if (!n) return '（先选择分类）';
+  if (!n) return '（没选分类：放进「待整理」，审核员会归到正确的课程、改好名字）';
   let s = n.label || n.name;
   const t = timeOf(r);
   if (t) s += `_${t}`;
@@ -552,7 +554,14 @@ async function renewTarget(uploadId, index, failed) {
 $('#submit').onclick = async () => {
   const todo = state.rows.filter((r) => !r.done);
   if (!todo.length) return toast('请先添加文件', true);
-  if (todo.some((r) => !nodeOf(r))) return toast('请先选择分类', true);
+  // Files with no category (none picked, none recognised from the name) go to 「待整理」.
+  if (todo.some((r) => !nodeOf(r))) {
+    try {
+      const inbox = brief(await api('/inbox', { method: 'POST' }));
+      for (const r of todo) if (!nodeOf(r)) r.node = inbox;
+      saveDraft();
+    } catch (err) { return toast(err.message, true); }
+  }
   state.busy = true;
   $('#submit').disabled = true;
   $('#prog').hidden = false;

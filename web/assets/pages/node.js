@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtSize, layout, levelBadge, moveResources, nodeCard, nodeTitle, pathId, resourceItem, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -127,20 +127,32 @@ $('#list').addEventListener('click', async (e) => {
   dlBusy = true;
   b.disabled = true;
   toast('浏览器问「是否允许下载多个文件」时请选允许');
-  let failed = 0;
+  const failed = [];
   for (const [i, c] of sel.entries()) {
     const id = Number(c.dataset.id);
     try {
       const res = await downloadResource(id, (p) => { b.textContent = `下载中 ${i + 1}/${sel.length} · ${Math.round(p * 100)}%`; }, { batch: true });
-      if (!res.ok) failed++;
-    } catch { failed++; }
+      if (!res.ok) failed.push({ id, plan: res.plan });
+    } catch { failed.push({ id, plan: null }); }
   }
   b.textContent = '批量下载';
   b.disabled = false;
   dlBusy = false;
-  if (failed) toast(`${failed} 份没有下载成功（多是分卷文件），请点进资料页单独下载`, true);
+  if (failed.length) dlFailed(failed, sel.length);
   else toast(`已下载 ${sel.length} 份`);
 });
+/** Files no mirror would hand to the page: a link each (a click lets the browser download it
+ * from the mirror itself); split files go to their own page, which joins the volumes. */
+function dlFailed(failed, total) {
+  const body = modal(`${failed.length} / ${total} 份没能自动下载`);
+  body.innerHTML = `<p class="small muted">能自动下载的已经保存了。下面这些请逐个点击下载：</p><div class="list">${failed.map(({ id, plan }) => {
+    const name = plan ? esc(plan.filename) : `资料 #${id}`;
+    const urls = plan && plan.parts.length === 1 ? plan.parts[0].urls : null;
+    return `<div class="item"><div class="body"><b>${name}</b>${plan ? ` <span class="small faint">${fmtSize(plan.size)}</span>` : ''}</div>
+      ${urls ? `<a class="btn sm primary" href="${esc(urls[0])}" target="_blank" rel="noopener noreferrer">下载</a><a class="small" href="${esc(urls[urls.length - 1])}" target="_blank" rel="noopener noreferrer">GitHub 直链</a>` : `<a class="btn sm" href="/r/${id}" target="_blank">去资料页下载</a>`}</div>`;
+  }).join('')}</div>`;
+}
+
 $('#list').addEventListener('click', async (e) => {
   if (!e.target.closest('#mvsel')) return;
   const ids = [...document.querySelectorAll('#list .rsel:checked')].map((c) => Number(c.dataset.id));

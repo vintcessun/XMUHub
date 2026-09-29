@@ -447,7 +447,9 @@ export async function downloadResource(id, onProgress = () => {}, { batch = fals
   try {
     const blobs = [];
     for (const part of plan.parts) {
-      const urls = single ? part.urls.slice(0, 1) : part.urls;
+      // One click, one file: the first mirror, else the browser opens it itself (below). A batch
+      // can't hand files to the browser that way, so it tries every mirror that allows fetching.
+      const urls = single && !batch ? part.urls.slice(0, 1) : part.urls;
       const b = await fetchPart(part, urls, (n) => onProgress(Math.min(1, (doneBytes + n) / total)));
       doneBytes += part.size;
       blobs.push(b);
@@ -458,17 +460,11 @@ export async function downloadResource(id, onProgress = () => {}, { batch = fals
     // Usually the fetch failed only because the mirror sends no CORS headers: then the browser
     // downloads from it directly. Never send the user to a mirror whose bytes just failed the
     // checksum; use the plain GitHub address (the last one) instead.
-    if (single) {
+    // In a batch the next file would cancel a page navigation (and the CSP blocks mirror
+    // frames), so the caller lists what failed for the user to click one by one.
+    if (single && !batch) {
       const urls = plan.parts[0].urls;
-      const url = e && e.integrity ? urls[urls.length - 1] : urls[0];
-      // In a batch the next file would cancel a page navigation; a frame per file doesn't.
-      if (batch) {
-        const f = document.createElement('iframe');
-        f.hidden = true;
-        f.src = url;
-        document.body.appendChild(f);
-        setTimeout(() => f.remove(), 120_000);
-      } else location.href = url;
+      location.href = e && e.integrity ? urls[urls.length - 1] : urls[0];
       return { ok: true, fallback: true };
     }
     return { ok: false, plan, error: e };

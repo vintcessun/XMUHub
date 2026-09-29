@@ -97,6 +97,9 @@ fn valid_time(t: &str) -> bool {
     }
 }
 
+/// A page of files with their courses, plus (matched, total).
+pub type ResourcePage = (Vec<(Resource, Node)>, usize, usize);
+
 impl Hub {
     pub(super) fn build_name(st: &State, input: &ResourceInput, extras: &AdminExtras, staff: bool, exclude: Option<Id>) -> Result<(NameParts, Tag)> {
         let node = st.resolve(input.node).ok_or(Error::NotFound("分类"))?;
@@ -587,6 +590,29 @@ impl Hub {
         let mut v: Vec<&Resource> = st.resources.values().filter(|r| r.uploader == me.id).collect();
         v.sort_by_key(|r| std::cmp::Reverse(r.created_at));
         Ok(Self::with_nodes(&st, v.into_iter()))
+    }
+
+    /// One page of the viewer's uploads, newest first, filtered by status and by a word in
+    /// the name, course, note or original name; with (matched, total). Only the page is
+    /// copied out (copying every upload with its course first made 「我的」 slow for big
+    /// uploaders).
+    pub fn my_resources_page(&self, actor: Viewer, status: &str, needle: &str, offset: usize, limit: usize) -> Result<ResourcePage> {
+        let me = actor.at_least(Level::Contributor)?;
+        let needle = needle.trim().to_lowercase();
+        let st = self.st.read();
+        let mut all: Vec<&Resource> = st.resources.values().filter(|r| r.uploader == me.id).collect();
+        let total = all.len();
+        all.retain(|r| {
+            (status.is_empty() || r.status.as_str() == status)
+                && (needle.is_empty()
+                    || r.name.stem().to_lowercase().contains(&needle)
+                    || r.note.to_lowercase().contains(&needle)
+                    || r.original_name.to_lowercase().contains(&needle)
+                    || st.nodes.get(&r.node).is_some_and(|n| n.name.to_lowercase().contains(&needle)))
+        });
+        all.sort_by_key(|r| (std::cmp::Reverse(r.created_at), std::cmp::Reverse(r.id)));
+        let matched = all.len();
+        Ok((Self::with_nodes(&st, all.into_iter().skip(offset).take(limit)), matched, total))
     }
 
     /// Review queue: pending first-review items, published-before-review items, and

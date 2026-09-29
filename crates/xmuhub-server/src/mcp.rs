@@ -249,7 +249,7 @@ const API: &[(&str, &str, &str)] = &[
     ("POST", "/links/suggestions", "推荐一个站外资源链接 {title, url, note?}（审核员通过后加入列表）"),
     ("GET", "/links/suggestions", "我推荐的链接（审核员：待审核的推荐）"),
     ("POST", "/links/suggestions/{id}/review", "审核员：{approve, reason?（不采纳时必填）, title?, url?, note?, sort?}"),
-    ("GET", "/review?status=&uncertain=", "审核员：审核队列"),
+    ("GET", "/review?status=&uncertain=&offset=&limit=", "审核员：审核队列（limit 默认 1000，最多 5000）"),
     ("GET", "/review/batch?within=", "审核员：我领的这批"),
     ("POST", "/review/batch", "审核员：领一批 {within?}"),
     ("POST", "/review/batch/release", "审核员：放回这批"),

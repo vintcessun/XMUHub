@@ -183,6 +183,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         secure_cookie: cfg.secure_cookie,
         github: github.clone(),
         scans: Default::default(),
+        tree_json: Default::default(),
         secret: cfg.ticket_secret.clone(),
         turnstile: if cfg.turnstile_sitekey.is_empty() || cfg.turnstile_secret.is_empty() {
             tracing::warn!("Turnstile not configured: uncommon mail domains can sign up without a human check");

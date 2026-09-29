@@ -61,6 +61,12 @@ impl Hub {
         NodeInfo { node: n.clone(), count: st.counts.get(&n.id).copied().unwrap_or(0) }
     }
 
+    /// Changes whenever [`Hub::tree`] would return something different (nodes, levels,
+    /// counts): a cache of the tree keyed by it is never stale.
+    pub fn tree_generation(&self) -> u64 {
+        self.tree_gen.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     /// The whole live tree, flat (clients assemble it by `parent`).
     pub fn tree(&self) -> Vec<NodeInfo> {
         let st = self.st.read();
@@ -211,10 +217,10 @@ impl Hub {
                 created_by: me.id,
                 created_at: now(),
             };
-            st.put_node(tx, n.clone())?;
             if input.level > super::LEVEL_BOTH {
                 return Err(bad("未知的课程层次"));
             }
+            st.put_node(tx, n.clone())?;
             if input.level != 0 {
                 tx.put_node_level(n.id, input.level)?;
                 st.node_levels.insert(n.id, input.level);

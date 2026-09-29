@@ -44,6 +44,9 @@ pub struct App {
     pub script_token: Option<String>,
     pub secure_cookie: bool,
     pub github: Option<Arc<xmuhub_core::storage::github::GitHubBackend>>,
+    /// `/api/tree` as sent, with the tree generation it was built from (see `Hub::tree_generation`).
+    /// Every page that shows the tree asks for it; rebuilding it took ~9 ms at 2 000 courses.
+    pub tree_json: parking_lot::Mutex<Option<(u64, bytes::Bytes)>>,
     /// Repository scans awaiting the admin's mapping, by scan id.
     pub scans: parking_lot::Mutex<std::collections::HashMap<String, xmuhub_core::storage::github::RepoScan>>,
     /// Human check for sign-ups from uncommon mail domains (None = not configured).
@@ -645,8 +648,21 @@ async fn review_avatar(State(app): S, auth: Auth, Path(user): Path<Id>, Json(b):
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn tree(State(app): S) -> Json<Value> {
-    Json(json!(app.hub.tree().iter().map(|i| node_view(&app.hub, &i.node, i.count)).collect::<Vec<_>>()))
+async fn tree(State(app): S) -> Response {
+    let generation = app.hub.tree_generation();
+    let cached = app.tree_json.lock().as_ref().filter(|(g, _)| *g == generation).map(|(_, b)| b.clone());
+    let body = match cached {
+        Some(b) => b,
+        None => {
+            let v: Vec<Value> = app.hub.tree().iter().map(|i| node_view(&app.hub, &i.node, i.count)).collect();
+            let b = bytes::Bytes::from(serde_json::to_vec(&v).unwrap_or_default());
+            // Built from a generation read before building: a write meanwhile bumps it and
+            // the next request builds again.
+            *app.tree_json.lock() = Some((generation, b.clone()));
+            b
+        }
+    };
+    ([(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 async fn node(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
@@ -786,20 +802,11 @@ struct MineQ {
 /// The caller's uploads, newest first, a page at a time (some people have thousands: sending
 /// them all at once froze phones).
 async fn mine(State(app): S, auth: Auth, Query(q): Query<MineQ>) -> R<Json<Value>> {
-    let all = app.hub.my_resources(auth.viewer())?;
-    let total = all.len();
-    let needle = q.q.trim().to_lowercase();
-    let hits: Vec<&(Resource, Node)> = all
-        .iter()
-        .filter(|(r, _)| q.status.is_empty() || r.status.as_str() == q.status)
-        .filter(|(r, n)| {
-            needle.is_empty() || [r.name.stem(), n.name.clone(), r.note.clone(), r.original_name.clone()].iter().any(|x| x.to_lowercase().contains(&needle))
-        })
-        .collect();
     let limit = q.limit.unwrap_or(30).clamp(1, 100);
     let v = auth.viewer();
-    let items: Vec<Value> = hits.iter().skip(q.offset).take(limit).map(|(r, n)| resource_view(&app, r, n, &[], v)).collect();
-    Ok(Json(json!({ "items": items, "matched": hits.len(), "total": total })))
+    let (page, matched, total) = app.hub.my_resources_page(v, &q.status, &q.q, q.offset, limit)?;
+    let items: Vec<Value> = page.iter().map(|(r, n)| resource_view(&app, r, n, &[], v)).collect();
+    Ok(Json(json!({ "items": items, "matched": matched, "total": total })))
 }
 
 // ------------------------------------------------------------------ resources
@@ -1133,12 +1140,17 @@ struct QueueQ {
     status: Option<String>,
     #[serde(default)]
     uncertain: bool,
+    /// Paging for big lists (e.g. status=published): at most `limit` (default 1000) from `offset`.
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
 }
 
 async fn review_queue(State(app): S, auth: Auth, Query(q): Query<QueueQ>) -> R<Json<Value>> {
     let v = auth.viewer();
     let items = app.hub.review_queue(v, q.status.as_deref(), q.uncertain)?;
-    Ok(Json(json!(items.iter().map(|(r, n)| resource_view(&app, r, n, &[], v)).collect::<Vec<_>>())))
+    let limit = q.limit.unwrap_or(1000).clamp(1, 5000);
+    Ok(Json(json!(items.iter().skip(q.offset).take(limit).map(|(r, n)| resource_view(&app, r, n, &[], v)).collect::<Vec<_>>())))
 }
 
 // ------------------------------------------------------------------ 站外资源 (outside sources)

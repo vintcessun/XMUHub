@@ -244,6 +244,15 @@ impl State {
     }
 
     fn rebuild_children(&mut self) {
+        self.children = self.children_map();
+    }
+
+    fn recount(&mut self) {
+        self.counts = self.count_map();
+    }
+
+    /// Parent → children in display order (built from `nodes`; see [`Hub::reindex`]).
+    fn children_map(&self) -> HashMap<Id, Vec<Id>> {
         let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
         for n in self.nodes.values() {
             if !matches!(n.status, NodeStatus::Merged(_)) {
@@ -256,10 +265,11 @@ impl State {
                 a.sort.cmp(&b.sort).then_with(|| a.code.cmp(&b.code)).then_with(|| a.name.cmp(&b.name))
             });
         }
-        self.children = children;
+        children
     }
 
-    fn recount(&mut self) {
+    /// Public files under each node, its subtree included.
+    fn count_map(&self) -> HashMap<Id, usize> {
         let mut counts: HashMap<Id, usize> = HashMap::new();
         for r in self.resources.values().filter(|r| r.status == Status::Published) {
             let mut cur = Some(r.node);
@@ -273,7 +283,7 @@ impl State {
                 }
             }
         }
-        self.counts = counts;
+        counts
     }
 
     fn put_resource(&mut self, tx: &Tx, r: Resource) -> Result<()> {
@@ -460,6 +470,10 @@ pub struct Hub {
     st: RwLock<State>,
     /// Serialises writers so read-modify-write sequences are atomic.
     writer: Mutex<()>,
+    /// One refresh of the derived indexes at a time (see [`Hub::reindex`]).
+    reindexing: Mutex<()>,
+    /// Bumped whenever the tree or its counts change, for caches of the tree's JSON.
+    tree_gen: std::sync::atomic::AtomicU64,
     /// user id → (day, files, bytes)
     quota: Mutex<HashMap<Id, (i64, u32, u64)>>,
     dirty_downloads: Mutex<HashSet<Id>>,
@@ -497,6 +511,8 @@ impl Hub {
             limits,
             st: RwLock::new(st),
             writer: Mutex::new(()),
+            reindexing: Mutex::new(()),
+            tree_gen: std::sync::atomic::AtomicU64::new(0),
             quota: Mutex::new(HashMap::new()),
             dirty_downloads: Mutex::new(HashSet::new()),
             download_seen: Mutex::new(HashMap::new()),
@@ -569,7 +585,8 @@ impl Hub {
     }
 
     /// One atomic write: `f` stages records into the transaction and the in-memory state.
-    /// On failure memory is reloaded from disk so the two never diverge.
+    /// If it fails (other than a rejection, which changes nothing) memory is reloaded from
+    /// disk so the two never diverge.
     fn mutate<R>(&self, f: impl FnOnce(&mut State, &Tx) -> Result<R>) -> Result<R> {
         let _w = self.writer.lock();
         // The in-memory update is quick; the commit waits for the disk. Readers only wait
@@ -585,7 +602,13 @@ impl Hub {
         if t.elapsed() > std::time::Duration::from_millis(500) {
             tracing::warn!(ms = t.elapsed().as_millis() as u64, "slow database write");
         }
-        if res.is_err() {
+        // A rejection (bad input, limits, permissions) comes before any change to memory, so
+        // only a real failure — the commit, or an error after changes were staged — means
+        // memory may hold changes the database never got. Reloading everything took the
+        // whole state lock for as long as reading the database lasts, on every refused
+        // comment: anyone could stall the site by repeating one. Write closures must keep
+        // this order: check, then change.
+        if res.as_ref().is_err_and(|e| !e.is_rejection()) {
             // Memory may hold changes the database never got: start over from the database.
             match State::from_db(&self.db) {
                 Ok(fresh) => *self.st.write() = fresh,
@@ -597,11 +620,22 @@ impl Hub {
 
     /// Refreshes counts, the child index and search entries after a write.
     fn reindex(&self, nodes: &[Id], resources: &[Id]) {
+        // The child index and the counts walk every node and every file: build them under
+        // the read lock and take the write lock only to swap them in, so pages keep being
+        // served meanwhile (the write lock used to be held for the whole walk — at 30 000
+        // files a few ms per write, every reader waiting). One refresh at a time, each from
+        // a state read after its own write, so the last one in holds every write before it.
+        let _one = self.reindexing.lock();
+        let (children, counts) = {
+            let st = self.st.read();
+            (st.children_map(), st.count_map())
+        };
         {
             let mut st = self.st.write();
-            st.rebuild_children();
-            st.recount();
+            st.children = children;
+            st.counts = counts;
         }
+        self.tree_gen.fetch_add(1, std::sync::atomic::Ordering::Release);
         let st = self.st.read();
         // A resource changing state can flip its ancestors between empty and non-empty,
         // which changes their search weight.

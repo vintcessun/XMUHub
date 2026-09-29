@@ -102,3 +102,62 @@ fn contributor_can_create_under_misclassified_college_only() {
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A refused write leaves memory as it was: nothing half-made shows up, before or after a
+/// restart (a refusal no longer reloads the whole state from the database).
+#[test]
+fn refused_writes_leave_nothing_behind() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-tree-refused-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let open = || {
+        let db = Arc::new(Db::open(&dir.join("t.redb"), 1 << 20).unwrap());
+        let storage = Storage::new(vec![Arc::new(LocalBackend { dir: dir.join("files"), secret: b"k".to_vec() })]);
+        Hub::open(db, storage, Limits::default(), vec!["a@example.invalid".into()]).unwrap()
+    };
+    let h = open();
+    let (email, code) = h.request_code("a@example.invalid", CodePurpose::Register, "1.1.1.1").unwrap();
+    let admin = h.register(Registration { email, code, password: test_password(), nickname: "admin".into() }, "1.1.1.1").unwrap().1;
+    let v = Viewer { user: Some(&admin) };
+    let section = h.create_node(v, input(None, "section", "专业课")).unwrap().id;
+    let mut bad = input(Some(section), "course", "层次不对的课");
+    bad.level = 9;
+    assert!(h.create_node(v, bad).is_err());
+    let named = |h: &Hub| h.tree().iter().filter(|i| i.node.name == "层次不对的课").count();
+    assert_eq!(named(&h), 0, "not in memory");
+    h.create_node(v, input(Some(section), "course", "正常的课")).unwrap();
+    drop(h);
+    let h = open();
+    assert_eq!(named(&h), 0, "not in the database");
+    assert_eq!(h.tree().iter().filter(|i| i.node.name == "正常的课").count(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The tree's generation moves with every change a cached copy of the tree would miss.
+#[test]
+fn tree_generation_follows_changes() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-tree-gen-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = Arc::new(Db::open(&dir.join("t.redb"), 1 << 20).unwrap());
+    let storage = Storage::new(vec![Arc::new(LocalBackend { dir: dir.join("files"), secret: b"k".to_vec() })]);
+    let h = Hub::open(db, storage, Limits::default(), vec!["a@example.invalid".into()]).unwrap();
+    let (email, code) = h.request_code("a@example.invalid", CodePurpose::Register, "1.1.1.1").unwrap();
+    let admin = h.register(Registration { email, code, password: test_password(), nickname: "admin".into() }, "1.1.1.1").unwrap().1;
+    let v = Viewer { user: Some(&admin) };
+    let g0 = h.tree_generation();
+    let section = h.create_node(v, input(None, "section", "专业课")).unwrap().id;
+    let g1 = h.tree_generation();
+    assert!(g1 > g0, "a new node");
+    let course = h.create_node(v, input(Some(section), "course", "数据结构")).unwrap().id;
+    let g2 = h.tree_generation();
+    assert!(g2 > g1);
+    h.update_node(v, course, xmuhub_core::hub::NodePatch { level: Some(2), ..Default::default() }).unwrap();
+    assert!(h.tree_generation() > g2, "a study level");
+    let mut bad = input(Some(section), "course", "x");
+    bad.level = 9;
+    let g3 = h.tree_generation();
+    assert!(h.create_node(v, bad).is_err());
+    assert_eq!(h.tree_generation(), g3, "a refused write changes nothing");
+    let _ = std::fs::remove_dir_all(dir);
+}

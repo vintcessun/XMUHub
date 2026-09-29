@@ -20,6 +20,15 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+impl Error {
+    /// A request turned down (bad input, not found, not allowed, too many …) as opposed to
+    /// something that failed. Writes check before they change anything, so a rejected write
+    /// leaves memory as it was (see `Hub::mutate`).
+    pub fn is_rejection(&self) -> bool {
+        matches!(self, Error::NotFound(_) | Error::Forbidden | Error::Unauthorized | Error::BadRequest(_) | Error::Conflict(_) | Error::TooMany(_))
+    }
+}
+
 pub fn bad(msg: impl Into<String>) -> Error {
     Error::BadRequest(msg.into())
 }

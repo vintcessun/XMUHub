@@ -12,6 +12,7 @@ mod inbox;
 mod links;
 mod notices;
 mod collections;
+mod series;
 mod stats_public;
 mod resources;
 mod social;
@@ -47,6 +48,7 @@ pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
 pub use collections::CollectionView;
+pub use series::{SeriesItem, SeriesView};
 pub use links::LinkSuggestionView;
 pub use notices::NoticeList;
 pub use stats_public::SiteStats;
@@ -135,6 +137,7 @@ pub(crate) struct State {
     /// user → their 站内提醒, oldest first
     notices: HashMap<Id, Vec<Notice>>,
     collections: HashMap<Id, Collection>,
+    series: HashMap<Id, Series>,
     /// The site-wide notice, once an admin has set one.
     announcement: Option<Announcement>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
@@ -218,6 +221,7 @@ impl State {
             st.notices.entry(n.user).or_default().push(n);
         }
         st.collections = snap.collections.into_iter().map(|c| (c.id, c)).collect();
+        st.series = snap.series.into_iter().map(|s| (s.id, s)).collect();
         for (want, user) in snap.want_votes {
             st.want_votes.entry(want).or_default().insert(user);
         }
@@ -398,11 +402,14 @@ impl Viewer<'_> {
     pub fn staff(&self) -> bool {
         self.level() >= Level::Reviewer
     }
-    /// The owner's import account (the script token). Everything a person submits, reviewers
-    /// and admins included, waits for another reviewer; only this account's bulk imports
-    /// (already vetted by the owner) don't.
+    /// The owner's import account (the script token).
     pub fn system(&self) -> bool {
         self.user.is_some_and(|u| u.email == SYSTEM_EMAIL)
+    }
+    /// Skips review: admins and the import account. Everything anyone else submits,
+    /// reviewers included, waits for a reviewer who didn't submit it.
+    pub fn exempt(&self) -> bool {
+        self.system() || self.level() >= Level::Admin
     }
     pub(crate) fn at_least(&self, l: Level) -> Result<&User> {
         match self.user {

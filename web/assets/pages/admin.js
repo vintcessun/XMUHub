@@ -436,7 +436,7 @@ const panels = {
           <label class="field"><span>链接 · <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer nofollow">打开看看</a> <span class="faint mono">${esc(host(s.url))}</span></span><input class="input" data-f="url" maxlength="400" value="${esc(s.url)}"></label></div>
         <label class="field"><span>说明</span><input class="input" data-f="note" maxlength="200" value="${esc(s.note)}"></label>
         <div class="meta"><span>${avatar(s.by.avatar, s.by.nickname, 20)} ${esc(s.by.nickname)} 推荐</span><span>${ago(s.created_at)}</span></div>
-        ${s.mine ? '<p class="small faint">这是你推荐的，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><label class="small">排序 <input class="input" data-f="sort" type="number" min="0" value="100" style="max-width:80px;min-height:30px;padding:3px 8px"></label><button class="btn sm ok" data-a="ok" type="button">采纳</button>
+        ${s.mine && me.level < 4 ? '<p class="small faint">这是你推荐的，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><label class="small">排序 <input class="input" data-f="sort" type="number" min="0" value="100" style="max-width:80px;min-height:30px;padding:3px 8px"></label><button class="btn sm ok" data-a="ok" type="button">采纳</button>
           <input class="input" data-f="reason" placeholder="不采纳的原因（推荐人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不采纳</button></div>`}
       </div></div>`).join('') : '<div class="empty"><b>没有待审核的推荐</b></div>'}</section>`;
     box.onclick = async (e) => {
@@ -456,7 +456,7 @@ const panels = {
       ${list.length ? list.map((c) => `<div class="item" data-id="${c.id}"><div class="body">
         <a class="title" href="/collections?id=${c.id}" target="_blank">${esc(c.title)}</a>${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}
         <div class="meta"><span>${c.count} 份</span><span>${avatar(c.owner.avatar, c.owner.nickname, 20)} ${esc(c.owner.nickname)}</span><span>${ago(c.updated_at)}</span></div>
-        ${c.mine ? '<p class="small faint">这是你的收藏夹，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button>
+        ${c.mine && me.level < 4 ? '<p class="small faint">这是你的收藏夹，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button>
           <input class="input" placeholder="不通过的原因（本人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不通过</button></div>`}
       </div></div>`).join('') : '<div class="empty"><b>没有待审核的收藏夹</b></div>'}</section>`;
     box.onclick = async (e) => {
@@ -466,6 +466,36 @@ const panels = {
       const note = it.querySelector('input').value.trim();
       if (b.dataset.a === 'no' && !note) return toast('写一下不通过的原因', true);
       try { await api(`/collections/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已公开' : '已处理'); } catch (err) { toast(err.message, true); }
+    };
+  },
+  async series(box) {
+    const list = await api('/review/series');
+    const itemLi = (i, cls) => `<li class="${cls}"><a href="/r/${i.id}" target="_blank">${esc(i.title)}</a>${i.status !== 'published' ? ` <span class="badge pending">${i.status === 'pending' ? '待审' : esc(i.status)}</span>` : ''}</li>`;
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学提议的合集：同一门课里按顺序排好的一组资料，通过后在课程页合成一行、资料页显示上一份 / 下一份。看名称是否合适、资料是否确实是一套、顺序对不对。
+      <b>＋</b> 新加入的，<s>删除线</s> 是要移出的。不通过要写原因（提议人能看到）。审核员自己提议的要由其他审核员审核。</p>
+      ${list.length ? list.map((s) => {
+        const d = s.draft;
+        const was = new Set(s.items.map((i) => i.id));
+        const now = new Set(d.items.map((i) => i.id));
+        const closing = !d.items.length;
+        const renamed = s.status === 'public' && s.title !== d.title;
+        return `<div class="item" data-id="${s.id}"><div class="body">
+        <b>${closing ? `申请解散合集「${esc(s.title)}」` : esc(d.title)}</b>${renamed ? ` <span class="small faint">原名「${esc(s.title)}」</span>` : ''}
+        <div class="meta"><span>${s.status === 'public' ? '修改' : '新合集'}</span><a href="/n/${s.node}" target="_blank">${esc(s.node_name)}</a>
+          <span>${avatar(d.by.avatar, d.by.nickname, 20)} ${esc(d.by.nickname)}${d.by.role ? ` · ${d.by.role}` : ''}</span><span>${ago(d.at)}</span></div>
+        ${closing ? '' : `<ol class="series-review">${d.items.map((i) => itemLi(i, s.status === 'public' && !was.has(i.id) ? 'add' : '')).join('')}</ol>`}
+        ${s.items.some((i) => !now.has(i.id)) ? `<ul class="series-review">${s.items.filter((i) => !now.has(i.id)).map((i) => itemLi(i, 'gone')).join('')}</ul>` : ''}
+        ${d.mine && me.level < 4 ? '<p class="small faint">这是你提议的，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button>
+          <input class="input" placeholder="不通过的原因（提议人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不通过</button></div>`}
+      </div></div>`;
+      }).join('') : '<div class="empty"><b>没有待审核的合集</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a]');
+      if (!b) return;
+      const it = b.closest('[data-id]');
+      const note = it.querySelector('input').value.trim();
+      if (b.dataset.a === 'no' && !note) return toast('写一下不通过的原因', true);
+      try { await api(`/series/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已通过' : '已处理'); } catch (err) { toast(err.message, true); }
     };
   },
   async announce(box) {

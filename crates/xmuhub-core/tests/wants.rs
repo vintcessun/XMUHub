@@ -9,7 +9,7 @@ use std::sync::Arc;
 use xmuhub_core::Hub;
 use xmuhub_core::db::Db;
 use xmuhub_core::hub::{CodePurpose, Limits, NodeInput, Registration, Viewer, WantFilter};
-use xmuhub_core::model::{User, WantStatus};
+use xmuhub_core::model::{Level, User, WantStatus};
 use xmuhub_core::storage::Storage;
 use xmuhub_core::storage::local::LocalBackend;
 
@@ -79,10 +79,16 @@ async fn wants_are_reviewed_then_answered() {
     let mine = h.wants(me, WantFilter::Mine, None).unwrap();
     assert_eq!(mine.iter().find(|x| x.id == bad.id).unwrap().review_note, "和资料无关");
 
-    // Staff posts wait for another reviewer too; a user can't flood the queue.
-    let own = h.add_want(staff, "征集马原期末", "", None).unwrap();
+    // Reviewers' posts wait for another reviewer too; admins' don't. A user can't flood the queue.
+    let rev = register(&h, "r@example.invalid", "reviewer");
+    h.update_user(staff, rev.id, Some(Level::Reviewer), None).unwrap();
+    let rev = h.user(rev.id).unwrap();
+    let reviewer = Viewer { user: Some(&rev) };
+    let own = h.add_want(reviewer, "征集马原期末", "", None).unwrap();
     assert_eq!(own.status, "pending");
-    assert!(h.review_want(staff, own.id, true, "").is_err(), "not their own");
+    assert!(h.review_want(reviewer, own.id, true, "").is_err(), "not their own");
+    h.review_want(staff, own.id, true, "").unwrap();
+    assert_eq!(h.add_want(staff, "征集毛概期末", "", None).unwrap().status, "open");
     for i in 0..3 {
         h.add_want(me, &format!("资料 {i}"), "", None).unwrap();
     }

@@ -652,6 +652,78 @@ export async function moveResources(ids) {
   } catch (e) { toast(e.message, true); return 0; }
 }
 
+// ---------------------------------------------------------------- 合集
+
+const byName = (a, b) => a.title.localeCompare(b.title, 'zh-CN', { numeric: true });
+
+/**
+ * 整理成合集 / 修改合集: name the set and put its files in order. Anyone signed in may propose;
+ * a reviewer who didn't propose it approves (admins' apply at once). `series` is the live
+ * 合集 being changed, or null for a new one made of the files `pick` (ids).
+ * Resolves true when the change is already live.
+ */
+export async function seriesEditor(node, series = null, pick = []) {
+  const admin = ((await me()) || {}).level >= 4;
+  let d;
+  try { d = await api(`/nodes/${node}`); } catch (e) { toast(e.message, true); return false; }
+  const byId = new Map(d.resources.map((r) => [r.id, r]));
+  const taken = new Map();
+  for (const s of d.series || []) if (!series || s.id !== series.id) for (const i of s.items) taken.set(i.id, s.title);
+  let items = series ? series.items.map((i) => i.id) : pick.filter((id) => byId.has(id)).sort((a, b) => byName(byId.get(a), byId.get(b)));
+  const body = modal(series ? `修改合集「${series.title}」` : '整理成合集', { wide: true });
+  return new Promise((resolve) => {
+    body.innerHTML = `<p class="small muted" style="margin-top:0">把这门课里连续的资料（第1讲…第12讲、历年期末…）按顺序排好，课程页上会合成一行，资料页可以直接切到上一份 / 下一份。
+      一份资料只能在一个合集里。${admin ? '你是管理员，提交后直接生效。' : '提交后由审核员审核，通过后显示。'}</p>
+      <label class="field"><span>合集名称 <em>*</em></span><input class="input" id="s_title" maxlength="40" value="${esc(series ? series.title : '')}" placeholder="如：数据结构课件（第1–12章）"></label>
+      <div class="row small" style="margin:10px 0 6px"><b id="s_count"></b><span class="grow"></span><button class="btn sm" id="s_sort" type="button">按名称排序</button></div>
+      <ol class="series-edit" id="s_list"></ol>
+      <details class="series-add"><summary class="small">添加这门课的其他资料</summary>
+        <input class="input" id="s_q" placeholder="按名称筛选" style="margin:8px 0">
+        <div id="s_more"></div></details>
+      <div class="row" style="margin-top:14px"><button class="btn primary" id="s_go" type="button">${admin ? '保存' : '提交审核'}</button>
+        ${series ? '<span class="grow"></span><button class="btn danger sm" id="s_close" type="button">解散合集</button>' : ''}</div>`;
+    const title = (id) => esc(byId.get(id)?.title || `资料 #${id}`);
+    const drawList = () => {
+      body.querySelector('#s_count').textContent = `顺序（${items.length} 份）`;
+      body.querySelector('#s_list').innerHTML = items.map((id, i) => `<li><span class="grow">${title(id)}</span>
+        <button class="btn sm" data-up="${i}" type="button"${i ? '' : ' disabled'} aria-label="上移">↑</button><button class="btn sm" data-down="${i}" type="button"${i < items.length - 1 ? '' : ' disabled'} aria-label="下移">↓</button><button class="btn sm" data-rm="${i}" type="button">移出</button></li>`).join('')
+        || '<li class="faint">还没有资料，从下面添加</li>';
+      drawMore();
+    };
+    const drawMore = () => {
+      const q = body.querySelector('#s_q').value.trim().toLowerCase();
+      const rest = [...byId.values()].filter((r) => !items.includes(r.id) && (!q || r.title.toLowerCase().includes(q))).sort(byName);
+      body.querySelector('#s_more').innerHTML = rest.map((r) => `<div class="row small series-cand"><span class="grow">${esc(r.title)}${taken.has(r.id) ? ` <span class="faint">（已在合集「${esc(taken.get(r.id))}」里）</span>` : ''}</span>
+        <button class="btn sm" data-add="${r.id}" type="button"${taken.has(r.id) ? ' disabled' : ''}>加入</button></div>`).join('') || '<p class="small faint">没有其他资料了</p>';
+    };
+    body.querySelector('#s_q').oninput = drawMore;
+    body.querySelector('#s_sort').onclick = () => { items.sort((a, b) => byName(byId.get(a) || { title: '' }, byId.get(b) || { title: '' })); drawList(); };
+    body.onclick = (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      const i = Number(b.dataset.up ?? b.dataset.down ?? b.dataset.rm);
+      if (b.dataset.up) [items[i - 1], items[i]] = [items[i], items[i - 1]];
+      else if (b.dataset.down) [items[i + 1], items[i]] = [items[i], items[i + 1]];
+      else if (b.dataset.rm) items.splice(i, 1);
+      else if (b.dataset.add) items.push(Number(b.dataset.add));
+      else return;
+      drawList();
+    };
+    const send = async (list) => {
+      try {
+        const s = await api(series ? `/series/${series.id}` : '/series', { method: series ? 'PUT' : 'POST', body: { node, title: body.querySelector('#s_title').value, items: list } });
+        const live = !s.draft;
+        toast(live ? (list.length ? '合集已更新' : '合集已解散') : '已提交，审核通过后显示');
+        body.close();
+        resolve(live);
+      } catch (err) { toast(err.message, true); }
+    };
+    body.querySelector('#s_go').onclick = () => send(items);
+    if (series) body.querySelector('#s_close').onclick = () => { if (confirm('解散这个合集？资料本身不受影响。')) send([]); };
+    drawList();
+  });
+}
+
 // ---------------------------------------------------------------- announcement
 
 const ANN_KEY = 'xmuhub.announce.closed';

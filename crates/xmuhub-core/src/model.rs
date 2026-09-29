@@ -658,6 +658,38 @@ pub struct Collection {
     pub review_note: String,
 }
 
+/// 合集: files of one course that belong together in a set order (第1讲…第12讲, 2019–2024 期末…),
+/// shown as one row on the course page, like a video 合集. Anyone signed in may propose one or a
+/// change to one; the change waits in `draft` until a reviewer other than its author approves it.
+/// A file is in at most one live 合集.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Series {
+    pub id: Id,
+    /// The course the files are in.
+    pub node: Id,
+    /// What visitors see (empty until the first proposal is approved).
+    pub title: String,
+    pub items: Vec<Id>,
+    pub created_by: Id,
+    pub created_at: i64,
+    pub updated_at: i64,
+    /// "new" (first proposal waiting or turned down), "public", or "closed" (解散).
+    pub status: String,
+    pub draft: Option<SeriesDraft>,
+    pub reviewed_by: Option<Id>,
+    /// Why the last proposal was turned down (shown to its author).
+    pub review_note: String,
+}
+
+/// A proposed title and file list for a 合集 (no files: 解散 the 合集).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SeriesDraft {
+    pub by: Id,
+    pub title: String,
+    pub items: Vec<Id>,
+    pub at: i64,
+}
+
 /// A link a student suggests for 站外资源: a reviewer (not the one who suggested it) adds it
 /// to the list or turns it down with a reason.
 #[derive(Debug, Clone, Serialize, Deserialize)]

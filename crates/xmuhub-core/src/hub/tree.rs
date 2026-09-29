@@ -207,7 +207,7 @@ impl Hub {
                 bucketed: input.bucketed,
                 sort: input.sort,
                 // Staff can file new categories anywhere, but another reviewer confirms them.
-                status: if actor.system() { NodeStatus::Active } else { NodeStatus::Pending },
+                status: if actor.exempt() { NodeStatus::Active } else { NodeStatus::Pending },
                 created_by: me.id,
                 created_at: now(),
             };
@@ -259,7 +259,7 @@ impl Hub {
                 n.parent = Some(target);
             }
             if p.approve && n.status == NodeStatus::Pending {
-                if n.created_by == me && !actor.system() {
+                if n.created_by == me && !actor.exempt() {
                     return Err(bad("自己新建的分类要由其他审核员确认"));
                 }
                 n.status = NodeStatus::Active;

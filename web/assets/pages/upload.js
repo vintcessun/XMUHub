@@ -81,7 +81,7 @@ window.addEventListener('beforeunload', (e) => {
     try { const d = await api(`/nodes/${startNode}`); pick(d.node, d.path); } catch { /* ignore */ }
   }
   showDraftNotice();
-  if (me.level !== 2) $('#hint').textContent = me.level >= 3 ? '你的上传要由另一位审核员通过后公开。' : '你的上传会在审核通过后公开。';
+  if (me.level !== 2) $('#hint').textContent = me.level >= 4 ? '你是管理员，上传后直接公开。' : me.level >= 3 ? '你的上传要由另一位审核员通过后公开。' : '你的上传会在审核通过后公开。';
 })();
 
 function yearOptions(cur) {

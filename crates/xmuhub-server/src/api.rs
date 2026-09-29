@@ -370,6 +370,10 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/collections/{id}/review", post(review_collection))
         .route("/review/collections", get(pending_collections))
         .route("/resources/{id}/collections", get(collections_with))
+        .route("/series", post(create_series))
+        .route("/series/{id}", get(series).put(change_series))
+        .route("/series/{id}/review", post(review_series))
+        .route("/review/series", get(pending_series))
         .route("/admin/avatars", get(pending_avatars))
         .route("/admin/avatars/{user}", post(review_avatar))
         .route("/admin/reports", get(reports))
@@ -652,6 +656,7 @@ async fn node(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
         "path": path.iter().map(node_brief).collect::<Vec<_>>(),
         "children": children.iter().map(|c| node_view(&app.hub, &c.node, c.count)).collect::<Vec<_>>(),
         "resources": resources.iter().map(|r| resource_view(&app, r, &info.node, &[], v)).collect::<Vec<_>>(),
+        "series": app.hub.node_series(v, info.node.id),
     })))
 }
 
@@ -800,7 +805,9 @@ async fn mine(State(app): S, auth: Auth, Query(q): Query<MineQ>) -> R<Json<Value
 
 async fn resource(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
     let (r, n, path) = app.hub.resource(auth.viewer(), id)?;
-    Ok(Json(resource_view(&app, &r, &n, &path, auth.viewer())))
+    let mut v = resource_view(&app, &r, &n, &path, auth.viewer());
+    v["series"] = json!(app.hub.series_of(auth.viewer(), id));
+    Ok(Json(v))
 }
 
 #[derive(Deserialize)]
@@ -1365,6 +1372,43 @@ async fn share_collection(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b)
     let hub = app.hub.clone();
     let user = auth.user.clone();
     Ok(Json(json!(blocking(move || hub.share_collection(Viewer { user: user.as_ref() }, id, b.on)).await?)))
+}
+
+#[derive(Deserialize)]
+struct SeriesIn {
+    #[serde(default)]
+    node: Id,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    items: Vec<Id>,
+}
+
+async fn create_series(State(app): S, auth: Auth, Json(b): Json<SeriesIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, None, b.node, &b.title, &b.items)).await?)))
+}
+
+async fn change_series(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<SeriesIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, Some(id), b.node, &b.title, &b.items)).await?)))
+}
+
+async fn series(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.series(auth.viewer(), id)?)))
+}
+
+async fn review_series(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<CollectionReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.review_series(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn pending_series(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.pending_series(auth.viewer())?)))
 }
 
 #[derive(Deserialize)]

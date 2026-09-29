@@ -9,7 +9,7 @@ use std::sync::Arc;
 use xmuhub_core::Hub;
 use xmuhub_core::db::Db;
 use xmuhub_core::hub::{CodePurpose, Limits, Registration, Viewer};
-use xmuhub_core::model::User;
+use xmuhub_core::model::{Level, User};
 use xmuhub_core::storage::Storage;
 use xmuhub_core::storage::local::LocalBackend;
 
@@ -57,12 +57,21 @@ async fn suggested_links_wait_for_another_reviewer() {
     h.review_link_suggestion(staff, bad.id, false, "和学习资料无关", None).unwrap();
     let mine = h.link_suggestions(me).unwrap();
     assert_eq!(mine.iter().find(|x| x.id == bad.id).unwrap().review_note, "和学习资料无关");
-    let own = h.suggest_link(staff, "审核员推荐", "https://staff.example.net/", "").unwrap();
-    assert!(h.review_link_suggestion(staff, own.id, true, "", None).is_err());
+    let rev = register(&h, "r@example.invalid", "reviewer");
+    h.update_user(staff, rev.id, Some(Level::Reviewer), None).unwrap();
+    let rev = h.user(rev.id).unwrap();
+    let reviewer = Viewer { user: Some(&rev) };
+    let own = h.suggest_link(reviewer, "审核员推荐", "https://staff.example.net/", "").unwrap();
+    assert!(h.review_link_suggestion(reviewer, own.id, true, "", None).is_err(), "reviewers don't pass their own");
+    // Admins are exempt: they may take their own suggestion (or add a link directly).
+    let adm = h.suggest_link(staff, "管理员推荐", "https://admin.example.net/", "").unwrap();
+    assert!(h.review_link_suggestion(staff, adm.id, true, "", None).unwrap().is_some());
+    assert!(h.add_link(reviewer, "直接加", "https://direct.example.net/", "", 1).is_err());
+    h.add_link(staff, "直接加", "https://direct.example.net/", "", 1).unwrap();
 
     drop(h);
     let h = open();
-    assert_eq!(h.links().len(), 1);
+    assert_eq!(h.links().len(), 3);
     assert_eq!(h.link_suggestions(staff).unwrap().len(), 1, "survives a restart");
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -202,7 +202,8 @@ impl Hub {
                 if st.collections.values().filter(|x| x.status == "pending").count() >= 200 {
                     return Err(Error::TooMany("待审核的收藏夹太多了，请稍后再试".into()));
                 }
-                c.status = "pending".into();
+                // Admins share straight away; everyone else waits for a reviewer.
+                c.status = if viewer.exempt() { "public" } else { "pending" }.into();
             } else {
                 c.status = "private".into();
             }
@@ -235,7 +236,7 @@ impl Hub {
             if c.status != "pending" {
                 return Err(Error::Conflict("这个收藏夹不在等待审核".into()));
             }
-            if c.user == me {
+            if c.user == me && !viewer.exempt() {
                 return Err(bad("自己的收藏夹要由其他审核员审核"));
             }
             c.status = if approve { "public" } else { "rejected" }.into();

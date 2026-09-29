@@ -141,7 +141,7 @@ impl Hub {
             if s.status != "pending" {
                 return Err(Error::Conflict("这个推荐已经处理过了".into()));
             }
-            if s.user == me {
+            if s.user == me && !viewer.exempt() {
                 return Err(bad("自己推荐的链接要由其他审核员审核"));
             }
             let mut added = None;
@@ -173,11 +173,11 @@ impl Hub {
         v
     }
 
-    /// Straight onto the list: only the owner's import account. Everyone else, staff too,
-    /// suggests a link for another reviewer.
+    /// Straight onto the list: admins and the owner's import account. Everyone else,
+    /// reviewers too, suggests a link for another reviewer.
     pub fn add_link(&self, actor: Viewer, title: &str, url: &str, note: &str, sort: u32) -> Result<Link> {
         let me = actor.at_least(Level::Reviewer)?.id;
-        if !actor.system() {
+        if !actor.exempt() {
             return Err(bad("新链接请在「推荐一个」里提交，由其他审核员审核"));
         }
         let (title, url, note) = checked(title, url, note)?;
@@ -195,7 +195,7 @@ impl Hub {
         let (title, url, note) = checked(title, url, note)?;
         self.mutate(|st, tx| {
             let mut l = st.links.get(&id).cloned().ok_or(Error::NotFound("链接"))?;
-            if l.url != url && !actor.system() {
+            if l.url != url && !actor.exempt() {
                 return Err(bad("换链接地址请重新推荐，由其他审核员审核"));
             }
             l.title = title;

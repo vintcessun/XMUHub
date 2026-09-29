@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, seriesEditor, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -75,6 +75,7 @@ async function load() {
       obs.observe(document.body, { childList: true });
     } catch (e) { toast(e.message, true); }
   };
+  seriesCard(r, me);
   if (me && (me.level >= 3 || r.mine)) renderManage(r, me);
   if (me && me.level >= 3) loadHistory();
   loadSocial(me);
@@ -186,12 +187,35 @@ $('#report').onclick = async (e) => {
   } catch (err) { toast(err.message, true); }
 };
 
+/** 合集 this file is in: 第 3 / 12 份, the neighbours, and the whole list, like a video 合集. */
+function seriesCard(r, me) {
+  const box = $('#series');
+  const s = r.series;
+  box.hidden = !s;
+  if (!s) return;
+  const at = s.items.findIndex((i) => i.id === r.id);
+  const prev = s.items[at - 1];
+  const next = s.items[at + 1];
+  box.innerHTML = `<div class="row"><b>合集</b><span class="grow"></span><span class="small muted">第 ${at + 1} / ${s.items.length} 份</span></div>
+    <p class="series-name">${esc(s.title)}</p>
+    <div class="row series-nav">${prev ? `<a class="btn sm" href="/r/${prev.id}" title="${esc(prev.title)}">‹ 上一份</a>` : '<span class="btn sm" aria-disabled="true">‹ 上一份</span>'}
+      ${next ? `<a class="btn sm primary" href="/r/${next.id}" title="${esc(next.title)}">下一份 ›</a>` : '<span class="btn sm" aria-disabled="true">下一份 ›</span>'}</div>
+    <ol class="series-list">${s.items.map((i, k) => `<li${i.id === r.id ? ' class="on" aria-current="true"' : ''}><span class="series-no">${k + 1}</span>
+      ${i.id === r.id ? `<b>${esc(i.title)}</b>` : `<a href="/r/${i.id}">${esc(i.title)}</a>`}</li>`).join('')}</ol>
+    ${me ? '<p class="small" style="margin:8px 0 0"><a href="#" id="sedit">修改合集</a></p>' : ''}`;
+  const cur = box.querySelector('li.on');
+  const list = box.querySelector('.series-list');
+  if (cur) list.scrollTop = cur.offsetTop - list.offsetTop - list.clientHeight / 2 + cur.clientHeight / 2;
+  const ed = box.querySelector('#sedit');
+  if (ed) ed.onclick = async (e) => { e.preventDefault(); if (await seriesEditor(r.node.id, s)) load(); };
+}
+
 async function renderManage(r, me) {
   const box = $('#manage');
   box.hidden = false;
   // On their own files reviewers are uploaders like anyone: someone else reviews the file,
-  // its edits and their note / removal requests.
-  const staff = me.level >= 3 && !r.mine;
+  // its edits and their note / removal requests. Admins are exempt.
+  const staff = me.level >= 4 || (me.level >= 3 && !r.mine);
   // Uploaders edit their pending and published files (a published one goes back to review).
   const canEdit = staff || r.status === 'pending' || r.status === 'published';
   const m = canEdit ? await meta() : null;

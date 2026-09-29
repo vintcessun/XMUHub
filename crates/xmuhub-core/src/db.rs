@@ -46,6 +46,8 @@ pub const FOLLOWS: TableDefinition<&[u8], u8> = TableDefinition::new("follows");
 pub const NOTICES: TableDefinition<u64, &[u8]> = TableDefinition::new("notices");
 /// id → Collection (收藏夹).
 pub const COLLECTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("collections");
+/// id → Series (合集).
+pub const SERIES: TableDefinition<u64, &[u8]> = TableDefinition::new("series");
 /// id → LinkSuggestion (a 站外资源 link waiting for a reviewer, or its outcome).
 pub const LINK_SUGGESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("link_suggestions");
 /// id → Want (a 求资料 post).
@@ -107,6 +109,7 @@ pub struct Snapshot {
     pub follows: Vec<(Id, Id)>,
     pub notices: Vec<Notice>,
     pub collections: Vec<Collection>,
+    pub series: Vec<Series>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -152,6 +155,7 @@ impl Db {
         txn.open_table(FOLLOWS)?;
         txn.open_table(NOTICES)?;
         txn.open_table(COLLECTIONS)?;
+        txn.open_table(SERIES)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -249,6 +253,9 @@ impl Db {
         for row in txn.open_table(COLLECTIONS)?.iter()? {
             snap.collections.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(SERIES)?.iter()? {
+            snap.series.push(decode(row?.1.value())?);
+        }
         for row in txn.open_table(WANT_REPLIES)?.iter()? {
             snap.want_replies.push(decode(row?.1.value())?);
         }
@@ -307,6 +314,7 @@ impl Db {
             follows: snap.follows,
             notices: snap.notices,
             collections: snap.collections,
+            series: snap.series,
         };
         serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
@@ -363,6 +371,8 @@ pub struct Dump {
     pub notices: Vec<Notice>,
     #[serde(default)]
     pub collections: Vec<Collection>,
+    #[serde(default)]
+    pub series: Vec<Series>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -515,6 +525,10 @@ impl Tx<'_> {
     }
     pub fn del_collection(&self, id: Id) -> Result<()> {
         self.txn.open_table(COLLECTIONS)?.remove(id)?;
+        Ok(())
+    }
+    pub fn put_series(&self, s: &Series) -> Result<()> {
+        self.txn.open_table(SERIES)?.insert(s.id, encode(s).as_slice())?;
         Ok(())
     }
     pub fn put_link_suggestion(&self, s: &LinkSuggestion) -> Result<()> {

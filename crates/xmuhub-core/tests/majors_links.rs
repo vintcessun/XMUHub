@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use xmuhub_core::Hub;
 use xmuhub_core::db::Db;
 use xmuhub_core::hub::{AdminExtras, CodePurpose, Limits, NodeInput, PartSpec, Registration, ResourceInput, Viewer};
-use xmuhub_core::model::{Id, User};
+use xmuhub_core::model::{Id, Level, User};
 use xmuhub_core::storage::github::{RepoFile, RepoScan};
 use xmuhub_core::storage::local::LocalBackend;
 use xmuhub_core::storage::{Receipt, Storage};
@@ -87,15 +87,19 @@ fn links_are_kept_by_staff() {
     let (staff, me, import) = (Viewer { user: Some(&admin) }, Viewer { user: Some(&student) }, Viewer { user: Some(&system) });
 
     assert!(h.add_link(me, "合集", "https://example.com/x", "", 0).is_err(), "contributors can't add");
-    assert!(h.add_link(staff, "合集", "https://example.com/x", "", 0).is_err(), "staff suggest links like everyone");
+    let rev = register(&h, "r@example.invalid", "reviewer");
+    h.update_user(staff, rev.id, Some(Level::Reviewer), None).unwrap();
+    let rev = h.user(rev.id).unwrap();
+    let reviewer = Viewer { user: Some(&rev) };
+    assert!(h.add_link(reviewer, "合集", "https://example.com/x", "", 0).is_err(), "reviewers suggest links like everyone");
     for bad in ["javascript:alert(1)", "ftp://example.com", "https://", "https://exa mple.com", "https://example.com/\"x"] {
         assert!(h.add_link(import, "合集", bad, "", 0).is_err(), "{bad}");
     }
     let b = h.add_link(import, "网盘合集", "https://pan.example.com/s/1", "提取码 abcd", 20).unwrap();
     let a = h.add_link(import, "XMU-CS-exam", "https://github.com/example/XMU-CS-exam", "", 10).unwrap();
     assert_eq!(h.links().iter().map(|l| l.id).collect::<Vec<_>>(), vec![a.id, b.id], "sorted by the sort number");
-    assert!(h.update_link(staff, b.id, "网盘合集", "https://pan.example.com/s/2", "", 5).is_err(), "a new address is a new suggestion");
-    h.update_link(staff, b.id, "网盘合集（新）", "https://pan.example.com/s/1", "", 5).unwrap();
+    assert!(h.update_link(reviewer, b.id, "网盘合集", "https://pan.example.com/s/2", "", 5).is_err(), "a new address is a new suggestion");
+    h.update_link(reviewer, b.id, "网盘合集（新）", "https://pan.example.com/s/1", "", 5).unwrap();
     assert_eq!(h.links()[0].title, "网盘合集（新）");
     assert!(h.delete_link(me, a.id).is_err());
     h.delete_link(staff, a.id).unwrap();

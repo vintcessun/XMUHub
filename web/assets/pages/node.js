@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtSize, layout, loginUrl, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, loginUrl, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, seriesEditor, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -21,6 +21,25 @@ function syncUrl() {
 }
 
 let staff = false;
+let signedIn = false;
+// 合集 the reader opened, kept open when the list is drawn again.
+const openSeries = new Set();
+
+const row = (r) => resourceItem(r, { showNode: false })
+  .replace('<div class="item">', `<div class="item"><input type="checkbox" class="rsel" data-id="${r.id}" data-size="${r.size}" aria-label="选择">`);
+
+/** A 合集 as one row, like a video 合集: opens to its files in order. */
+function seriesRow(s, items) {
+  const size = items.reduce((a, r) => a + r.size, 0);
+  return `<details class="series" data-sid="${s.id}"${openSeries.has(s.id) ? ' open' : ''}>
+    <summary class="item series-head"><div class="ficon series-icon" aria-hidden="true">合集</div>
+      <div class="body"><span class="title">${esc(s.title)}</span>
+        <div class="meta"><span class="tag t-series">合集</span><span>共 ${items.length} 份</span><span>${fmtSize(size)}</span></div></div>
+      <span class="series-toggle small muted"></span></summary>
+    <div class="series-items">${items.map((r, i) => row(r).replace('<div class="item">', `<div class="item"><span class="series-no">${i + 1}</span>`)).join('')}
+      <div class="row series-tools"><button class="btn sm" data-sdl="${s.id}" type="button">下载整个合集</button>
+        ${signedIn ? `<button class="btn sm" data-sedit="${s.id}" type="button">修改合集</button>` : ''}</div></div></details>`;
+}
 
 function renderList() {
   const time = $('#time').value;
@@ -28,10 +47,19 @@ function renderList() {
     && (!major || (major === '-' ? !r.major : r.major === major)));
   const bar = rs.length > 1 || staff ? `<div class="selbar"><label class="small"><input type="checkbox" id="selall"> 全选</label>
     <button class="btn sm" id="dlsel" type="button" disabled>批量下载</button>
+    ${signedIn && rs.length > 1 ? '<button class="btn sm" id="mksel" type="button" title="把选中的资料按顺序合成一个合集">整理成合集</button>' : ''}
     ${staff ? '<button class="btn sm" id="mvsel" type="button">移动选中到其他分类</button>' : ''}<span class="small faint" id="selcount"></span></div>` : '';
+  // 合集 fold their files into one row; with a filter on, files are listed one by one.
+  const grouped = !bucket && !time && !major;
+  const seriesOf = new Map();
+  if (grouped) for (const s of data.series || []) for (const i of s.items) seriesOf.set(i.id, s);
+  const byId = new Map(rs.map((r) => [r.id, r]));
+  // 合集 first (in the order they were made), then the loose files.
+  const rows = grouped ? (data.series || []).map((s) => [s, s.items.map((i) => byId.get(i.id)).filter(Boolean)])
+    .filter(([, items]) => items.length).map(([s, items]) => seriesRow(s, items)) : [];
+  for (const r of rs) if (!seriesOf.has(r.id)) rows.push(row(r));
   $('#list').innerHTML = rs.length
-    ? bar + rs.map((r) => resourceItem(r, { showNode: false })
-      .replace('<div class="item">', `<div class="item"><input type="checkbox" class="rsel" data-id="${r.id}" data-size="${r.size}" aria-label="选择">`)).join('')
+    ? bar + rows.join('')
     : `<div class="empty"><b>这里还没有资料</b><a href="/upload?node=${data.node.id}">上传第一份</a> · <a href="/wants?node=${data.node.id}">去求资料</a></div>`;
 }
 
@@ -88,9 +116,11 @@ async function load() {
 
   const me = await mePromise;
   followButton(n, me);
-  if (me && me.level >= 3) {
-    renderEditor(n);
-    if (!staff) { staff = true; renderList(); }
+  if (me && me.level >= 3) renderEditor(n);
+  if (me && (!signedIn || staff !== me.level >= 3)) {
+    signedIn = true;
+    staff = me.level >= 3;
+    renderList();
   }
 }
 
@@ -136,10 +166,28 @@ $('#list').addEventListener('change', (e) => {
 const DL_MAX = 30;
 const DL_MAX_BYTES = 2 * 1024 ** 3;
 let dlBusy = false;
-$('#list').addEventListener('click', async (e) => {
+$('#list').addEventListener('click', (e) => {
   const b = e.target.closest('#dlsel');
-  if (!b || dlBusy) return;
-  const sel = [...document.querySelectorAll('#list .rsel:checked')];
+  if (b && !dlBusy) batchDownload([...document.querySelectorAll('#list .rsel:checked')], b);
+  const all = e.target.closest('[data-sdl]');
+  if (all && !dlBusy) batchDownload([...all.closest('.series').querySelectorAll('.rsel')], all);
+});
+$('#list').addEventListener('toggle', (e) => {
+  const d = e.target.closest?.('.series');
+  if (d) { if (d.open) openSeries.add(Number(d.dataset.sid)); else openSeries.delete(Number(d.dataset.sid)); }
+}, true);
+$('#list').addEventListener('click', async (e) => {
+  const mk = e.target.closest('#mksel');
+  const ed = e.target.closest('[data-sedit]');
+  if (!mk && !ed) return;
+  const s = ed && (data.series || []).find((x) => x.id === Number(ed.dataset.sedit));
+  const ids = mk ? [...document.querySelectorAll('#list .rsel:checked')].map((c) => Number(c.dataset.id)) : [];
+  if (mk && ids.length < 2) return toast('先勾选至少两份要放进合集的资料', true);
+  if (await seriesEditor(data.node.id, s || null, ids)) load();
+});
+
+async function batchDownload(sel, b) {
+  const label = b.textContent;
   const size = sel.reduce((a, c) => a + Number(c.dataset.size), 0);
   if (sel.length > DL_MAX) return toast(`一次最多下载 ${DL_MAX} 份，请少选一些`, true);
   if (size > DL_MAX_BYTES) return toast(`一次最多下载 ${fmtSize(DL_MAX_BYTES)}，请少选一些`, true);
@@ -154,12 +202,12 @@ $('#list').addEventListener('click', async (e) => {
       if (!res.ok) failed.push({ id, plan: res.plan });
     } catch { failed.push({ id, plan: null }); }
   }
-  b.textContent = '批量下载';
+  b.textContent = label;
   b.disabled = false;
   dlBusy = false;
   if (failed.length) dlFailed(failed, sel.length);
   else toast(`已下载 ${sel.length} 份`);
-});
+}
 /** Files no mirror would hand to the page: a link each (a click lets the browser download it
  * from the mirror itself); split files go to their own page, which joins the volumes. */
 function dlFailed(failed, total) {

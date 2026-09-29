@@ -150,7 +150,7 @@ async fn content_abuse_is_contained() {
 }
 
 #[tokio::test]
-async fn staff_uploads_wait_for_another_reviewer() {
+async fn reviewer_uploads_wait_for_another_reviewer() {
     let (h, dir) = open("staffupload");
     let (_, admin) = register(&h, "a@example.invalid", "admin");
     let (_, second) = register(&h, "r@example.invalid", "reviewer");
@@ -159,40 +159,46 @@ async fn staff_uploads_wait_for_another_reviewer() {
     let second = h.user(second.id).unwrap();
     let reviewer = Viewer { user: Some(&second) };
     let section = h.create_node(staff, NodeInput { parent: None, kind: "section".into(), code: String::new(), name: "专业课".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
-    let course = h.create_node(staff, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "数据结构".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
+    let course = h.create_node(reviewer, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "数据结构".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
 
-    let id = upload(&h, &dir, staff, course, b"admin's own file").await;
-    assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Pending, "no review exemption for staff");
-    assert!(h.review(staff, id, "approve", "").is_err(), "not by its own uploader");
-    assert!(h.review_batch(staff, None, true).unwrap().is_empty(), "nor handed to them in a batch");
-    assert_eq!(h.review_batch(reviewer, None, true).unwrap().len(), 1);
-    h.review(reviewer, id, "approve", "").unwrap();
+    let id = upload(&h, &dir, reviewer, course, b"reviewer's own file").await;
+    assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Pending, "no review exemption for reviewers");
+    assert!(h.review(reviewer, id, "approve", "").is_err(), "not by its own uploader");
+    assert!(h.review_batch(reviewer, None, true).unwrap().is_empty(), "nor handed to them in a batch");
+    assert_eq!(h.review_batch(staff, None, true).unwrap().len(), 1);
+    h.review(staff, id, "approve", "").unwrap();
     assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Published);
 
-    // Categories staff create wait for another reviewer too (approving a file in it counts).
+    // Categories reviewers create wait for another reviewer too (approving a file in it counts).
     let course_node = h.node(staff, course).unwrap().0.node;
     assert_eq!(course_node.status, NodeStatus::Active, "confirmed by approving the file in it");
-    let other = h.create_node(staff, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "操作系统".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
+    let other = h.create_node(reviewer, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "操作系统".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
     assert_eq!(h.node(staff, other).unwrap().0.node.status, NodeStatus::Pending);
-    assert!(h.update_node(staff, other, NodePatch { approve: true, ..Default::default() }).is_err(), "not their own");
-    h.update_node(reviewer, other, NodePatch { approve: true, ..Default::default() }).unwrap();
+    assert!(h.update_node(reviewer, other, NodePatch { approve: true, ..Default::default() }).is_err(), "not their own");
+    h.update_node(staff, other, NodePatch { approve: true, ..Default::default() }).unwrap();
 
     // Editing their own published file sends it back to review; so does asking to publish directly.
     let mut changed = input(course);
     changed.extra = "改过".into();
-    h.update_resource(staff, id, changed, AdminExtras::default()).unwrap();
+    h.update_resource(reviewer, id, changed, AdminExtras::default()).unwrap();
     assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Pending);
-    h.review(reviewer, id, "approve", "").unwrap();
+    h.review(staff, id, "approve", "").unwrap();
     let sha = hex::encode(Sha256::digest(b"straight to published?"));
-    let plan = h.begin_upload(staff, "卷子.pdf", "application/pdf", vec![PartSpec { size: 22, sha256: sha.clone() }]).await.unwrap();
+    let plan = h.begin_upload(reviewer, "卷子.pdf", "application/pdf", vec![PartSpec { size: 22, sha256: sha.clone() }]).await.unwrap();
     std::fs::write(dir.join("files").join(&sha), b"straight to published?").unwrap();
-    h.confirm_part(staff, plan.upload_id, 0, Receipt { asset_id: None }).await.unwrap();
+    h.confirm_part(reviewer, plan.upload_id, 0, Receipt { asset_id: None }).await.unwrap();
     let extras = AdminExtras { status: Some("published".into()), ..Default::default() };
-    assert_eq!(h.create_resource(staff, plan.upload_id, input(other), extras).unwrap().status, Status::Pending);
+    assert_eq!(h.create_resource(reviewer, plan.upload_id, input(other), extras).unwrap().status, Status::Pending);
 
     // Their own note / removal requests go to someone else as well.
-    let q = h.request_resource_change(staff, id, "note", "新备注").unwrap();
-    assert!(h.review_resource_change(staff, q.id, true, "").is_err());
-    h.review_resource_change(reviewer, q.id, true, "").unwrap();
+    let q = h.request_resource_change(reviewer, id, "note", "新备注").unwrap();
+    assert!(h.review_resource_change(reviewer, q.id, true, "").is_err());
+    h.review_resource_change(staff, q.id, true, "").unwrap();
+
+    // Admins are exempt: their uploads and categories go live at once.
+    let mine = upload(&h, &dir, staff, course, b"admin's own file").await;
+    assert_eq!(h.resource(staff, mine).unwrap().0.status, Status::Published);
+    let third = h.create_node(staff, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "编译原理".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
+    assert_eq!(h.node(staff, third).unwrap().0.node.status, NodeStatus::Active);
     let _ = std::fs::remove_dir_all(dir);
 }

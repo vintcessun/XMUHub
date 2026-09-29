@@ -1,4 +1,4 @@
-import { api, esc, fmtSize, layout, loginUrl, meta, pathText, pickFromTree, qs, sendPart, store, toast, tree, $ } from '../app.js';
+import { api, esc, fmtSize, layout, loginUrl, meta, modal, pathText, pickFromTree, qs, sendPart, store, toast, tree, $ } from '../app.js';
 
 const state = { node: null, path: [], rows: [], busy: false };
 let M = null; // meta
@@ -588,9 +588,60 @@ async function renewTarget(uploadId, index, failed) {
   return (await api(`/uploads/${uploadId}/parts/${index}/renew${viaRelay ? '?via=relay' : ''}`, { method: 'POST' })).target;
 }
 
+/** Files following the picked category whose names say another course (checked again at submit:
+ * the category may have been picked after the files were added). */
+async function mismatches(todo) {
+  const t = await tree().catch(() => null);
+  const mine = t && state.node && courseOf(t, state.node.id);
+  if (!t || !state.node) return { follow: 0, off: [] };
+  const follow = todo.filter((r) => !r.node);
+  const off = [];
+  for (const r of follow) {
+    const c = courseIn(r.file.name, t);
+    if (!c || (mine && sameName(mine, c)) || within(t, state.node.id, c.id)) continue;
+    off.push({ r, c, twins: twinsOf(c, t).length > 0 });
+  }
+  return { follow: follow.length, off };
+}
+
+/** Half or more of the files look like another course than the picked one: ask before sending
+ * them all there (a whole batch once went under 微积分I this way). Resolves true to go on. */
+async function confirmCategory(todo) {
+  const { follow, off } = await mismatches(todo);
+  if (!off.length || off.length * 2 < follow) return true;
+  const names = [...new Set(off.map((x) => x.c.name))];
+  const movable = off.filter((x) => !x.twins);
+  return new Promise((resolve) => {
+    const body = modal('分类好像不对');
+    let answered = false;
+    const done = (v) => { answered = true; body.close(); resolve(v); };
+    body.innerHTML = `<p>你选的分类是「<b>${esc(state.node.name)}</b>」，但这 ${follow} 个文件里有 <b>${off.length}</b> 个的文件名看起来属于别的课程：${names.slice(0, 5).map((n) => `「${esc(n)}」`).join('')}${names.length > 5 ? ` 等 ${names.length} 门` : ''}。</p>
+      <p class="small muted">放错课程的资料别人很难找到，审核员也要一份份挪。${off.length > movable.length ? '有些课程名在几个学院都有，按文件名没法确定是哪个，请逐个选一下。' : ''}</p>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap">
+        ${movable.length ? `<button class="btn primary sm" data-a="move" type="button">按文件名放过去（${movable.length} 个）</button>` : ''}
+        <button class="btn sm" data-a="back" type="button">回去逐个检查</button>
+        <button class="btn sm" data-a="go" type="button">确定都放到「${esc(state.node.name)}」</button></div>`;
+    body.onclick = (e) => {
+      const a = e.target.closest('[data-a]')?.dataset.a;
+      if (!a) return;
+      if (a === 'move') {
+        for (const x of movable) x.r.node = brief(x.c);
+        saveDraft();
+        renderRows();
+        toast(`已把 ${movable.length} 个文件放到文件名对应的课程，检查一下再点上传`);
+      }
+      done(a === 'go');
+    };
+    // Closed with × or Esc: don't upload.
+    const obs = new MutationObserver(() => { if (!body.isConnected) { obs.disconnect(); if (!answered) resolve(false); } });
+    obs.observe(document.body, { childList: true });
+  });
+}
+
 $('#submit').onclick = async () => {
   const todo = state.rows.filter((r) => !r.done);
   if (!todo.length) return toast('请先添加文件', true);
+  if (!(await confirmCategory(todo))) return;
   // Files with no category (none picked, none recognised from the name) go to 「待整理」.
   if (todo.some((r) => !nodeOf(r))) {
     try {

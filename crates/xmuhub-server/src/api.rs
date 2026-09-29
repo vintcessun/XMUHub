@@ -385,6 +385,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/admin/daily", get(daily))
         .route("/admin/users", get(users))
         .route("/admin/users/{id}", axum::routing::patch(update_user))
+        .route("/admin/users/{id}/purge", post(purge_user))
         .route("/admin/status", get(status))
         .route("/admin/github/scan", post(gh_scan))
         .route("/admin/github/import", post(gh_import))
@@ -1652,6 +1653,18 @@ async fn handle_report(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): J
 
 async fn users(State(app): S, auth: Auth, Query(q): Query<Q>) -> R<Json<Value>> {
     Ok(Json(json!(app.hub.users(auth.viewer(), q.q.as_deref().unwrap_or(""))?.iter().map(user_view).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct PurgeIn {
+    #[serde(default)]
+    reason: String,
+}
+
+async fn purge_user(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<PurgeIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    Ok(Json(json!(blocking(move || hub.purge_user(Viewer { user: user.as_ref() }, id, &b.reason)).await?)))
 }
 
 #[derive(Deserialize)]

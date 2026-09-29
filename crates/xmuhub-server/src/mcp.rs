@@ -239,6 +239,7 @@ const API: &[(&str, &str, &str)] = &[
     ("POST", "/series", "提议新合集 {node, title, source?（来源）, year?（年份）, items:[资料 id，按顺序]}（至少两份，同一门课，审核通过后显示；自己刚上传、还在审核的资料也可以放）"),
     ("PUT", "/series/{id}", "提议修改合集 {title, source?, year?, items}；items 为空表示解散（同样要审核）"),
     ("GET", "/review/series", "审核员：等待审核的合集提议"),
+    ("POST", "/admin/users/{id}/purge", "管理员：封禁并清理账号 {reason?}：资料未通过/下架（文件不删）、评论和回复删除、评分撤销、求资料/合集提议/推荐链接驳回、收藏夹取消公开、头像和令牌清除"),
     ("POST", "/series/{id}/review", "审核员：{approve, note?（不通过时必填）, with_files?（通过时连同里面待审的资料一起通过）}"),
     ("POST", "/collections/{id}/review", "审核员：{approve, note?（不通过时必填）}"),
     ("GET", "/links", "友情链接"),

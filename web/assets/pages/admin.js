@@ -565,7 +565,7 @@ const panels = {
       ${list.map((u) => `<tr data-id="${u.id}"><td>${esc(u.nickname)}</td><td class="small">${esc(u.email)}${u.xmu ? ' <span class="badge published">厦大</span>' : ''}</td>
         <td>${u.id === me.id || u.level >= me.level ? `${LEVELS[u.level]}${u.level === 4 ? ' <span class="small faint">（名单）</span>' : ''}` : `<select class="input" data-f="level" style="min-height:30px;padding:2px 8px">${opts(u.level)}</select>`}</td>
         <td>${u.uploads}</td><td class="small faint">${fmtDate(u.created_at)}</td>
-        <td>${u.id === me.id ? '<span class="small faint">你自己</span>' : u.level >= me.level ? '<span class="small faint">同级</span>' : `<button class="btn sm ${u.banned ? '' : 'danger'}" data-a="ban">${u.banned ? '解除封禁' : '封禁'}</button>`}</td></tr>`).join('')}
+        <td>${u.id === me.id ? '<span class="small faint">你自己</span>' : u.level >= me.level ? '<span class="small faint">同级</span>' : `<button class="btn sm ${u.banned ? '' : 'danger'}" data-a="ban">${u.banned ? '解除封禁' : '封禁'}</button>${me.level >= 4 ? ` <button class="btn sm danger" data-a="purge" title="封禁账号，并撤掉他发的所有东西">封禁并清理</button>` : ''}`}</td></tr>`).join('')}
       </tbody></table></section>`;
     box.querySelector('#uq').onsubmit = (e) => { e.preventDefault(); panels.users(box, box.querySelector('#uqv').value); };
     box.onchange = async (e) => {
@@ -574,6 +574,8 @@ const panels = {
       try { await api(`/admin/users/${sel.closest('tr').dataset.id}`, { method: 'PATCH', body: { level: Number(sel.value) } }); toast('角色已更新'); } catch (err) { toast(err.message, true); }
     };
     box.onclick = async (e) => {
+      const p = e.target.closest('[data-a="purge"]');
+      if (p) return purgeDialog(list.find((u) => String(u.id) === p.closest('tr').dataset.id), () => panels.users(box, q));
       const b = e.target.closest('[data-a="ban"]');
       if (!b) return;
       const banned = b.textContent === '封禁';
@@ -722,6 +724,31 @@ function releaseBatch() {
 window.addEventListener('pagehide', () => { if (current === 'queue') releaseBatch(); });
 
 // Complaints, feedback, the full review log and accounts are admin-only (the server enforces it).
+/** 封禁并清理: bans the account and takes back everything it posted, after one confirmation. */
+function purgeDialog(u, done) {
+  const body = modal(`封禁并清理「${u.nickname}」`);
+  body.innerHTML = `<p class="small">会一次做完下面这些，<b>资料文件本身不删</b>（只改状态，需要时可以在资料页逐个恢复）：</p>
+    <ul class="small muted" style="margin:0 0 10px;padding-left:20px">
+      <li>封禁账号，退出所有登录，作废他的 API 令牌</li>
+      <li>他上传的 ${u.uploads} 份资料：待审的标为未通过，已公开的下架</li>
+      <li>评论、求资料的回复删除；他打的评分不再计入</li>
+      <li>求资料帖、合集提议、推荐的链接驳回；收藏夹取消公开；头像清掉</li></ul>
+    <label class="field"><span>原因（资料和帖子上会显示给审核员和本人）</span><input class="input" id="pg_reason" maxlength="200" value="账号因滥用被封禁，内容已清理"></label>
+    <label class="field"><span>确认：输入昵称「${esc(u.nickname)}」</span><input class="input" id="pg_confirm" autocomplete="off"></label>
+    <div class="row"><button class="btn danger" id="pg_go" type="button">封禁并清理</button><span class="small faint" id="pg_msg"></span></div>`;
+  body.querySelector('#pg_go').onclick = async () => {
+    if (body.querySelector('#pg_confirm').value.trim() !== u.nickname) return toast('昵称不对，没有执行', true);
+    const go = body.querySelector('#pg_go');
+    go.disabled = true;
+    body.querySelector('#pg_msg').textContent = '处理中…';
+    try {
+      const r = await api(`/admin/users/${u.id}/purge`, { method: 'POST', body: { reason: body.querySelector('#pg_reason').value } });
+      body.innerHTML = `<div class="notice ok">已封禁「${esc(u.nickname)}」并清理：资料未通过 ${r.rejected} 份、下架 ${r.removed} 份，评论 ${r.comments} 条，评分 ${r.ratings} 个，求资料 ${r.wants} 条、回复 ${r.want_replies} 条，合集提议 ${r.series} 个，收藏夹 ${r.collections} 个，推荐链接 ${r.links} 个，令牌 ${r.tokens} 个${r.avatar ? '，头像已清掉' : ''}。</div>`;
+      done();
+    } catch (err) { go.disabled = false; body.querySelector('#pg_msg').textContent = ''; toast(err.message, true); }
+  };
+}
+
 const ADMIN_TABS = ['reports', 'feedback', 'log', 'users', 'announce'];
 
 async function show(name) {

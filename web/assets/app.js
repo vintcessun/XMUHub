@@ -78,6 +78,21 @@ export function meta() {
 let treeCache = null;
 let treeAt = 0;
 /** The whole category tree: { list, byId, children(id) }. */
+const zh = new Intl.Collator('zh-CN', { numeric: true });
+/**
+ * Sibling order (in place): numbered groups keep the scheme's order (A1 思政, A2 数学 …);
+ * unnumbered colleges and courses follow them by 拼音 initial, so a long list can be scanned.
+ * Levels (I-1, 上 …) keep the server's order; a `sort` set by hand wins over both.
+ */
+export function sortNodes(list) {
+  const key = (n) => (n.kind === 'level' ? 0 : n.code ? 1 : 2);
+  const idx = new Map(list.map((n, i) => [n, i]));
+  const pos = (n) => n.sort || Infinity; // an order set by hand comes first
+  return list.sort((a, b) => (pos(a) === pos(b) ? 0 : pos(a) - pos(b)) || key(a) - key(b)
+    || (key(a) === 1 ? zh.compare(a.code, b.code) : key(a) === 2 ? zh.compare(a.name, b.name) : 0)
+    || idx.get(a) - idx.get(b));
+}
+
 export function tree() {
   if (!treeCache || Date.now() - treeAt > STALE) {
     treeAt = Date.now();
@@ -89,6 +104,8 @@ export function tree() {
         if (!kids.has(k)) kids.set(k, []);
         kids.get(k).push(n);
       }
+      // The top-level sections keep the order of the scheme (校选课 · 公共课 · 专业课 …).
+      for (const [p, k] of kids) if (p) sortNodes(k);
       return { list, byId, children: (id) => kids.get(id ?? 0) || [] };
     });
   }
@@ -419,7 +436,7 @@ export async function fetchPart(part, urls, onBytes, alive = () => true) {
  * to that same fastest mirror (full speed, ASCII filename). Multi-part files must be fetched
  * and joined in the browser, so every mirror is tried for each part.
  */
-export async function downloadResource(id, onProgress = () => {}) {
+export async function downloadResource(id, onProgress = () => {}, { batch = false } = {}) {
   const plan = await api(`/resources/${id}/download`);
   const total = plan.size;
   const single = plan.parts.length === 1;
@@ -440,7 +457,15 @@ export async function downloadResource(id, onProgress = () => {}) {
     // checksum; use the plain GitHub address (the last one) instead.
     if (single) {
       const urls = plan.parts[0].urls;
-      location.href = e && e.integrity ? urls[urls.length - 1] : urls[0];
+      const url = e && e.integrity ? urls[urls.length - 1] : urls[0];
+      // In a batch the next file would cancel a page navigation; a frame per file doesn't.
+      if (batch) {
+        const f = document.createElement('iframe');
+        f.hidden = true;
+        f.src = url;
+        document.body.appendChild(f);
+        setTimeout(() => f.remove(), 120_000);
+      } else location.href = url;
       return { ok: true, fallback: true };
     }
     return { ok: false, plan, error: e };

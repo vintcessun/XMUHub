@@ -1,4 +1,4 @@
-import { esc, layout, levelBadge, qs, store, tree, $ } from '../app.js';
+import { api, esc, fmtSize, layout, levelBadge, qs, store, tree, $ } from '../app.js';
 
 layout('browse');
 
@@ -7,6 +7,19 @@ const picking = qs.get('pick') === '1';
 const OPEN_KEY = 'xmuhub.tree.open';
 let open = new Set(JSON.parse(store.get(OPEN_KEY) || '[]'));
 let filter = '';
+// 逛书架: a course without sub-levels opens to its files, loaded when first opened.
+const shelf = new Map(); // node id -> resources, or null while loading
+const shelfOpen = new Set();
+const SHELF_MAX = 12;
+
+function shelfHtml(n) {
+  const rs = shelf.get(n.id);
+  if (!rs) return '<ul class="shelf"><li class="faint small">加载中…</li></ul>';
+  if (!rs.length) return '<ul class="shelf"><li class="faint small">还没有公开的资料</li></ul>';
+  return `<ul class="shelf">${rs.slice(0, SHELF_MAX).map((r) => `<li><a href="/r/${r.id}">${esc(r.title)}</a>
+    <span class="small faint">${esc(r.tag.label)} · ${fmtSize(r.size)}${r.downloads ? ` · ${r.downloads} 次下载` : ''}</span></li>`).join('')}
+    ${rs.length > SHELF_MAX ? `<li><a class="small" href="/n/${n.id}">全部 ${rs.length} 份 →</a></li>` : ''}</ul>`;
+}
 
 function save() { store.set(OPEN_KEY, JSON.stringify([...open])); }
 
@@ -24,18 +37,21 @@ function render(t) {
   const li = (n) => {
     const kids = t.children(n.id).filter((k) => !shown || shown.has(k.id));
     const isOpen = shown ? true : open.has(n.id);
+    const leafShelf = !picking && !kids.length && n.count > 0 && !t.children(n.id).length;
+    const shelfOn = leafShelf && shelfOpen.has(n.id);
     // In the picker a name with children expands it; only leaves (and "选这里") pick.
     const href = picking ? (kids.length ? '#' : `/upload?node=${n.id}`) : `/n/${n.id}`;
     return `<li>
       <div class="row-n${kids.length ? ' has-kids' : ''}" ${kids.length ? `data-t="${n.id}"` : ''}>
-        ${kids.length ? `<button class="tw" data-t="${n.id}" aria-label="${isOpen ? '收起' : '展开'}">${isOpen ? '▾' : '▸'}</button>` : '<span class="tw"></span>'}
+        ${kids.length ? `<button class="tw" data-t="${n.id}" aria-label="${isOpen ? '收起' : '展开'}">${isOpen ? '▾' : '▸'}</button>`
+    : leafShelf ? `<button class="tw" data-f="${n.id}" aria-label="${shelfOn ? '收起资料' : '看看有哪些资料'}" title="看看有哪些资料">${shelfOn ? '▾' : '▸'}</button>` : '<span class="tw"></span>'}
         <a class="n${n.count ? '' : ' zero'}" href="${href}"${picking && kids.length ? ` data-t="${n.id}"` : ''}>${esc(n.name)}</a>${n.own_level ? levelBadge(n) : ''}
         ${n.status === 'pending' ? '<span class="badge pending">待确认</span>' : ''}
         ${picking && kids.length ? `<span class="small faint">${kids.length} 个下级</span>` : ''}
         ${picking && n.kind !== 'section' ? `<a class="btn sm pick${kids.length ? '' : ' primary'}" href="/upload?node=${n.id}">选这里</a>` : ''}
         <span class="c">${n.count || ''}</span>
       </div>
-      ${kids.length && isOpen ? `<ul>${kids.map(li).join('')}</ul>` : ''}
+      ${kids.length && isOpen ? `<ul>${kids.map(li).join('')}</ul>` : ''}${shelfOn ? shelfHtml(n) : ''}
     </li>`;
   };
   const roots = t.children(0).filter((n) => !shown || shown.has(n.id));
@@ -48,6 +64,20 @@ tree().then((t) => {
   $('#tree').onclick = (e) => {
     // Clicking the arrow, the row background, or (in the picker) a parent's name toggles it.
     if (e.target.closest('.pick')) return;
+    const f = e.target.closest('[data-f]');
+    if (f) {
+      const id = Number(f.dataset.f);
+      if (shelfOpen.has(id)) shelfOpen.delete(id);
+      else {
+        shelfOpen.add(id);
+        if (!shelf.has(id)) {
+          shelf.set(id, null);
+          api(`/nodes/${id}`).then((d) => d.resources, () => []).then((rs) => { shelf.set(id, rs); render(t); });
+        }
+      }
+      render(t);
+      return;
+    }
     const name = e.target.closest('a.n');
     if (name && !name.dataset.t) return;
     const b = name || e.target.closest('[data-t]');

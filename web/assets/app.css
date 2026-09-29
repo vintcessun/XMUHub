@@ -244,6 +244,8 @@ textarea.input { min-height: 90px; resize: vertical; }
 .tree { list-style: none; margin: 0; padding: 0; }
 .tree ul { list-style: none; margin: 0 0 0 18px; padding: 0; border-left: 1px dashed var(--line); }
 .tree li { margin: 2px 0; }
+.tree .shelf { margin: 2px 0 8px 30px; padding: 4px 0 4px 12px; border-left: 2px solid var(--line); }
+.tree .shelf li { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; padding: 3px 0; }
 .tree .row-n { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; }
 .tree .row-n:hover { background: var(--surface-2); }
 .tree .row-n.has-kids { cursor: pointer; }
@@ -786,20 +788,19 @@ a, button { -webkit-tap-highlight-color: transparent; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
-/* Home: every category card and both lists get one compact height, so a long tag list
-   doesn't stretch its whole row; the overflow scrolls inside the card. Single column
-   (phones) goes back to fitting the content. */
+/* Home: every category card shows the same few rows of tags, so a long list (校选课's 35
+   colleges) doesn't make its card much taller than the rest; 「展开全部」 opens one card. */
 .home-lists { grid-template-columns: 1fr 1fr; }
-@media (min-width: 641px) {
-  #sections > .section-card { height: 272px; display: flex; flex-direction: column; }
-  #sections > .section-card .chips {
-    flex: 1; min-height: 0; overflow-y: auto; align-content: flex-start;
-    padding: 0 4px 16px 0; overscroll-behavior: contain; scrollbar-width: thin;
-    /* Fade the cut-off edge so it reads as "scroll for more"; the bottom padding keeps the
-       last row clear of it once scrolled to the end. */
-    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
-    mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
-  }
+#sections > .section-card { display: flex; flex-direction: column; }
+#sections > .section-card .chips { align-content: flex-start; max-height: 142px; overflow: hidden; }
+#sections > .section-card.clipped:not(.open) .chips {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+}
+#sections > .section-card.open .chips { max-height: none; }
+#sections .more {
+  margin-top: auto; padding: 8px 0 0; align-self: flex-start; background: none; border: 0;
+  color: var(--accent); font: inherit; font-size: 13px; cursor: pointer;
 }
 @media (min-width: 861px) {
   .home-lists > .card { height: 660px; display: flex; flex-direction: column; }

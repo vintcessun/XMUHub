@@ -15,8 +15,20 @@ tree().then((t) => {
     return `<section class="card section-card">
       <h3><a href="/n/${s.id}">${esc(s.name)}</a><span class="small faint">${s.count} 份</span></h3>
       <div class="chips">${groups.map((g) => `<a class="chip" href="/n/${g.id}" title="${esc(g.name)}">${esc(g.name.replace(/^[A-D]\d+-/, ''))}${g.count ? ` <b>${g.count}</b>` : ''}</a>`).join('')}</div>
+      <button class="more" type="button" hidden>展开全部 ${groups.length} 个 ▾</button>
     </section>`;
   }).join('') || '<div class="empty card"><b>分类还没有建立</b></div>';
+  // Every card starts at the same few rows; the ones with more get a 展开 button.
+  for (const card of document.querySelectorAll('#sections > .section-card')) {
+    const chips = card.querySelector('.chips');
+    const more = card.querySelector('.more');
+    more.hidden = chips.scrollHeight <= chips.clientHeight + 2;
+    card.classList.toggle('clipped', !more.hidden);
+    more.onclick = () => {
+      const open = card.classList.toggle('open');
+      more.textContent = open ? '收起 ▴' : `展开全部 ${chips.children.length} 个 ▾`;
+    };
+  }
 }).catch((e) => { $('#sections').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; });
 
 for (const [id, path] of [['#recent', '/recent'], ['#popular', '/popular']]) {

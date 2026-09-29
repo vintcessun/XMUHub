@@ -1,4 +1,4 @@
-import { api, esc, layout, levelBadge, moveResources, nodeCard, nodeTitle, pathId, resourceItem, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, levelBadge, moveResources, nodeCard, nodeTitle, pathId, resourceItem, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -26,13 +26,12 @@ function renderList() {
   const time = $('#time').value;
   const rs = data.resources.filter((r) => (!bucket || r.tag.bucket === bucket) && (!time || r.name.time === time)
     && (!major || (major === '-' ? !r.major : r.major === major)));
-  const bar = staff && rs.length ? `<div class="selbar"><label class="small"><input type="checkbox" id="selall"> 全选</label>
-    <button class="btn sm" id="mvsel" type="button">移动选中到其他分类</button><span class="small faint" id="selcount"></span></div>` : '';
+  const bar = rs.length > 1 || staff ? `<div class="selbar"><label class="small"><input type="checkbox" id="selall"> 全选</label>
+    <button class="btn sm" id="dlsel" type="button" disabled>批量下载</button>
+    ${staff ? '<button class="btn sm" id="mvsel" type="button">移动选中到其他分类</button>' : ''}<span class="small faint" id="selcount"></span></div>` : '';
   $('#list').innerHTML = rs.length
-    ? bar + rs.map((r) => {
-      const item = resourceItem(r, { showNode: false });
-      return staff ? item.replace('<div class="item">', `<div class="item"><input type="checkbox" class="rsel" data-id="${r.id}" aria-label="选择">`) : item;
-    }).join('')
+    ? bar + rs.map((r) => resourceItem(r, { showNode: false })
+      .replace('<div class="item">', `<div class="item"><input type="checkbox" class="rsel" data-id="${r.id}" data-size="${r.size}" aria-label="选择">`)).join('')
     : `<div class="empty"><b>这里还没有资料</b><a href="/upload?node=${data.node.id}">上传第一份</a></div>`;
 }
 
@@ -62,6 +61,7 @@ async function load() {
   $('#sq').placeholder = `在「${n.name}」中搜索…`;
   $('#upload').hidden = n.kind === 'section';
 
+  sortNodes(data.children);
   $('#children').innerHTML = data.children.map((c) => nodeCard(c).replace('class="card node-card"', `class="card node-card${c.count ? '' : ' empty-node'}" data-level="${c.level || 0}"`)).join('');
   $('#children').hidden = !data.children.length;
   levelChips(data.children);
@@ -102,9 +102,42 @@ $('#buckets').onclick = (e) => {
 $('#time').onchange = () => { syncUrl(); renderList(); };
 $('#list').addEventListener('change', (e) => {
   if (e.target.id === 'selall') document.querySelectorAll('#list .rsel').forEach((c) => { c.checked = e.target.checked; });
-  const n = document.querySelectorAll('#list .rsel:checked').length;
+  const sel = [...document.querySelectorAll('#list .rsel:checked')];
+  const size = sel.reduce((a, c) => a + Number(c.dataset.size), 0);
   const c = $('#selcount');
-  if (c) c.textContent = n ? `已选 ${n} 份` : '';
+  if (c) c.textContent = sel.length ? `已选 ${sel.length} 份 · ${fmtSize(size)}` : '';
+  const d = $('#dlsel');
+  if (d && !dlBusy) d.disabled = !sel.length;
+});
+
+// 批量下载: one file after another, each straight from the mirrors like the 下载 button
+// (the server only hands out the links). Files are held in memory one at a time.
+const DL_MAX = 30;
+const DL_MAX_BYTES = 2 * 1024 ** 3;
+let dlBusy = false;
+$('#list').addEventListener('click', async (e) => {
+  const b = e.target.closest('#dlsel');
+  if (!b || dlBusy) return;
+  const sel = [...document.querySelectorAll('#list .rsel:checked')];
+  const size = sel.reduce((a, c) => a + Number(c.dataset.size), 0);
+  if (sel.length > DL_MAX) return toast(`一次最多下载 ${DL_MAX} 份，请少选一些`, true);
+  if (size > DL_MAX_BYTES) return toast(`一次最多下载 ${fmtSize(DL_MAX_BYTES)}，请少选一些`, true);
+  dlBusy = true;
+  b.disabled = true;
+  toast('浏览器问「是否允许下载多个文件」时请选允许');
+  let failed = 0;
+  for (const [i, c] of sel.entries()) {
+    const id = Number(c.dataset.id);
+    try {
+      const res = await downloadResource(id, (p) => { b.textContent = `下载中 ${i + 1}/${sel.length} · ${Math.round(p * 100)}%`; }, { batch: true });
+      if (!res.ok) failed++;
+    } catch { failed++; }
+  }
+  b.textContent = '批量下载';
+  b.disabled = false;
+  dlBusy = false;
+  if (failed) toast(`${failed} 份没有下载成功（多是分卷文件），请点进资料页单独下载`, true);
+  else toast(`已下载 ${sel.length} 份`);
 });
 $('#list').addEventListener('click', async (e) => {
   if (!e.target.closest('#mvsel')) return;

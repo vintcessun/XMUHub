@@ -17,6 +17,9 @@ Changes:
    the same page whatever the id (the page reads the id from the address bar), so thousands of
    addresses share one cache entry each.
 3. Smart Tiered Cache: data centres that miss ask an upper-tier one before the origin.
+4. Pages: the cache key leaves out the query string (a /?x=<random> flood can't miss the cache).
+5. Anonymous API reads live 5 minutes at the edge (not 1); /assets/speculation-rules.json is
+   cached with the pages.
 
 Needs CF_API_TOKEN in .secrets/cloudflare.env with Cache Rules, Transform Rules and
 Zone Settings edit permission.
@@ -143,3 +146,33 @@ else:
     body['action_parameters']['cache_key'] = key
     r = call('PATCH', f"{Z}/rulesets/{rs['id']}/rules/{page['id']}", body)
     print('4. page cache key (ignore query string):', 'ok' if r['success'] else r.get('errors'))
+
+# 5. Longer edge life for anonymous API reads, and the speculation rules cached with the pages.
+#    The course tree, home lists and meta change a few times a day: 5 minutes of delay is
+#    fine and cuts the origin hits (they expired every minute). /assets/speculation-rules.json
+#    has no version in its URL (a header names it) and .json isn't cached by default, so every
+#    page view fetched it from the origin; it rides with the pages rule (deploy purges it).
+API_TTL = 300
+SPEC = '/assets/speculation-rules.json'
+fresh = call('GET', f'{Z}/rulesets/phases/http_request_cache_settings/entrypoint')['result']
+for r0 in fresh['rules']:
+    desc = r0.get('description', '')
+    body = {k: r0[k] for k in ('description', 'expression', 'action', 'action_parameters', 'enabled') if k in r0}
+    body['action_parameters'] = json.loads(json.dumps(body['action_parameters']))
+    if desc.startswith('XMUHub public API'):
+        ttl = body['action_parameters'].get('edge_ttl', {})
+        if ttl.get('default') == API_TTL:
+            print(f'5. API edge TTL: already {API_TTL} s')
+            continue
+        ttl['default'] = API_TTL
+        body['action_parameters']['edge_ttl'] = ttl
+        body['description'] = desc.replace('60 s', f'{API_TTL} s')
+        r = call('PATCH', f"{Z}/rulesets/{fresh['id']}/rules/{r0['id']}", body)
+        print(f'5. API edge TTL -> {API_TTL} s:', 'ok' if r['success'] else r.get('errors'))
+    elif desc.startswith('XMUHub pages'):
+        if SPEC in body['expression']:
+            print('5. speculation rules cached with pages: already done')
+            continue
+        body['expression'] = f'({body["expression"]}) or (http.host eq "{HOST}" and http.request.method eq "GET" and http.request.uri.path eq "{SPEC}")'
+        r = call('PATCH', f"{Z}/rulesets/{fresh['id']}/rules/{r0['id']}", body)
+        print('5. speculation rules cached with pages:', 'ok' if r['success'] else r.get('errors'))

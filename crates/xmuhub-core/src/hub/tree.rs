@@ -340,6 +340,7 @@ impl Hub {
                 return Err(Error::Conflict("只能删除空的分类".into()));
             }
             st.nodes.remove(&id).ok_or(Error::NotFound("分类"))?;
+            st.tree_changed(true);
             tx.del_node(id)
         })?;
         self.reindex(&[id], &[]);

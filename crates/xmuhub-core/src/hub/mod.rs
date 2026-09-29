@@ -101,6 +101,13 @@ pub(crate) struct State {
     blobs: HashMap<String, Blob>,
     /// Published resources in each node's subtree (recomputed after writes).
     counts: HashMap<Id, usize>,
+    /// Versions of what `children` / `counts` are derived from, and the versions they were
+    /// last built at (see `Hub::reindex`). Files keep `counts` up to date by themselves
+    /// (`put_resource`); only tree changes need a full rebuild.
+    children_ver: u64,
+    children_built: u64,
+    counts_ver: u64,
+    counts_built: u64,
     /// Review audit trail, oldest first.
     reviews: Vec<ReviewEvent>,
     resource_change_requests: HashMap<Id, ResourceChangeRequest>,
@@ -286,8 +293,35 @@ impl State {
         counts
     }
 
+    /// Adds `delta` to the public-file count of `node` and every ancestor.
+    fn count_up(&mut self, node: Id, delta: isize) {
+        let mut cur = Some(node);
+        let mut guard = 0;
+        while let Some(id) = cur {
+            let c = self.counts.entry(id).or_default();
+            *c = c.saturating_add_signed(delta);
+            if *c == 0 {
+                self.counts.remove(&id);
+            }
+            cur = self.nodes.get(&id).and_then(|n| n.parent);
+            guard += 1;
+            if guard > 32 {
+                break;
+            }
+        }
+    }
+
     fn put_resource(&mut self, tx: &Tx, r: Resource) -> Result<()> {
         tx.put_resource(&r)?;
+        // Counts follow the file: out of its old course if it was public, into the new one if
+        // it is (a full recount walked every file on every write).
+        let old = self.resources.get(&r.id).map(|o| (o.node, o.status == Status::Published));
+        if let Some((node, true)) = old {
+            self.count_up(node, -1);
+        }
+        if r.status == Status::Published {
+            self.count_up(r.node, 1);
+        }
         // Newly public (a new file, or one just approved): tell whoever follows its course.
         let was = self.resources.get(&r.id).map(|o| o.status);
         let newly_public = r.status == Status::Published && matches!(was, None | Some(Status::Pending));
@@ -318,8 +352,19 @@ impl State {
 
     fn put_node(&mut self, tx: &Tx, n: Node) -> Result<()> {
         tx.put_node(&n)?;
+        // Any change can reorder siblings; a new parent or a merge also moves counts.
+        let moved = self.nodes.get(&n.id).is_some_and(|o| o.parent != n.parent || o.status != n.status);
+        self.tree_changed(moved);
         self.nodes.insert(n.id, n);
         Ok(())
+    }
+
+    /// Marks the child index (and, when files move with nodes, the counts) for a rebuild.
+    fn tree_changed(&mut self, counts_too: bool) {
+        self.children_ver += 1;
+        if counts_too {
+            self.counts_ver += 1;
+        }
     }
 
     fn put_user(&mut self, tx: &Tx, u: User) -> Result<()> {
@@ -620,20 +665,27 @@ impl Hub {
 
     /// Refreshes counts, the child index and search entries after a write.
     fn reindex(&self, nodes: &[Id], resources: &[Id]) {
-        // The child index and the counts walk every node and every file: build them under
-        // the read lock and take the write lock only to swap them in, so pages keep being
-        // served meanwhile (the write lock used to be held for the whole walk — at 30 000
-        // files a few ms per write, every reader waiting). One refresh at a time, each from
-        // a state read after its own write, so the last one in holds every write before it.
+        // Counts follow each file as it is written (State::put_resource); the child index and
+        // a full recount are rebuilt only when the tree itself changed. Rebuilding both on
+        // every write walked all files under the write lock (a few ms at 30 000 files, with
+        // every reader waiting).
         let _one = self.reindexing.lock();
-        let (children, counts) = {
+        let stale = {
             let st = self.st.read();
-            (st.children_map(), st.count_map())
+            st.children_built != st.children_ver || st.counts_built != st.counts_ver
         };
-        {
+        if stale {
+            // Only after tree edits (rare), so doing it under the write lock is fine, and it
+            // can't race a file write that is adjusting the counts meanwhile.
             let mut st = self.st.write();
-            st.children = children;
-            st.counts = counts;
+            if st.children_built != st.children_ver {
+                st.children = st.children_map();
+                st.children_built = st.children_ver;
+            }
+            if st.counts_built != st.counts_ver {
+                st.counts = st.count_map();
+                st.counts_built = st.counts_ver;
+            }
         }
         self.tree_gen.fetch_add(1, std::sync::atomic::Ordering::Release);
         let st = self.st.read();

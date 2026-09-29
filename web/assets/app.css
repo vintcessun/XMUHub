@@ -400,6 +400,7 @@ pre.code { background: var(--surface-2); border: 1px solid var(--line); border-r
 .kpi span { font-size: 12px; color: var(--muted); }
 .selbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .item .rsel { margin: 4px 8px 0 0; flex: none; }
+.frow .guess { background: var(--warn-soft); color: var(--warn); border-radius: 4px; padding: 0 4px; }
 .pdfview { max-height: min(78vh, 1000px); overflow: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px; -webkit-overflow-scrolling: touch; }
 .pdfpage { background: #fff; margin: 0 auto 8px; width: 100%; max-width: 900px; box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
 .pdfpage canvas { width: 100%; height: 100%; display: block; }

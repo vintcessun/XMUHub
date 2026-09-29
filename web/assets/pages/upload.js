@@ -231,24 +231,34 @@ function guess(name) {
 
 /**
  * The course a file name names, if any: the longest course name / label / alias found in it.
- * A batch often mixes courses (a folder of old papers), and naming every file after the
- * batch's category turned 「C语言_2018_期中」 into 「微积分I_2018_期中」.
+ * Checked against the files already on the site (2026-09): about a third of original names
+ * name a course at all, and of those ~88% match where reviewers filed them; most misses are a
+ * related course (数据库 / 数据库系统, 概率统计 / 概率统计(A)). So the guess files a batch
+ * nobody categorised, but only suggests against a category the uploader picked.
  */
 function courseIn(name, t) {
   const stem = name.replace(/\.[^.]+$/, '').toLowerCase();
   let best = null;
   let len = 1; // single characters match too much
   for (const n of t.list) {
-    if (n.kind !== 'course' || n.status !== 'active') continue;
+    if (n.kind !== 'course' || n.status !== 'active' || GENERIC.test(n.name)) continue;
     for (const w of new Set([n.name, n.label, ...(n.aliases || [])])) {
-      if (!w || w.length <= len) continue;
+      if (!w || w.length < len) continue;
       const at = stem.indexOf(w.toLowerCase());
-      // 「微积分I」 is not in 「微积分III」: a Roman numeral may not go on after the match.
-      if (at >= 0 && !/^[ivxⅠ-ⅿ]/i.test(stem.slice(at + w.length))) { best = n; len = w.length; }
+      if (at < 0) continue;
+      // 「微积分I」 is not in 「微积分III」: a name ending in a Roman numeral may not run on
+      // into another one (「线代」 still matches 「线代I」).
+      if (/[ivxⅠ-ⅿ]$/i.test(w) && /^[ivxⅠ-ⅿ]/i.test(stem.slice(at + w.length))) continue;
+      // Same length: two courses share a name (电工技术 in two colleges); take the fuller one.
+      if (w.length === len && best && (n.count || 0) <= (best.count || 0)) continue;
+      best = n;
+      len = w.length;
     }
   }
   return best;
 }
+/** Course names too general to file by (a 「教材」 course; 「未分层（微积分）」 placeholders). */
+const GENERIC = /^(教材|资料|课件|笔记|未分层)/;
 
 /** Whether node `id` is `anc` or lies under it. */
 function within(t, id, anc) {
@@ -296,12 +306,13 @@ async function addFiles(files) {
       if (saved.upload_id) row.upload_id = saved.upload_id;
       row.status = saved.upload_id ? '已恢复上次填写的信息，上传会从断点继续' : '已恢复上次填写的信息';
     } else if (t) {
-      // A file named after another course goes there, not to the batch's category.
+      // A file named after a course goes there when no category was picked; against one the
+      // uploader picked it is only a suggestion (see courseIn).
       const c = courseIn(f.name, t);
-      if (c && !(state.node && within(t, state.node.id, c.id))) {
+      if (c && !state.node) {
         row.node = brief(c);
         row.status = `按文件名放到了「${esc(c.name)}」，不对的话点「换一个」`;
-      }
+      } else if (c && !within(t, state.node.id, c.id)) row.guess = brief(c);
     }
     state.rows.push(row);
   }
@@ -319,7 +330,7 @@ function rowHtml(r, i) {
       <span class="orig">${esc(r.file.name)} <span class="faint">· ${fmtSize(r.file.size)}${hashed}</span></span>
       ${r.done ? '' : `<button class="btn sm" data-x="del" type="button">移除</button>`}</div>
     <div class="gen">→ ${esc(genName(r))}</div>
-    ${r.done ? '' : `<div class="small fnode">分类：${r.node ? `<b>${esc(r.node.name)}</b>（这个文件单独设置） · <a href="#" data-x="unnode">跟随上面的分类</a> · ` : `<span class="faint">${state.node ? esc(state.node.name) : '跟随上面的分类'}</span> · `}<a href="#" data-x="node">${r.node ? '换一个' : '单独选分类'}</a></div>`}
+    ${r.done ? '' : `<div class="small fnode">分类：${r.node ? `<b>${esc(r.node.name)}</b>（这个文件单独设置） · <a href="#" data-x="unnode">跟随上面的分类</a> · ` : `<span class="faint">${state.node ? esc(state.node.name) : '跟随上面的分类'}</span> · `}<a href="#" data-x="node">${r.node ? '换一个' : '单独选分类'}</a>${r.guess && !r.node ? ` · <span class="guess">文件名像是「${esc(r.guess.name)}」的，<a href="#" data-x="guess">放过去</a></span>` : ''}</div>`}
     <div class="opts">
       <label>类型<select class="input" data-f="type_word">${types}</select></label>
       <label>学年 / 年份<select class="input" data-f="year"><option value="">不填</option>${yearOptions(r.year)}</select></label>
@@ -336,7 +347,9 @@ function rowHtml(r, i) {
 }
 
 function renderRows() {
-  $('#rows').innerHTML = state.rows.map(rowHtml).join('');
+  const guesses = state.rows.filter((r) => r.guess && !r.node && !r.done).length;
+  $('#rows').innerHTML = (guesses ? `<div class="notice warn small" style="margin-bottom:10px">有 ${guesses} 个文件的文件名看起来属于别的课程（下面标黄的）。<a href="#" data-x="guessall">全部按文件名放过去</a>，或者逐个看一下。</div>` : '')
+    + state.rows.map(rowHtml).join('');
   $('#bulk').hidden = state.rows.length < 2;
   const pending = state.rows.filter((r) => !r.done).length;
   $('#submit').textContent = pending > 1 ? `上传并提交 ${pending} 个文件` : '上传并提交';
@@ -366,6 +379,15 @@ $('#rows').addEventListener('input', (e) => {
   if (f === 'extra') row.querySelector('.gen').textContent = `→ ${genName(r)}`;
 });
 $('#rows').addEventListener('click', async (e) => {
+  const g = e.target.closest('[data-x="guess"], [data-x="guessall"]');
+  if (g && !state.busy) {
+    e.preventDefault();
+    const rows = g.dataset.x === 'guessall' ? state.rows : [state.rows[Number(g.closest('.frow').dataset.i)]];
+    for (const r of rows) if (r.guess && !r.node && !r.done) r.node = r.guess;
+    saveDraft();
+    renderRows();
+    return;
+  }
   const nb = e.target.closest('[data-x="node"], [data-x="unnode"]');
   if (nb && !state.busy) {
     e.preventDefault();

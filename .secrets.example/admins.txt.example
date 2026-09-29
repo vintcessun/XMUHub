@@ -1,0 +1,2 @@
+# 管理员邮箱，一行一个；改完运行 pwsh scripts/deploy.ps1 -AdminsOnly，一分钟内生效
+you@example.com

@@ -56,6 +56,13 @@
 - 第三方库放在 `web/vendor/<名字>-<版本>/`，固定版本、核对 npm 的 sha512，不要从运行时 CDN 加载。
   唯一的例外是注册页的 Cloudflare Turnstile（`challenges.cloudflare.com/turnstile/v0/api.js`）：它按设计只能从 Cloudflare 加载，只在用非常用邮箱注册、服务器要求人机验证时才加载，负责人同意过。
 
+## 6.4 站点内容只放在 `site/`（方便 fork 同步上游）
+
+- 站名、学校名、域名、联系方式、Logo、背景图等「某个站自己的东西」只放在 `site/<站点>/`（`site.json` 和同路径覆盖的文件），见 `site/README.md`。
+- `web/` 和 `crates/` 是所有站共用的代码：页面、脚本、样式里用 `{{site.name}}`、`{{site.school}}` 等占位符（服务器启动时替换），Rust 里用 `crate::site::get()` / `xmuhub_core::site::get()`。**不要把任何站点的专有文字写进共用代码**，`check-web.mjs` 会报错。
+- 新增占位符时，同时改 `crates/xmuhub-server/src/site.rs`（`SiteConfig` 和变量表）、`scripts/check-web.mjs`（`SITE_KEYS`）、`site/README.md` 以及每个 `site/*/site.json`。
+- 密钥只放 `.secrets/`（模板在 `.secrets.example/`），不编进程序。
+
 ## 6.5 代码质量：Clippy 零警告
 
 - 每次改 Rust 代码，提交前都要跑 `cargo clippy --workspace --all-targets`，**所有警告都要处理掉**（包括测试代码里的），不能留到以后。
@@ -77,7 +84,7 @@
 - [ ] 有没有改已有的数据库记录结构？
 - [ ] 有没有把密钥或管理员邮箱写进仓库？
 - [ ] `cargo clippy --workspace --all-targets` 是否零警告？`cargo test --workspace` 是否全部通过？
-- [ ] `node scripts/check-web.mjs`（JS 语法、导入的名字是否真的被导出、页面引用的文件是否存在）和 `node scripts/check-rules.mjs`（本文件的硬性规则）是否通过？
+- [ ] `node scripts/check-web.mjs`（JS 语法、导入的名字是否真的被导出、页面引用的文件是否存在、`site/*/site.json` 是否完整、共用代码里有没有写死站点专有文字）和 `node scripts/check-rules.mjs`（本文件的硬性规则）是否通过？
 
 以上检查在 GitHub Actions（`.github/workflows/ci.yml`）里对每次推送和 PR 自动运行，没通过的不要合并。`check-rules.mjs` 报「新文件用了网络请求」时，不要为了过检查去改写法，先问负责人；确认只是元数据请求后，由负责人把文件加进 `scripts/allowed-network-code.txt`。
 - [ ] Rust 改了的话，是否按完整部署发布？

@@ -106,6 +106,7 @@ async fn wants_are_reviewed_then_answered() {
 
 #[tokio::test]
 async fn announcement_defaults_and_is_admin_only() {
+    common::test_site();
     let (h, dir) = open("announce");
     let admin = register(&h, "a@example.invalid", "admin");
     let student = register(&h, "s@example.invalid", "student");

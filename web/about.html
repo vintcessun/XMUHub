@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>使用须知 · 鹭岛书阁</title>
-<meta name="description" content="鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<title>使用须知 · {{site.name}}</title>
+<meta name="description" content="{{site.description}}">
 <meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="/assets/logo.png" type="image/png">
-<link rel="preload" href="/assets/xmu-campus-background.jpg" as="image">
+<link rel="icon" href="/assets/site/logo.png" type="image/png">
+<link rel="preload" href="/assets/site/background.jpg" as="image">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="about">
@@ -17,7 +17,7 @@
 <main><div class="wrap">
   <section class="card" style="max-width:760px">
     <h1>使用须知</h1>
-    <p>鹭岛书阁是厦门大学同学自发维护的非官方资料共享站，与厦门大学官方无关。</p>
+    <p>{{site.name}}是{{site.school}}同学自发维护的非官方资料共享站，与{{site.school}}官方无关。</p>
     <h2>欢迎上传</h2>
     <p>往年试卷、自己整理的笔记、老师公开发放的课件与作业题、实验指导等有助于学习的资料。</p>
     <h2>请不要上传</h2>
@@ -38,8 +38,8 @@
     <p>本站所有资料均由用户自行上传分享，仅供个人学习、研究使用，不得用于任何商业用途。本站不对资料主张任何权利，资料的著作权归原作者或权利人所有；上传者应保证自己有权分享所上传的内容，并对其负责。</p>
     <p>如果你认为某份资料侵犯了你的著作权、隐私或其他合法权益，请联系我们，<b>不需要注册账号</b>：</p>
     <ul>
-      <li>在<a href="/feedback">意见反馈</a>页提交，或已登录时在资料页点击「投诉 / 申请下架」；也可以加 QQ 群 1124715660 联系管理员。</li>
-      <li>请写明资料的页面链接（形如 <code>xmu.vintces.icu/r/123</code>）、你的身份或权利说明，以及联系方式。</li>
+      <li>在<a href="/feedback">意见反馈</a>页提交，或已登录时在资料页点击「投诉 / 申请下架」；也可以通过{{site.community}}联系管理员。</li>
+      <li>请写明资料的页面链接（形如 <code>{{site.domain}}/r/123</code>）、你的身份或权利说明，以及联系方式。</li>
     </ul>
     <p>我们收到后会在 <b>48 小时内</b>处理：情况属实或暂时无法核实的，先下架相关资料；确认侵权的予以删除，并视情况限制上传者的权限。</p>
   </section>

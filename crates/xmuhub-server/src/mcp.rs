@@ -28,7 +28,8 @@ use crate::api::{App, Auth, CSRF_HEADER, client_ip, node_view, resource_view};
 
 const SUPPORTED: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "鹭岛书阁是厦门大学学生资料共享站（往年试卷、笔记、课件、题库）。\
+/// How to use the tools; which site this is goes in front (see [`instructions`]).
+const INSTRUCTIONS: &str = "\
 先用 search 找课程或资料（支持中文、课程代号和拼音首字母，如 wjf=微积分），\
 用 get_category 浏览课程下的资料，用 get_download_links 取下载地址（国内镜像，按速度排序，依次尝试即可）。\
 资料 id 和分类 id 都是数字。写操作（上传、评论、评分、求资料、审核）需要个人令牌，令牌以其主人的身份和权限操作。\
@@ -289,9 +290,15 @@ struct Ctx {
     forward: Vec<(header::HeaderName, HeaderValue)>,
 }
 
+/// The instructions sent on `initialize`: which site this is, then how to use the tools.
+fn instructions() -> String {
+    let s = &crate::site::get().config;
+    format!("{}是{}学生资料共享站（往年试卷、笔记、课件、题库）。{INSTRUCTIONS}", s.name, s.school)
+}
+
 impl Ctx {
     fn from(h: &HeaderMap, auth: &Auth) -> Ctx {
-        let host = h.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("xmu.vintces.icu");
+        let host = h.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or(crate::site::get().config.domain.as_str());
         let local = host.starts_with("localhost") || host.starts_with("127.0.0.1") || host.starts_with("[::1]");
         let scheme = h.get("x-forwarded-proto").and_then(|v| v.to_str().ok()).unwrap_or(if local { "http" } else { "https" });
         let mut forward = Vec::new();
@@ -640,13 +647,14 @@ async fn handle_one(app: &Arc<App>, auth: &Auth, ctx: &Ctx, ip: &str, msg: &Valu
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
     let result: Result<Value, (i64, String)> = match method {
         "initialize" => {
+            let site = &crate::site::get().config;
             let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
             let version = if SUPPORTED.contains(&asked) { asked } else { SUPPORTED[0] };
             Ok(json!({
                 "protocolVersion": version,
                 "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "ludao-shuge", "title": "鹭岛书阁 · 厦大资料库", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": INSTRUCTIONS,
+                "serverInfo": { "name": site.mcp_name, "title": format!("{} · {}", site.name, site.subtitle), "version": env!("CARGO_PKG_VERSION") },
+                "instructions": instructions(),
             }))
         }
         "ping" => Ok(json!({})),

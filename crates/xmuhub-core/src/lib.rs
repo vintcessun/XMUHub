@@ -3,6 +3,7 @@ pub mod error;
 pub mod hub;
 pub mod model;
 pub mod search;
+pub mod site;
 pub mod storage;
 pub mod text;
 pub mod ticket;

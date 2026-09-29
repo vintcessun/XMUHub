@@ -6,6 +6,7 @@ mod mailer;
 mod mcp;
 mod ratelimit;
 mod relay;
+mod site;
 mod thumbs;
 mod transfer;
 mod versioning;
@@ -26,7 +27,7 @@ use xmuhub_core::storage::{Storage, StorageBackend};
 use crate::config::{Config, StorageKind};
 
 #[derive(Parser)]
-#[command(name = "xmuhub", about = "鹭岛书阁 — 厦门大学学生资料共享平台")]
+#[command(name = "xmuhub", about = "XMUHub — 学生资料共享平台（站点配置见 site/）")]
 struct Cli {
     #[command(subcommand)]
     cmd: Option<Cmd>,
@@ -58,6 +59,7 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let cfg = Config::from_env()?;
+    site::Site::load(&site::Site::locate(&cfg.web_dir))?;
     // Two cores on the host: keep the runtime small and predictable.
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -78,7 +80,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     let mirrors = Arc::new(Mirrors::new(cfg.mirrors.clone()));
 
     let mut http = reqwest::Client::builder()
-        .user_agent("XMUHub/0.1 (+https://xmu.vintces.icu)")
+        .user_agent(format!("XMUHub/0.1 (+https://{})", site::get().config.domain))
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60));
     if let Some(p) = &cfg.gh_api_proxy {
@@ -161,7 +163,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
     };
     tracing::info!(upload_via = if !cfg.worker_url.is_empty() && github.is_some() { "worker (relay as fallback)" } else if relay.is_some() { "server relay" } else { "local" });
 
-    let site = Arc::new(web::Site::load(&cfg.web_dir)?);
+    let site = Arc::new(web::Site::load(&cfg.web_dir, site::get())?);
     let csp = site.csp();
     let app = Arc::new(api::App {
         hub: hub.clone(),
@@ -187,7 +189,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
             None
         } else {
             // Straight to Cloudflare, never through the GitHub API proxy.
-            let http = reqwest::Client::builder().user_agent("XMUHub/0.1 (+https://xmu.vintces.icu)").build()?;
+            let http = reqwest::Client::builder().user_agent(format!("XMUHub/0.1 (+https://{})", site::get().config.domain)).build()?;
             Some(captcha::Turnstile::new(cfg.turnstile_sitekey.clone(), cfg.turnstile_secret.clone(), http))
         },
     });

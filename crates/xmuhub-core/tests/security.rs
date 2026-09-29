@@ -57,6 +57,7 @@ async fn upload(h: &Hub, dir: &std::path::Path, v: Viewer<'_>, node: Id, content
 
 #[test]
 fn uncommon_mail_domains_need_a_human_check() {
+    common::test_site();
     for ok in ["a@qq.com", "a@163.com", "a@gmail.com", "a@stu.xmu.edu.cn", "a@xmu.edu.cn", "a@math.xmu.edu.cn", "a@outlook.com"] {
         assert!(!needs_captcha(ok), "{ok}");
     }
@@ -67,6 +68,7 @@ fn uncommon_mail_domains_need_a_human_check() {
 
 #[test]
 fn accounts_are_bounded() {
+    common::test_site();
     let (h, dir) = open("security-accounts");
     let (_, admin) = register(&h, "a@example.invalid", "admin");
     let (signup_session, user) = register(&h, "b@example.invalid", "student");

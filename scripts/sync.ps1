@@ -23,7 +23,8 @@
 param(
     [string]$Branch = "main",
     [string]$User = "root",
-    [string]$HostName = "vintces.icu",
+    # Default: SSH_HOST in .secrets/deploy.env.
+    [string]$HostName = "",
     [string]$RemoteBase = "/root/xmuhub",
     # Seconds between checks; 0 = run once.
     [int]$Watch = 0,
@@ -38,9 +39,21 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+
+# Where and what to deploy: .secrets/deploy.env (see .secrets.example/deploy.env). Values given
+# on the command line win.
+$DeployEnvPath = Join-Path $Root ".secrets/deploy.env"
+$dep = @{}
+if (Test-Path $DeployEnvPath) {
+    foreach ($line in Get-Content $DeployEnvPath) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') { $dep[$Matches[1]] = $Matches[2].Trim('"') }
+    }
+}
+if (-not $HostName) { $HostName = $dep.SSH_HOST }
+if (-not $HostName) { throw "请在 .secrets/deploy.env 里填写 SSH_HOST（模板见 .secrets.example/deploy.env）" }
 # Files whose change needs a new binary / a web-only deploy.
 $BinPaths = @("crates", "Cargo.toml", "Cargo.lock", "scripts/build-alinux3.ps1", "scripts/Dockerfile.alinux3")
-$WebPaths = @("web", "scripts/deploy.ps1")
+$WebPaths = @("web", "site", "scripts/deploy.ps1")
 # AGENTS.md §1: file bytes never pass through the server. New code that fetches or streams
 # HTTP bodies outside these files (probing, GitHub API, upload relay, background jobs)
 # stops the automatic deploy until a person has looked at it.

@@ -1,0 +1,2 @@
+# 源站防护的放行地址（不受连接数限制、不会被自动封禁），一行一个 IP 或网段
+# 上传：ssh <服务器> "mkdir -p /etc/xmuhub && cat > /etc/xmuhub/ddos-allow" < .secrets/ddos-allow.txt

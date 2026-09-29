@@ -66,9 +66,9 @@ pub struct User {
 }
 
 impl User {
-    /// Registered with a Xiamen University address.
+    /// Registered with an address at the school's domains (site config): 「认证」.
     pub fn xmu_verified(&self) -> bool {
-        self.email.ends_with("@xmu.edu.cn") || self.email.ends_with(".xmu.edu.cn")
+        crate::site::is_school_email(&self.email)
     }
 }
 

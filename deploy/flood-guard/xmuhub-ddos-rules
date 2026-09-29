@@ -18,6 +18,8 @@ ipset create -exist ddos_ban6 hash:ip family inet6 timeout 3600
 
 top() { $1 ${2:+-t $2} -C $3 "${@:4}" 2>/dev/null || $1 ${2:+-t $2} -I $3 1 "${@:4}"; }
 top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 32 -j REJECT --reject-with tcp-reset
+# A few of the refused sources per minute go to the kernel log (journalctl -k | grep xmuhub-reject), to spot false positives.
+top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 32 -m limit --limit 6/min --limit-burst 6 -j LOG --log-prefix "xmuhub-reject "
 # The exemption must stay above the limit: always move it back to the top.
 first() { while $1 -D INPUT "${@:2}" 2>/dev/null; do :; done; $1 -I INPUT 1 "${@:2}"; }
 first iptables  -p tcp -m multiport --dports 80,443 -m set --match-set cf4 src -j ACCEPT

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cloudflare cache settings for xmu.vintces.icu (see deploy/cloudflare.md).
+"""Cloudflare cache settings for the site (CF_ZONE / CF_HOST in .secrets/deploy.env; see deploy/cloudflare.md).
 
     python3 scripts/cf_cache_rules.py          # show what the token can reach and the current state
     python3 scripts/cf_cache_rules.py apply    # make the changes below (safe to run again)
@@ -29,8 +29,6 @@ import urllib.error
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ZONE = 'vintces.icu'
-HOST = 'xmu.vintces.icu'
 API = 'https://api.cloudflare.com/client/v4'
 
 
@@ -45,6 +43,9 @@ def read_env(path):
 
 
 TOKEN = read_env(os.path.join(ROOT, '.secrets', 'cloudflare.env'))['CF_API_TOKEN']
+# The zone and the site's host name: CF_ZONE / CF_HOST in .secrets/deploy.env.
+_deploy = read_env(os.path.join(ROOT, '.secrets', 'deploy.env'))
+ZONE, HOST = _deploy['CF_ZONE'], _deploy['CF_HOST']
 
 
 def call(method, path, body=None):

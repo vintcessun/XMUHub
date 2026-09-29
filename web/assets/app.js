@@ -1,4 +1,4 @@
-// 鹭岛书阁 shared front-end helpers: API client, session, layout, formatting, downloads.
+// Shared front-end helpers: API client, session, layout, formatting, downloads.
 // Plain ES modules, no build step — edit and redeploy.
 
 export const store = {
@@ -115,9 +115,11 @@ export function tree() {
 /** Site slogan, shown big on the home page. */
 export const SLOGAN = '让每一份资料都被需要它的人找到';
 /** User group shown on the feedback page, e.g. 'QQ 群 123456789'; empty hides it. */
-export const REPO_URL = 'https://github.com/vintcessun/XMUHub';
+export const REPO_URL = '{{site.repo}}';
 
-export const COMMUNITY = 'QQ 群：1124715660';
+export const COMMUNITY = '{{site.community}}';
+/** The site's name, for page titles. */
+export const SITE_NAME = '{{site.name}}';
 
 export const LEVELS = ['访客', '贡献者', '可信贡献者', '审核员', '管理员'];
 
@@ -298,13 +300,13 @@ export async function layout(active) {
   const q = qs.get('q') || '';
   top.className = 'top';
   top.innerHTML = `<div class="wrap">
-    <a class="brand" href="/"><img class="logo" src="/assets/logo.png" alt=""><span><b>鹭岛书阁</b><small>厦大资料库</small></span></a>
+    <a class="brand" href="/"><img class="logo" src="/assets/site/logo.png" alt=""><span><b>{{site.name}}</b><small>{{site.subtitle}}</small></span></a>
     ${active === 'home' || active === 'search' ? '<span class="grow"></span>' : `<form action="/search" role="search"><input name="q" value="${esc(q)}" placeholder="搜索课程名称…" aria-label="搜索"></form>`}
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>
       <a href="/help" data-k="help">教程</a>
       <a href="/wants" data-k="wants">求资料</a>
-      <a href="https://github.com/vintcessun/XMUHub" class="gh" rel="noopener" target="_blank" title="本站完全开源，欢迎 Star 和参与开发">⭐ 开源</a>
+      <a href="${REPO_URL}" class="gh" rel="noopener" target="_blank" title="本站完全开源，欢迎 Star 和参与开发">⭐ 开源</a>
       <a href="/admin" data-k="admin" hidden>审核</a>
       <a href="/notices" data-k="notices" id="nav-bell" class="bell" title="站内提醒" hidden>提醒<span class="count" hidden></span></a>
       <a href="/me" data-k="me" id="nav-me">登录</a>
@@ -314,8 +316,8 @@ export async function layout(active) {
   const foot = document.getElementById('foot');
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
-    <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/wants">求资料</a> · <a href="/collections">收藏夹</a> · <a href="/links">站外资源</a> · <a href="/stats">统计</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
+    <span>{{site.footer}}</span>
+    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/wants">求资料</a> · <a href="/collections">收藏夹</a> · <a href="/links">站外资源</a> · <a href="/stats">统计</a> · <a href="${REPO_URL}" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
     <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内删除。<a href="/about#copyright">版权声明</a></span></div>`;
   feedbackButton(active !== 'feedback');
   topButton();

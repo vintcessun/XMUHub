@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>使用教程 · 鹭岛书阁</title>
-<meta name="description" content="鹭岛书阁使用教程：怎么找资料、预览下载、上传分享，以及审核员指南。">
+<title>使用教程 · {{site.name}}</title>
+<meta name="description" content="{{site.name}}使用教程：怎么找资料、预览下载、上传分享，以及审核员指南。">
 <meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="/assets/logo.png" type="image/png">
-<link rel="preload" href="/assets/xmu-campus-background.jpg" as="image">
+<link rel="icon" href="/assets/site/logo.png" type="image/png">
+<link rel="preload" href="/assets/site/background.jpg" as="image">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="help">
@@ -30,7 +30,7 @@
     <div class="help-body">
       <section class="card">
         <h1>使用教程</h1>
-        <p class="muted">鹭岛书阁是厦大同学自己维护的资料库：往年试卷、笔记、课件、题库按课程整理好，免费看、免费下。花两分钟看完下面几步就会用了。</p>
+        <p class="muted">{{site.name}}是{{site.school_short}}同学自己维护的资料库：往年试卷、笔记、课件、题库按课程整理好，免费看、免费下。花两分钟看完下面几步就会用了。</p>
       </section>
 
       <section class="card" id="find">
@@ -58,7 +58,7 @@
       <section class="card" id="upload">
         <h2>3 · 上传资料</h2>
         <ol>
-          <li><b>注册 / 登录</b>：任何邮箱都能注册，收验证码即可；用厦大邮箱会显示「厦大认证」。昵称一个字也行。</li>
+          <li><b>注册 / 登录</b>：任何邮箱都能注册，收验证码即可；用{{site.school_short}}邮箱会显示「{{site.verified_label}}」。昵称一个字也行。</li>
           <li><b>选分类</b>：点「上传」，搜课程名（支持拼音首字母），或「在分类树里选」——点学院名字就能展开到具体课程。找不到课程就点搜索框旁边的「＋ 新增课程」，选好课程类别（校选课 / 公共课 / 专业课 / 体育课）和开课学院，填上课程名，研究生课程记得选「研究生」。<b>资料太多太杂、不知道放哪</b>：点「放进「待整理」」，一次选很多文件直接传，审核员会帮你归类；每个文件的备注里写一句是什么课、什么内容，会快很多。</li>
           <li><b>加文件</b>：拖进来或点选，<b>可以一次选多个</b>。支持任意格式：PDF、Word、<b>PPT</b>、Excel、图片、压缩包都行。</li>
           <li><b>核对自动识别</b>：系统会从原文件名里识别类型、学年、学期、A/B 卷、是否含答案，并生成规范文件名（「→」后面那行）。不对的改一下下拉框就行；多个文件可以用「批量设置」。</li>
@@ -77,7 +77,7 @@
           <li>资料页底部可以给资料打 1–5 星、写评论（比如「答案有两处错」「和今年考的很像」），帮后来的同学挑资料。</li>
           <li>本站没有的，可以看看页脚的「<a href="/links">站外资源</a>」：同学们整理在别处的仓库、网盘合集等。</li>
           <li>发现资料侵权、有隐私或分类错了：资料页点「投诉 / 申请下架」，48 小时内处理。</li>
-          <li>网站本身的问题和建议：页面底部「<a href="/feedback">意见反馈</a>」，或加 QQ 群 <b>1124715660</b>。</li>
+          <li>网站本身的问题和建议：页面底部「<a href="/feedback">意见反馈</a>」，或通过<b>{{site.community}}</b>。</li>
         </ul>
       </section>
 
@@ -106,17 +106,17 @@
           <li>群里的同学以后可以直接在这里搜，不用在群文件里翻；新资料也可以直接传到这里，全校都能用。</li>
           <li>群管理员可以申请成为审核员，一起维护对应学院 / 课程的资料。</li>
         </ul>
-        <p>联系方式：QQ 群 <b>1124715660</b>，或在<a href="/feedback">意见反馈</a>里留言并写上联系方式。</p>
+        <p>联系方式：<b>{{site.community}}</b>，或在<a href="/feedback">意见反馈</a>里留言并写上联系方式。</p>
       </section>
 
       <section class="card" id="agent">
         <h2>7 · 进阶：AI 助手 / API</h2>
-        <p>在「<a href="/me">我的</a>」页面可以创建个人令牌，给 Claude、Cursor 等支持 MCP 的 AI 助手接入本站：网页上能做的它都能帮你做，比如搜资料、下载、上传、发求资料。地址 <code>https://xmu.vintces.icu/mcp</code>，具体配置方法见「我的」页面的「如何连接」。</p>
+        <p>在「<a href="/me">我的</a>」页面可以创建个人令牌，给 Claude、Cursor 等支持 MCP 的 AI 助手接入本站：网页上能做的它都能帮你做，比如搜资料、下载、上传、发求资料。地址 <code>https://{{site.domain}}/mcp</code>，具体配置方法见「我的」页面的「如何连接」。</p>
       </section>
 
       <section class="card" id="oss">
         <h2>8 · 开源与参与开发</h2>
-        <p>鹭岛书阁的全部代码都公开在 GitHub：<a href="https://github.com/vintcessun/XMUHub" target="_blank" rel="noopener"><b>项目 GitHub 仓库</b></a>（AGPL-3.0 许可）。后端是 Rust，前端是不需要编译的普通网页，改起来很容易。</p>
+        <p>{{site.name}}的全部代码都公开在 GitHub：<a href="{{site.repo}}" target="_blank" rel="noopener"><b>项目 GitHub 仓库</b></a>（AGPL-3.0 许可）。后端是 Rust，前端是不需要编译的普通网页，改起来很容易。</p>
         <ul>
           <li>觉得好用，给项目点个 <b>⭐ Star</b>，让更多同学看到。</li>
           <li>发现 bug、想要新功能：在 GitHub 提 <b>Issue</b>，或者用右下角「反馈」。</li>

@@ -388,7 +388,7 @@ impl Hub {
 
     /// The site-wide notice; until an admin sets one, the default below.
     pub fn announcement(&self) -> Announcement {
-        self.st.read().announcement.clone().unwrap_or_else(|| Announcement { text: DEFAULT_ANNOUNCEMENT.into(), at: 1_790_000_000 })
+        self.st.read().announcement.clone().unwrap_or_else(|| Announcement { text: crate::site::get().announcement.clone(), at: 1_790_000_000 })
     }
 
     /// Admins set the notice; empty text hides it.
@@ -406,4 +406,3 @@ impl Hub {
 }
 
 pub(super) const ANNOUNCEMENT_KEY: &str = "announcement";
-const DEFAULT_ANNOUNCEMENT: &str = "鹭岛书阁目前只面向厦门大学的同学。资料都由同学上传，不保证准确、完整，下载使用前请自行仔细甄别。";

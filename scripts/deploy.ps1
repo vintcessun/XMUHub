@@ -8,6 +8,7 @@
       .secrets/github.env      GH_STORE_USER, GH_STORE_TOKEN
       .secrets/cloudflare.env  CF_ACCOUNT_ID, CF_API_TOKEN, CF_UPLOAD_DOMAIN, TURNSTILE_SITEKEY, TURNSTILE_SECRET
       .secrets/upload.env      UPLOAD_TICKET_SECRET, UPLOAD_WORKER_NAME
+      .secrets/deploy.env      SSH_HOST, PUBLIC_URL, SITE, NGINX_EXT_DIR …（部署到哪、用哪个 site/ 文件夹）
 
     步骤：
       1. 以 .new 临时名上传 run、web 包、环境文件（上传期间服务照常运行）；
@@ -25,16 +26,18 @@
 #>
 param(
     [string]$User = "root",
-    [string]$HostName = "vintces.icu",
+    [string]$HostName = "",
     [int]$Port = 22,
     [string]$RemoteBase = "/root/xmuhub",
     [string]$Service = "xmuhub.service",
     [string]$Socket = "xmuhub.socket",
     [int]$AppPort = 8089,
-    [string]$PublicUrl = "https://xmu.vintces.icu",
+    [string]$PublicUrl = "",
     [string]$IdentityFile = "",
     # BT panel per-site include directory (server-level directives for this vhost).
-    [string]$NginxExtDir = "/www/server/panel/vhost/nginx/extension/xmu.vintces.icu",
+    [string]$NginxExtDir = "",
+    # Which site/<name>/ folder to ship (pictures, name, school …); default from .secrets/deploy.env.
+    [string]$Site = "",
     # Empty = uploads stream through this server (workers.dev is blocked in mainland China).
     # Set to a Worker URL on a Cloudflare custom domain to take the server out of the path.
     [string]$UploadWorkerUrl = "",
@@ -50,10 +53,31 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+
+# Where and what to deploy: .secrets/deploy.env (see .secrets.example/deploy.env). Values given
+# on the command line win.
+$DeployEnvPath = Join-Path $Root ".secrets/deploy.env"
+$dep = @{}
+if (Test-Path $DeployEnvPath) {
+    foreach ($line in Get-Content $DeployEnvPath) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') { $dep[$Matches[1]] = $Matches[2].Trim('"') }
+    }
+}
+if (-not $HostName) { $HostName = $dep.SSH_HOST }
+if (-not $PSBoundParameters.ContainsKey('User') -and $dep.SSH_USER) { $User = $dep.SSH_USER }
+if (-not $PublicUrl) { $PublicUrl = $dep.PUBLIC_URL }
+if (-not $NginxExtDir) { $NginxExtDir = $dep.NGINX_EXT_DIR }
+if (-not $Site) { $Site = if ($dep.SITE) { $dep.SITE } else { "xmu" } }
+if (-not $HostName -or -not $PublicUrl) { throw "请在 .secrets/deploy.env 里填写 SSH_HOST 和 PUBLIC_URL（模板见 .secrets.example/deploy.env）" }
+$SiteDir = Join-Path $Root "site/$Site"
+if (-not (Test-Path (Join-Path $SiteDir "site.json"))) { throw "找不到站点文件夹 site/$Site/site.json（见 site/README.md）" }
 $Remote = "$User@$HostName"
 
-function Read-EnvFile([string]$Path) {
-    if (-not (Test-Path $Path)) { throw "缺少密钥文件：$Path" }
+function Read-EnvFile([string]$Path, [switch]$Optional) {
+    if (-not (Test-Path $Path)) {
+        if ($Optional) { return @{} }
+        throw "缺少密钥文件：$Path（模板见 .secrets.example/）"
+    }
     $h = @{}
     foreach ($line in Get-Content $Path) {
         if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') { $h[$Matches[1]] = $Matches[2] }
@@ -62,9 +86,9 @@ function Read-EnvFile([string]$Path) {
 }
 
 $gh = Read-EnvFile (Join-Path $Root ".secrets/github.env")
-$cf = Read-EnvFile (Join-Path $Root ".secrets/cloudflare.env")
+$cf = Read-EnvFile (Join-Path $Root ".secrets/cloudflare.env") -Optional
 $up = Read-EnvFile (Join-Path $Root ".secrets/upload.env")
-$mail = Read-EnvFile (Join-Path $Root ".secrets/mail.env")
+$mail = Read-EnvFile (Join-Path $Root ".secrets/mail.env") -Optional
 $WorkerName = if ($up.UPLOAD_WORKER_NAME) { $up.UPLOAD_WORKER_NAME } else { "xmuhub-upload" }
 # CF_UPLOAD_DOMAIN in .secrets/cloudflare.env (e.g. upload.vintces.icu, the Worker's custom domain)
 # switches uploads to the Worker on every deploy, so sync.ps1 keeps it too.
@@ -175,7 +199,12 @@ Invoke-Remote "echo connected as `$(whoami) on `$(hostname)" "连接测试"
 $stage = New-Item -ItemType Directory -Force (Join-Path ([System.IO.Path]::GetTempPath()) "xmuhub-deploy")
 $webTar = Join-Path $stage "web.tar.gz"
 Remove-Item $webTar -Force -ErrorAction SilentlyContinue
-& tar -czf $webTar -C (Join-Path $Root "web") .
+# The site folder rides along as web/_site/ (the server overlays it and never serves it as is).
+$siteStage = Join-Path $stage "site"
+Remove-Item $siteStage -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force (Join-Path $siteStage "_site") | Out-Null
+Copy-Item -Recurse -Force (Join-Path $SiteDir "*") (Join-Path $siteStage "_site")
+& tar -czf $webTar -C (Join-Path $Root "web") . -C $siteStage _site
 if ($LASTEXITCODE -ne 0) { throw "打包 web 失败" }
 
 $envText = @"

@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>意见反馈 · 鹭岛书阁</title>
-<meta name="description" content="鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<title>意见反馈 · {{site.name}}</title>
+<meta name="description" content="{{site.description}}">
 <meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="/assets/logo.png" type="image/png">
-<link rel="preload" href="/assets/xmu-campus-background.jpg" as="image">
+<link rel="icon" href="/assets/site/logo.png" type="image/png">
+<link rel="preload" href="/assets/site/background.jpg" as="image">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="feedback">
@@ -26,7 +26,7 @@
     </form>
   </section>
   <section class="card" id="mine" hidden><h3>我的反馈</h3><p class="small muted" style="margin-top:0">管理员处理后会在这里回复你（在本浏览器提交的，或登录账号时提交的）。页面开着会自动刷新。</p><div class="list" id="minelist"></div></section>
-  <section class="card"><h3>其他渠道</h3><p class="small muted" style="margin:0">资料侵权或需要下架：在资料页点「投诉 / 申请下架」，48 小时内处理。<br>源代码与问题追踪：<a href="https://github.com/vintcessun/XMUHub/issues" rel="noopener">GitHub Issues</a></p></section>
+  <section class="card"><h3>其他渠道</h3><p class="small muted" style="margin:0">资料侵权或需要下架：在资料页点「投诉 / 申请下架」，48 小时内处理。<br>源代码与问题追踪：<a href="{{site.repo}}/issues" rel="noopener">GitHub Issues</a></p></section>
 </div></main>
 <footer id="foot" class="foot"></footer>
 <script>try{var f=sessionStorage.getItem('ludao.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>

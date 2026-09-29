@@ -23,7 +23,7 @@ function render() {
 function form(l) {
   return `<section class="card"><h3>编辑链接</h3>
     <div class="fields-2">
-      <label class="field"><span>名称 <em>*</em></span><input class="input" id="ltitle" maxlength="40" value="${esc(l?.title || '')}" placeholder="如 XMU-CS-exam（信息学院试卷）"></label>
+      <label class="field"><span>名称 <em>*</em></span><input class="input" id="ltitle" maxlength="40" value="${esc(l?.title || '')}" placeholder="{{site.link_example}}"></label>
       <label class="field"><span>链接 <em>*</em></span><input class="input" id="lurl" maxlength="400" value="${esc(l.url)}" readonly title="换地址请重新推荐"></label>
     </div>
     <label class="field"><span>说明（选填：是什么、适合谁、提取码等）</span><input class="input" id="lnote" maxlength="200" value="${esc(l?.note || '')}"></label>
@@ -50,7 +50,7 @@ const SUGG = { pending: ['等待审核', 'pending'], approved: ['已采纳', 'pu
 
 function suggestForm() {
   $('#sform').innerHTML = `<div class="fields-2">
-      <label class="field"><span>名称 <em>*</em></span><input class="input" id="stitle" maxlength="40" placeholder="如 XMU-CS-exam（信息学院试卷）"></label>
+      <label class="field"><span>名称 <em>*</em></span><input class="input" id="stitle" maxlength="40" placeholder="{{site.link_example}}"></label>
       <label class="field"><span>链接 <em>*</em></span><input class="input" id="surl" maxlength="400" placeholder="https://…"></label></div>
     <label class="field"><span>说明（选填：是什么、适合谁）</span><input class="input" id="snote" maxlength="200"></label>
     <div class="row"><button class="btn primary sm" id="ssend" type="button">提交推荐</button></div>`;

@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, seriesAbout, seriesEditor, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, seriesAbout, seriesEditor, SITE_NAME, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -12,7 +12,7 @@ async function load() {
     $('#dl').disabled = true;
     return;
   }
-  document.title = `${r.title} · 鹭岛书阁`;
+  document.title = `${r.title} · ${SITE_NAME}`;
   $('#crumbs').innerHTML = `<a class="uplevel" title="回到上一页" href="/n/${r.node.id}">‹ 返回</a>` + ['<a href="/browse">分类</a>', ...r.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`), `<a href="/n/${r.node.id}">${esc(r.node.name)}</a>`].join(' / ');
   $('#title').textContent = r.title;
   $('#subtitle').textContent = r.subtitle || '';

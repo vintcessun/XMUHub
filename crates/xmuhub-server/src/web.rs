@@ -1,5 +1,6 @@
-//! Static site. Files under `web/` are read once at startup, compressed (brotli + gzip)
-//! and served from memory with ETags. Edit files and restart (deploy does) to update.
+//! Static site. Files under `web/` are read once at startup, overlaid with the site's own
+//! files (`site/<name>/`, see site.rs), their `{{site.…}}` placeholders filled in, compressed
+//! (brotli + gzip) and served from memory with ETags. Edit files and restart (deploy does).
 //! Also builds the Content-Security-Policy (with the hashes of the pages' inline scripts)
 //! and the middleware that puts the security headers on every response.
 
@@ -118,12 +119,28 @@ fn mime_of(path: &str) -> &'static str {
 }
 
 impl Site {
-    pub fn load(dir: &Path) -> anyhow::Result<Site> {
+    pub fn load(dir: &Path, site: &crate::site::Site) -> anyhow::Result<Site> {
         let mut raw_files = HashMap::new();
         walk(dir, dir, &mut |rel, raw| {
-            raw_files.insert(rel, raw);
+            // Where deploy puts the site folder; loaded below as the overlay, never served as is.
+            if !rel.starts_with("_site/") {
+                raw_files.insert(rel, raw);
+            }
             Ok(())
         })?;
+        // The site's own files replace (or add to) the generic ones at the same path.
+        walk(&site.dir, &site.dir, &mut |rel, raw| {
+            if rel != "site.json" && !rel.ends_with(".md") {
+                raw_files.insert(rel, raw);
+            }
+            Ok(())
+        })?;
+        for (rel, raw) in raw_files.iter_mut() {
+            if crate::site::is_template(rel) {
+                let text = String::from_utf8(std::mem::take(raw)).map_err(|_| anyhow::anyhow!("{rel}: not UTF-8"))?;
+                *raw = site.fill(rel, &text)?.into_bytes();
+            }
+        }
         let crate::versioning::Versioned { files: versioned, keys } = crate::versioning::version(raw_files);
         let mut files = HashMap::new();
         let mut total = 0usize;

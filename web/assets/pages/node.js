@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtSize, layout, loginUrl, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, seriesAbout, seriesEditor, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, levelBadge, loginUrl, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, seriesAbout, seriesEditor, SITE_NAME, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -73,7 +73,7 @@ async function load() {
   }
   const n = data.node;
   if (n.id !== id) history.replaceState(history.state, '', `/n/${n.id}${location.search}`);
-  document.title = `${n.name} · 鹭岛书阁`;
+  document.title = `${n.name} · ${SITE_NAME}`;
   const up = data.path.length ? `/n/${data.path[data.path.length - 1].id}` : '/browse';
   $('#crumbs').innerHTML = `<a class="uplevel" title="回到上一页" href="${up}">‹ 返回</a>`
     + ['<a href="/browse">分类</a>', ...data.path.map((p) => `<a href="/n/${p.id}">${esc(p.name)}</a>`)].join(' / ');

@@ -1,0 +1,17 @@
+{
+  "name": "某某书阁",
+  "subtitle": "学生资料库",
+  "school": "某某大学",
+  "school_short": "某大",
+  "description": "某某书阁是某某大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。",
+  "slogan": "某某大学学生资料共享 · 试卷、笔记、课件，按课程一站找齐",
+  "footer": "某某书阁 · 某某大学学生资料共享 · 非官方学生项目，与某某大学官方无关",
+  "domain": "hub.example.com",
+  "repo": "https://github.com/your-name/XMUHub",
+  "mcp_name": "example-hub",
+  "community": "",
+  "verified_domains": ["example.edu.cn"],
+  "verified_label": "某大认证",
+  "link_example": "如 某某学院历年试卷合集",
+  "announcement": "某某书阁目前只面向某某大学的同学。资料都由同学上传，不保证准确、完整，下载使用前请自行仔细甄别。"
+}

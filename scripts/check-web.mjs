@@ -112,10 +112,60 @@ for (const f of scripts.filter((p) => p.startsWith(join(web, 'assets')))) {
   }
 }
 
+// ---------------------------------------------------------------- 4. sites (site/<name>/)
+//
+// Everything site-specific lives in site/<name>/ (see site/README.md): pages and code say
+// {{site.name}} … and the server fills them in. So a fork edits only its own folder and can
+// merge upstream without conflicts. Checked here:
+//  - every site.json has the required keys, and no value holds characters that would break
+//    the HTML or JS it is pasted into (the server refuses them too);
+//  - pages and scripts use only known {{site.…}} keys;
+//  - no site's own words (name, school, domain, contact) are written into web/ or the code.
+
+const SITE_KEYS = ['name', 'subtitle', 'school', 'school_short', 'description', 'slogan', 'footer', 'domain', 'repo', 'mcp_name', 'community', 'verified_label', 'link_example', 'verified_emails'];
+const REQUIRED = SITE_KEYS.filter((k) => k !== 'community' && k !== 'verified_emails').concat(['announcement']);
+const FORBIDDEN = /[<>"'`\\\n\r{}]/;
+const siteRoot = join(root, 'site');
+const sites = existsSync(siteRoot) ? readdirSync(siteRoot).filter((n) => existsSync(join(siteRoot, n, 'site.json'))) : [];
+if (!sites.length) errors.push('site/: no site folder with a site.json');
+const ownWords = new Map();
+for (const name of sites) {
+  const file = join(siteRoot, name, 'site.json');
+  let cfg;
+  try { cfg = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { fail(file, `not valid JSON: ${e.message}`); continue; }
+  for (const k of REQUIRED) if (typeof cfg[k] !== 'string' || !cfg[k].trim()) fail(file, `needs "${k}"`);
+  for (const [k, v] of Object.entries(cfg)) {
+    const values = k === 'extra' ? Object.values(v || {}) : Array.isArray(v) ? v : [v];
+    for (const x of values) if (typeof x === 'string' && FORBIDDEN.test(x)) fail(file, `"${k}" may not contain < > " ' \` \\ { } or line breaks`);
+  }
+  for (const k of ['name', 'school', 'school_short', 'domain', 'community']) {
+    if (typeof cfg[k] === 'string' && cfg[k].trim().length >= 2) ownWords.set(cfg[k].trim(), `${name}/site.json "${k}"`);
+  }
+  for (const d of cfg.verified_domains || []) ownWords.set(String(d).replace(/^@/, ''), `${name}/site.json verified_domains`);
+}
+
+const templates = walk(web, (p) => /\.(html|m?js|css|json|txt|svg|webmanifest)$/.test(p) && !p.includes(`${sep}vendor${sep}`));
+for (const f of templates) {
+  const src = readFileSync(f, 'utf8');
+  for (const m of src.matchAll(/\{\{site\.([A-Za-z0-9_.]+)\}\}/g)) {
+    if (!SITE_KEYS.includes(m[1]) && !m[1].startsWith('extra.')) fail(f, `unknown placeholder {{site.${m[1]}}} (see site/README.md)`);
+  }
+}
+const code = [
+  ...templates,
+  ...['crates/xmuhub-core/src', 'crates/xmuhub-server/src'].filter((d) => existsSync(join(root, d))).flatMap((d) => walk(join(root, d), (p) => p.endsWith('.rs'))),
+];
+for (const f of code) {
+  const src = readFileSync(f, 'utf8');
+  for (const [word, from] of ownWords) {
+    if (src.includes(word)) fail(f, `contains "${word}" (${from}): use the {{site.…}} placeholder, or the site config in Rust`);
+  }
+}
+
 // ---------------------------------------------------------------- result
 
 if (errors.length) {
   console.error(`web checks failed (${errors.length}):\n\n${errors.map((e) => `- ${e}`).join('\n')}`);
   process.exit(1);
 }
-console.log(`web checks passed: ${scripts.length} scripts, ${pages.length} pages`);
+console.log(`web checks passed: ${scripts.length} scripts, ${pages.length} pages, ${sites.length} sites`);

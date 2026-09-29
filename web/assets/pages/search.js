@@ -1,4 +1,4 @@
-import { api, esc, go, layout, meta, nodeCard, qs, resourceItem, tree, $ } from '../app.js';
+import { api, esc, go, layout, meta, nodeCard, qs, resourceItem, SITE_NAME, tree, $ } from '../app.js';
 
 layout('search');
 
@@ -16,7 +16,7 @@ function url(p) {
   return `/search?${u}`;
 }
 
-document.title = q ? `${q} · 搜索 · 鹭岛书阁` : '搜索 · 鹭岛书阁';
+document.title = q ? `${q} · 搜索 · ${SITE_NAME}` : `搜索 · ${SITE_NAME}`;
 $('#title').textContent = q ? `“${q}”的搜索结果` : '搜索';
 $('#sq').value = q;
 $('#stype').value = type;

@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>我的 · 鹭岛书阁</title>
-<meta name="description" content="鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<title>我的 · {{site.name}}</title>
+<meta name="description" content="{{site.description}}">
 <meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="/assets/logo.png" type="image/png">
-<link rel="preload" href="/assets/xmu-campus-background.jpg" as="image">
+<link rel="icon" href="/assets/site/logo.png" type="image/png">
+<link rel="preload" href="/assets/site/background.jpg" as="image">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="me">
@@ -46,21 +46,21 @@
     <div id="tlist" style="margin-top:12px"></div>
     <details style="margin-top:14px"><summary class="small"><b>如何连接</b></summary>
       <div class="small" style="margin-top:10px">
-        <p>MCP 地址：<span class="mono">https://xmu.vintces.icu/mcp</span>（Streamable HTTP）。请求头 <span class="mono">Authorization: Bearer 你的令牌</span>。不带令牌也能搜索和下载公开资料。</p>
+        <p>MCP 地址：<span class="mono">https://{{site.domain}}/mcp</span>（Streamable HTTP）。请求头 <span class="mono">Authorization: Bearer 你的令牌</span>。不带令牌也能搜索和下载公开资料。</p>
         <p><b>Claude Code</b>：</p>
-        <pre class="code">claude mcp add --transport http ludao-shuge https://xmu.vintces.icu/mcp --header "Authorization: Bearer xmh_你的令牌"</pre>
+        <pre class="code">claude mcp add --transport http {{site.mcp_name}} https://{{site.domain}}/mcp --header "Authorization: Bearer xmh_你的令牌"</pre>
         <p><b>其他客户端</b>（mcp.json / claude_desktop_config.json 等）：</p>
         <pre class="code">{
   "mcpServers": {
-    "ludao-shuge": {
+    "{{site.mcp_name}}": {
       "type": "http",
-      "url": "https://xmu.vintces.icu/mcp",
+      "url": "https://{{site.domain}}/mcp",
       "headers": { "Authorization": "Bearer xmh_你的令牌" }
     }
   }
 }</pre>
         <p>网页上能做的，AI 助手用令牌都能做：搜索浏览、下载（给出镜像地址，助手自己下载并校验）、上传（助手在你电脑上切分、校验后直接传到存储，再填写课程提交）、评论评分、举报、求资料；审核员还能审核、移动资料。其他网页操作可以用 call_api 调用对应接口（list_api 列出全部接口）。登录注册和令牌管理只能在网站上操作。</p>
-        <p><b>REST API</b>：同一个令牌也可以调用网站的 <span class="mono">/api/…</span> 接口，例如 <span class="mono">curl -H "Authorization: Bearer xmh_…" "https://xmu.vintces.icu/api/search?q=微积分"</span>。</p>
+        <p><b>REST API</b>：同一个令牌也可以调用网站的 <span class="mono">/api/…</span> 接口，例如 <span class="mono">curl -H "Authorization: Bearer xmh_…" "https://{{site.domain}}/api/search?q=微积分"</span>。</p>
       </div></details>
   </section>
 </div></main>

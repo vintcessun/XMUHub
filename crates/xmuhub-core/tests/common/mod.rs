@@ -20,3 +20,12 @@ pub fn test_password() -> String {
 pub fn other_test_password() -> String {
     format!("{}-2", test_password())
 }
+
+/// The site config the tests run under (normally read from `site/<name>/site.json`).
+pub fn test_site() {
+    xmuhub_core::site::init(xmuhub_core::site::SiteInfo {
+        name: "鹭岛书阁".into(),
+        verified_domains: vec!["xmu.edu.cn".into(), "stu.xmu.edu.cn".into()],
+        announcement: "本站目前只面向厦门大学的同学。".into(),
+    });
+}

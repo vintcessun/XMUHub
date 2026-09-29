@@ -1,0 +1,17 @@
+{
+  "name": "鹭岛书阁",
+  "subtitle": "厦大资料库",
+  "school": "厦门大学",
+  "school_short": "厦大",
+  "description": "鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。",
+  "slogan": "厦门大学学生资料共享 · 试卷、笔记、课件，按课程一站找齐",
+  "footer": "鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关",
+  "domain": "xmu.vintces.icu",
+  "repo": "https://github.com/vintcessun/XMUHub",
+  "mcp_name": "ludao-shuge",
+  "community": "QQ 群：1124715660",
+  "verified_domains": ["stu.xmu.edu.cn", "xmu.edu.cn"],
+  "verified_label": "厦大认证",
+  "link_example": "如 XMU-CS-exam（信息学院试卷）",
+  "announcement": "鹭岛书阁目前只面向厦门大学的同学。资料都由同学上传，不保证准确、完整，下载使用前请自行仔细甄别。"
+}

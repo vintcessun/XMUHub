@@ -1,4 +1,4 @@
-import { ago, api, avatar, esc, layout, loginUrl, qs, resourceItem, toast, $ } from '../app.js';
+import { ago, api, avatar, esc, layout, loginUrl, qs, resourceItem, SITE_NAME, toast, $ } from '../app.js';
 
 // 收藏夹: without ?id, the reader's own lists (create, open) and the lists others shared;
 // with ?id, one list. Its owner renames it, takes files off, asks to share it (a reviewer
@@ -40,7 +40,7 @@ async function one(id) {
   let d;
   try { d = await api(`/collections/${id}`); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div><p><a href="/collections">‹ 所有收藏夹</a></p>`; return; }
   const c = d.collection;
-  document.title = `${c.title} · 收藏夹 · 鹭岛书阁`;
+  document.title = `${c.title} · 收藏夹 · ${SITE_NAME}`;
   const shareBtn = c.status === 'private' || c.status === 'rejected'
     ? '<button class="btn sm" data-share="1" type="button">申请公开分享</button>'
     : '<button class="btn sm" data-share="0" type="button">取消分享</button>';

@@ -34,25 +34,25 @@ const HASHES_AT_ONCE: u32 = 3;
 /// In-memory counters are pruned of stale entries once they grow past this.
 const COUNTER_CAP: usize = 20_000;
 
-/// Mail providers people actually use, plus the university's own. Signing up with any
-/// other domain (or a `+tag` alias) needs a human check first (Cloudflare Turnstile).
+/// Mail providers people actually use (plus the school's own, from the site config). Signing
+/// up with any other domain (or a `+tag` alias) needs a human check first (Cloudflare Turnstile).
 const COMMON_EMAIL_DOMAINS: &[&str] = &[
     "qq.com", "vip.qq.com", "foxmail.com", "163.com", "vip.163.com", "126.com", "vip.126.com", "yeah.net", "188.com",
     "sina.com", "sina.cn", "vip.sina.com", "sohu.com", "139.com", "189.cn", "wo.cn", "aliyun.com", "88.com",
     "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "live.cn", "msn.com", "icloud.com",
     "me.com", "mac.com", "yahoo.com", "proton.me", "protonmail.com",
-    "xmu.edu.cn", "stu.xmu.edu.cn",
 ];
 
 /// Whether signing up with `email` (already normalized) needs a human check first.
 pub fn needs_captcha(email: &str) -> bool {
     let Some((local, domain)) = email.split_once('@') else { return true };
-    let common = COMMON_EMAIL_DOMAINS.contains(&domain) || domain.ends_with(".xmu.edu.cn");
+    let common = COMMON_EMAIL_DOMAINS.contains(&domain) || crate::site::is_school_domain(domain);
     !common || local.contains('+')
 }
 
 /// Names nobody but staff may pick: they would pass for the site or its staff.
-const RESERVED_NICKNAMES: &[&str] = &["管理员", "审核员", "站长", "官方", "鹭岛书阁", "客服", "admin", "administrator", "moderator", "system", "xmuhub"];
+/// The site's own name (from the site config) is reserved as well.
+const RESERVED_NICKNAMES: &[&str] = &["管理员", "审核员", "站长", "官方", "客服", "admin", "administrator", "moderator", "system", "xmuhub"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodePurpose {
@@ -221,7 +221,8 @@ fn clean_nickname(n: &str, staff: bool) -> Result<String> {
         return Err(bad("请填写昵称"));
     }
     let folded: String = n.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect();
-    if !staff && RESERVED_NICKNAMES.iter().any(|r| folded.contains(r)) {
+    let site_name = crate::site::get().name.to_lowercase();
+    if !staff && (RESERVED_NICKNAMES.iter().any(|r| folded.contains(r)) || (!site_name.is_empty() && folded.contains(site_name.as_str()))) {
         return Err(bad("这个昵称容易被误认为本站或工作人员，换一个吧"));
     }
     Ok(n)

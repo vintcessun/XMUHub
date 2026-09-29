@@ -75,7 +75,7 @@ async function detail(row, data = null) {
   box.innerHTML = `<div class="replies">${d.replies.map((r) => `<div class="comment" data-rid="${r.id}"><div class="who">${who(r.author)}<span class="faint">${ago(r.created_at)}</span><span class="grow"></span>${r.can_delete ? '<a href="#" data-rdel class="small">删除</a>' : ''}</div>
         ${r.body ? `<div class="text">${linkify(r.body)}</div>` : ''}${r.resource ? `<div class="small">资料：<a href="/r/${r.resource.id}">${esc(r.resource.name)}</a></div>` : ''}</div>`).join('') || (live ? '<p class="small faint">还没有回复</p>' : '')}</div>
     ${live && me ? `<form class="rform"><textarea class="input" name="body" rows="2" maxlength="500" placeholder="知道在哪？说一声：在哪门课下、群文件、老师的课程网站……"></textarea>
-      <div class="row" style="margin-top:6px"><input class="input" name="res" placeholder="本站资料链接（选填，如 https://xmu.vintces.icu/r/123）" style="max-width:360px"><button class="btn sm primary">回复</button>
+      <div class="row" style="margin-top:6px"><input class="input" name="res" placeholder="本站资料链接（选填，如 https://{{site.domain}}/r/123）" style="max-width:360px"><button class="btn sm primary">回复</button>
       <a class="small" href="/upload${w.node ? `?node=${w.node.id}` : ''}">我有，去上传</a></div></form>` : live ? `<p class="small"><a href="${loginUrl()}">登录</a>后可以回复</p>` : ''}
     ${w.can_manage && live ? `<div class="row small" style="margin-top:8px">${w.status === 'open'
       ? '<input class="input" name="found" placeholder="找到的资料链接（选填）" style="max-width:300px"><button class="btn sm" data-st="found" type="button">标记已找到</button><button class="btn sm" data-st="closed" type="button">关闭</button>'

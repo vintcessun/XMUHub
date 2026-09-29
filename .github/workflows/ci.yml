@@ -34,7 +34,7 @@ jobs:
       - run: cargo test --workspace --locked
 
   web:
-    name: Web (syntax, imports / exports, page references)
+    name: Web (syntax, imports / exports, page references, site/ configs)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

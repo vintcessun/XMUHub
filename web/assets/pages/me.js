@@ -5,7 +5,7 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
 (async () => {
   const me = await layout('me');
   if (!me) { location.replace(loginUrl()); return; }
-  $('#who').innerHTML = `${esc(me.nickname)} · ${esc(me.email)} · ${LEVELS[me.level]}${me.xmu ? ' · <span class="badge published">厦大认证</span>' : ''}`;
+  $('#who').innerHTML = `${esc(me.nickname)} · ${esc(me.email)} · ${LEVELS[me.level]}${me.xmu ? ' · <span class="badge published">{{site.verified_label}}</span>' : ''}`;
   $('#nick').value = me.nickname;
   // Reviewers asking about the caller's uploads (answered on each file's page).
   api('/me/questions').then((list) => {

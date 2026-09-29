@@ -17,6 +17,7 @@ mod thumbs;
 mod tokens;
 mod tree;
 mod uploads;
+mod wants;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -42,6 +43,7 @@ pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
+pub use wants::{WantFilter, WantReplyView, WantView};
 
 const SEQ_KEY: &str = "seq";
 /// Longest search query looked at (characters); the rest is ignored.
@@ -114,6 +116,13 @@ pub(crate) struct State {
     majors: HashMap<Id, String>,
     /// recommended outside sources, by id
     links: HashMap<Id, Link>,
+    /// 求资料 posts and their replies, by id
+    wants: HashMap<Id, Want>,
+    want_replies: HashMap<Id, WantReply>,
+    /// want → users who said 「我也要」
+    want_votes: HashMap<Id, HashSet<Id>>,
+    /// The site-wide notice, once an admin has set one.
+    announcement: Option<Announcement>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
     inbox: Option<Id>,
 }
@@ -133,6 +142,8 @@ impl State {
                 st.seq = u64::from_le_bytes(v.try_into().unwrap());
             } else if k == INBOX_KEY && v.len() == 8 {
                 st.inbox = Some(u64::from_le_bytes(v.try_into().unwrap()));
+            } else if k == wants::ANNOUNCEMENT_KEY {
+                st.announcement = serde_json::from_slice(&v).ok();
             }
         }
         for n in snap.nodes {
@@ -180,6 +191,11 @@ impl State {
         st.questions = snap.questions.into_iter().map(|q| (q.id, q)).collect();
         st.majors = snap.majors.into_iter().collect();
         st.links = snap.links.into_iter().map(|l| (l.id, l)).collect();
+        st.wants = snap.wants.into_iter().map(|w| (w.id, w)).collect();
+        st.want_replies = snap.want_replies.into_iter().map(|r| (r.id, r)).collect();
+        for (want, user) in snap.want_votes {
+            st.want_votes.entry(want).or_default().insert(user);
+        }
         st.thumbs = snap.thumbs.into_iter().map(|t| (t.key.clone(), t)).collect();
         for t in snap.tokens {
             st.token_by_hash.insert(t.hash, t.id);

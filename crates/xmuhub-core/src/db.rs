@@ -40,6 +40,12 @@ pub const QUESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("questio
 pub const RESOURCE_MAJORS: TableDefinition<u64, &str> = TableDefinition::new("resource_majors");
 /// id → Link (a recommended outside source: another repo, a netdisk collection …).
 pub const LINKS: TableDefinition<u64, &[u8]> = TableDefinition::new("links");
+/// id → Want (a 求资料 post).
+pub const WANTS: TableDefinition<u64, &[u8]> = TableDefinition::new("wants");
+/// id → WantReply
+pub const WANT_REPLIES: TableDefinition<u64, &[u8]> = TableDefinition::new("want_replies");
+/// (want id, user id) → 1: 「我也要」.
+pub const WANT_VOTES: TableDefinition<&[u8], u8> = TableDefinition::new("want_votes");
 /// Free-form small state: id sequences, storage bucket cursors, settings.
 pub const META: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
@@ -86,6 +92,9 @@ pub struct Snapshot {
     pub questions: Vec<Question>,
     pub majors: Vec<(Id, String)>,
     pub links: Vec<Link>,
+    pub wants: Vec<Want>,
+    pub want_replies: Vec<WantReply>,
+    pub want_votes: Vec<(Id, Id)>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -124,6 +133,9 @@ impl Db {
         txn.open_table(QUESTIONS)?;
         txn.open_table(RESOURCE_MAJORS)?;
         txn.open_table(LINKS)?;
+        txn.open_table(WANTS)?;
+        txn.open_table(WANT_REPLIES)?;
+        txn.open_table(WANT_VOTES)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -202,6 +214,18 @@ impl Db {
         for row in txn.open_table(LINKS)?.iter()? {
             snap.links.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(WANTS)?.iter()? {
+            snap.wants.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(WANT_REPLIES)?.iter()? {
+            snap.want_replies.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(WANT_VOTES)?.iter()? {
+            let k = row?.0.value().to_vec();
+            if k.len() == 16 {
+                snap.want_votes.push((u64::from_be_bytes(k[..8].try_into().unwrap()), u64::from_be_bytes(k[8..].try_into().unwrap())));
+            }
+        }
         Ok(snap)
     }
 
@@ -244,6 +268,9 @@ impl Db {
             questions: snap.questions,
             majors: snap.majors,
             links: snap.links,
+            wants: snap.wants,
+            want_replies: snap.want_replies,
+            want_votes: snap.want_votes,
         };
         serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
@@ -286,6 +313,12 @@ pub struct Dump {
     pub majors: Vec<(Id, String)>,
     #[serde(default)]
     pub links: Vec<Link>,
+    #[serde(default)]
+    pub wants: Vec<Want>,
+    #[serde(default)]
+    pub want_replies: Vec<WantReply>,
+    #[serde(default)]
+    pub want_votes: Vec<(Id, Id)>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -412,6 +445,20 @@ impl Tx<'_> {
     }
     pub fn del_link(&self, id: Id) -> Result<()> {
         self.txn.open_table(LINKS)?.remove(id)?;
+        Ok(())
+    }
+    pub fn put_want(&self, w: &Want) -> Result<()> {
+        self.txn.open_table(WANTS)?.insert(w.id, encode(w).as_slice())?;
+        Ok(())
+    }
+    pub fn put_want_reply(&self, r: &WantReply) -> Result<()> {
+        self.txn.open_table(WANT_REPLIES)?.insert(r.id, encode(r).as_slice())?;
+        Ok(())
+    }
+    pub fn put_want_vote(&self, want: Id, user: Id, on: bool) -> Result<()> {
+        let mut t = self.txn.open_table(WANT_VOTES)?;
+        let k = rating_key(want, user);
+        if on { t.insert(k.as_slice(), 1u8)?; } else { t.remove(k.as_slice())?; }
         Ok(())
     }
     pub fn put_question(&self, q: &Question) -> Result<()> {

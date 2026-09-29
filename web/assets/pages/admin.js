@@ -388,6 +388,33 @@ const panels = {
       try { await api(`/admin/feedback/${it.dataset.id}/handle`, { method: 'POST', body: { note: it.querySelector('input').value } }); toast('已处理'); panels.feedback(box, all); } catch (err) { toast(err.message, true); }
     };
   },
+  async wants(box) {
+    const list = await api('/wants?status=pending');
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学发的「求资料」，通过后公开在<a href="/wants" target="_blank">求资料</a>页。只放学习资料的求助；留联系方式、买卖、广告、和学习无关的请驳回并写明原因（发帖人能看到）。</p>
+      ${list.length ? list.map((w) => `<div class="item" data-id="${w.id}"><div class="body">
+        <b>${esc(w.title)}</b>${w.body ? `<div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(w.body)}</div>` : ''}
+        <div class="meta">${w.node ? `<a href="/n/${w.node.id}" target="_blank">${esc(w.node.name)}</a>` : '<span>没选课程</span>'}<span>${avatar(w.author.avatar, w.author.nickname, 20)} ${esc(w.author.nickname)}</span><span>${ago(w.created_at)}</span></div>
+        <div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button><input class="input" placeholder="驳回原因（发帖人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">驳回</button></div>
+      </div></div>`).join('') : '<div class="empty"><b>没有待审核的求助</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a]');
+      if (!b) return;
+      const it = b.closest('[data-id]');
+      const note = it.querySelector('input').value.trim();
+      if (b.dataset.a === 'no' && !note) return toast('写一下驳回原因', true);
+      try { await api(`/wants/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已通过' : '已驳回'); } catch (err) { toast(err.message, true); }
+    };
+  },
+  async announce(box) {
+    const a = (await meta()).announcement || { text: '' };
+    box.innerHTML = `<section class="card"><h3 style="margin-top:0">全站公告</h3>
+      <p class="small muted">显示在每个页面顶部；同学点 × 后不再显示，直到公告改了。留空则不显示。可以写网址，会自动变成链接。</p>
+      <textarea class="input" id="antext" rows="3" maxlength="300">${esc(a.text)}</textarea>
+      <div class="row" style="margin-top:8px"><button class="btn primary sm" id="ansave" type="button">保存</button><span class="small faint">保存后一分钟内所有人可见。</span></div></section>`;
+    box.querySelector('#ansave').onclick = async () => {
+      try { await api('/announcement', { method: 'PUT', body: { text: box.querySelector('#antext').value } }); toast('已保存'); } catch (err) { toast(err.message, true); }
+    };
+  },
   async log(box) {
     const list = await api('/admin/reviews');
     const A = { edit: ['上传者修改', 'pending'], approve: ['通过', 'published'], reject: ['驳回', 'rejected'], remove: ['下架', 'removed'], restrict: ['仅内部', 'restricted'], restore: ['恢复发布', 'published'], note_approved: ['同意修改备注', 'published'], note_rejected: ['驳回备注申请', 'rejected'], delete_approved: ['同意删除', 'removed'], delete_rejected: ['驳回删除申请', 'rejected'] };
@@ -595,7 +622,7 @@ function releaseBatch() {
 window.addEventListener('pagehide', () => { if (current === 'queue') releaseBatch(); });
 
 // Complaints, feedback, the full review log and accounts are admin-only (the server enforces it).
-const ADMIN_TABS = ['reports', 'feedback', 'log', 'users'];
+const ADMIN_TABS = ['reports', 'feedback', 'log', 'users', 'announce'];
 
 async function show(name) {
   if (!panels[name] || (ADMIN_TABS.includes(name) && me.level < 4)) name = 'dash';

@@ -303,6 +303,7 @@ export async function layout(active) {
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>
       <a href="/help" data-k="help">教程</a>
+      <a href="/wants" data-k="wants">求资料</a>
       <a href="https://github.com/vintcessun/XMUHub" class="gh" rel="noopener" target="_blank" title="本站完全开源，欢迎 Star 和参与开发">⭐ 开源</a>
       <a href="/admin" data-k="admin" hidden>审核</a>
       <a href="/me" data-k="me" id="nav-me">登录</a>
@@ -313,10 +314,11 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/links">站外资源</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
+    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/wants">求资料</a> · <a href="/links">站外资源</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
     <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内删除。<a href="/about#copyright">版权声明</a></span></div>`;
   feedbackButton(active !== 'feedback');
   topButton();
+  announcement();
   const user = await me();
   const navMe = top.querySelector('#nav-me');
   if (user) {
@@ -636,6 +638,24 @@ export async function moveResources(ids) {
   } catch (e) { toast(e.message, true); return 0; }
 }
 
+// ---------------------------------------------------------------- announcement
+
+const ANN_KEY = 'xmuhub.announce.closed';
+/** The admins' site-wide notice under the header, until the reader closes this version of it. */
+function announcement() {
+  meta().then((m) => {
+    const a = m.announcement;
+    document.querySelector('.announce')?.remove();
+    if (!a || !a.text || store.get(ANN_KEY) === String(a.at)) return;
+    const bar = document.createElement('div');
+    bar.className = 'announce';
+    bar.setAttribute('role', 'note');
+    bar.innerHTML = `<div class="wrap"><b>公告</b><span class="grow">${linkify(a.text)}</span><button type="button" aria-label="关闭公告" title="关闭">×</button></div>`;
+    bar.querySelector('button').onclick = () => { store.set(ANN_KEY, String(a.at)); bar.remove(); };
+    document.getElementById('top').after(bar);
+  }).catch(() => {});
+}
+
 // ---------------------------------------------------------------- back to top
 
 /** 「回到顶部」 above the 反馈 button, once a long page has scrolled two screens down. */
@@ -810,7 +830,7 @@ document.addEventListener('click', (e) => {
  * URL, so refresh, bookmarks and back/forward work as before, and a refresh returns to the
  * same scroll position. Upload, account and admin pages still open with a full load.
  */
-const SOFT = /^\/(?:|browse|help|about|feedback|links|search|[nr]\/\d+\/?)$/;
+const SOFT = /^\/(?:|browse|help|about|feedback|links|wants|search|[nr]\/\d+\/?)$/;
 const here = () => location.pathname + location.search;
 const soft = (u) => u.origin === location.origin && SOFT.test(u.pathname) && SOFT.test(location.pathname);
 const templates = new Map();

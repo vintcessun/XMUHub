@@ -12,8 +12,8 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use xmuhub_core::hub::{AdminExtras, CodePurpose, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SearchItem, Viewer};
-use xmuhub_core::model::{Id, Level, Node, NodeStatus, Report, Resource, Status, TYPE_WORDS, Tag, User, now};
+use xmuhub_core::hub::{AdminExtras, CodePurpose, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SearchItem, Viewer, WantFilter};
+use xmuhub_core::model::{Id, Level, Node, NodeStatus, Report, Resource, Status, TYPE_WORDS, Tag, User, WantStatus, now};
 use xmuhub_core::search::{DocType, Filter};
 use xmuhub_core::storage::Receipt;
 use xmuhub_core::storage::local::LocalBackend;
@@ -348,6 +348,14 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/me/questions", get(my_questions))
         .route("/links", get(links).post(add_link))
         .route("/links/{id}", axum::routing::patch(update_link).delete(delete_link))
+        .route("/wants", get(wants).post(add_want))
+        .route("/wants/{id}", get(want))
+        .route("/wants/{id}/review", post(review_want))
+        .route("/wants/{id}/status", post(resolve_want))
+        .route("/wants/{id}/vote", put(vote_want))
+        .route("/wants/{id}/replies", post(reply_want))
+        .route("/want-replies/{id}", axum::routing::delete(delete_want_reply))
+        .route("/announcement", put(set_announcement))
         .route("/admin/avatars", get(pending_avatars))
         .route("/admin/avatars/{user}", post(review_avatar))
         .route("/admin/reports", get(reports))
@@ -411,6 +419,7 @@ async fn meta(State(app): S) -> Json<Value> {
         "stats": app.hub.stats(),
         "upload_via": if app.worker_url.is_empty() { "relay" } else { "worker" },
         "mail": app.mailer.is_some(),
+        "announcement": app.hub.announcement(),
     }))
 }
 
@@ -1110,6 +1119,123 @@ async fn review_queue(State(app): S, auth: Auth, Query(q): Query<QueueQ>) -> R<J
 }
 
 // ------------------------------------------------------------------ 站外资源 (outside sources)
+
+// ------------------------------------------------------------------ 求资料, announcement
+
+#[derive(Deserialize)]
+struct WantsQ {
+    #[serde(default)]
+    status: String,
+    node: Option<Id>,
+}
+
+async fn wants(State(app): S, auth: Auth, Query(q): Query<WantsQ>) -> R<Json<Value>> {
+    let filter = match q.status.as_str() {
+        "found" => WantFilter::Found,
+        "mine" => WantFilter::Mine,
+        "pending" => WantFilter::Pending,
+        _ => WantFilter::Open,
+    };
+    Ok(Json(json!(app.hub.wants(auth.viewer(), filter, q.node)?)))
+}
+
+async fn want(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let (w, replies) = app.hub.want(auth.viewer(), id)?;
+    Ok(Json(json!({ "want": w, "replies": replies })))
+}
+
+#[derive(Deserialize)]
+struct WantIn {
+    title: String,
+    #[serde(default)]
+    body: String,
+    node: Option<Id>,
+}
+
+async fn add_want(State(app): S, auth: Auth, Json(b): Json<WantIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let w = blocking(move || hub.add_want(Viewer { user: user.as_ref() }, &b.title, &b.body, b.node)).await?;
+    Ok(Json(json!(w)))
+}
+
+#[derive(Deserialize)]
+struct WantReviewIn {
+    approve: bool,
+    #[serde(default)]
+    note: String,
+}
+
+async fn review_want(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<WantReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.review_want(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct WantStatusIn {
+    status: String,
+    resource: Option<Id>,
+}
+
+async fn resolve_want(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<WantStatusIn>) -> R<Json<Value>> {
+    let status = match b.status.as_str() {
+        "open" => WantStatus::Open,
+        "found" => WantStatus::Found,
+        "closed" => WantStatus::Closed,
+        _ => return Err(ApiError(Error::BadRequest("状态不对".into()))),
+    };
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.resolve_want(Viewer { user: user.as_ref() }, id, status, b.resource)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct VoteIn {
+    on: bool,
+}
+
+async fn vote_want(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<VoteIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let votes = blocking(move || hub.vote_want(Viewer { user: user.as_ref() }, id, b.on)).await?;
+    Ok(Json(json!({ "votes": votes })))
+}
+
+#[derive(Deserialize)]
+struct WantReplyIn {
+    #[serde(default)]
+    body: String,
+    resource: Option<Id>,
+}
+
+async fn reply_want(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<WantReplyIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.reply_want(Viewer { user: user.as_ref() }, id, &b.body, b.resource)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn delete_want_reply(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_want_reply(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct AnnouncementIn {
+    text: String,
+}
+
+async fn set_announcement(State(app): S, auth: Auth, Json(b): Json<AnnouncementIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let a = blocking(move || hub.set_announcement(Viewer { user: user.as_ref() }, &b.text)).await?;
+    Ok(Json(json!(a)))
+}
 
 async fn links(State(app): S) -> Json<Value> {
     Json(json!(app.hub.links()))

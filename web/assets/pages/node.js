@@ -32,7 +32,7 @@ function renderList() {
   $('#list').innerHTML = rs.length
     ? bar + rs.map((r) => resourceItem(r, { showNode: false })
       .replace('<div class="item">', `<div class="item"><input type="checkbox" class="rsel" data-id="${r.id}" data-size="${r.size}" aria-label="选择">`)).join('')
-    : `<div class="empty"><b>这里还没有资料</b><a href="/upload?node=${data.node.id}">上传第一份</a></div>`;
+    : `<div class="empty"><b>这里还没有资料</b><a href="/upload?node=${data.node.id}">上传第一份</a> · <a href="/wants?node=${data.node.id}">去求资料</a></div>`;
 }
 
 async function load() {
@@ -57,6 +57,8 @@ async function load() {
     n.status === 'pending' && '<span class="badge pending">待确认</span>',
   ].filter(Boolean).join(' · ');
   $('#upload').href = `/upload?node=${n.id}`;
+  $('#wantlink').href = `/wants?node=${n.id}`;
+  $('#wantlink').hidden = n.kind === 'section';
   $('#within').value = n.id;
   $('#sq').placeholder = `在「${n.name}」中搜索…`;
   $('#upload').hidden = n.kind === 'section';

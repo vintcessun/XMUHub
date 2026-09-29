@@ -591,3 +591,69 @@ pub struct Thumb {
     pub tries: u8,
     pub at: i64,
 }
+
+/// Where a 求资料 post stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WantStatus {
+    /// Waiting for a reviewer; only its author and staff see it.
+    Pending,
+    /// Public, still looking.
+    Open,
+    /// Someone pointed to it (`Want::resource` when it is on the site).
+    Found,
+    /// Closed without an answer (by its author or staff).
+    Closed,
+    /// Turned down by a reviewer; only its author and staff see it.
+    Rejected,
+}
+
+impl WantStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WantStatus::Pending => "pending",
+            WantStatus::Open => "open",
+            WantStatus::Found => "found",
+            WantStatus::Closed => "closed",
+            WantStatus::Rejected => "rejected",
+        }
+    }
+}
+
+/// A 求资料 post: a student asking for material the site doesn't have yet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Want {
+    pub id: Id,
+    pub user: Id,
+    /// The course it is for, if the author picked one.
+    pub node: Option<Id>,
+    pub title: String,
+    pub body: String,
+    pub created_at: i64,
+    pub status: WantStatus,
+    pub reviewed_by: Option<Id>,
+    /// Why it was rejected (shown to its author).
+    pub review_note: String,
+    /// The file on the site that answers it.
+    pub resource: Option<Id>,
+    pub updated_at: i64,
+}
+
+/// A reply under a 求资料 post: a pointer to a file, or a hint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WantReply {
+    pub id: Id,
+    pub want: Id,
+    pub user: Id,
+    pub body: String,
+    pub resource: Option<Id>,
+    pub created_at: i64,
+    /// Soft-deleted by its author or staff.
+    pub deleted_by: Option<Id>,
+}
+
+/// The site-wide notice shown above every page (set by admins; empty text hides it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Announcement {
+    pub text: String,
+    pub at: i64,
+}

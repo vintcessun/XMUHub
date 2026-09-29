@@ -434,6 +434,10 @@ pre.textview { max-height: min(75vh, 900px); overflow: auto; background: var(--s
   font-size: 20px; line-height: 1; cursor: pointer; -webkit-backdrop-filter: blur(15px); backdrop-filter: blur(15px);
 }
 .topfab[hidden] { display: none; }
+.announce { position: relative; z-index: 5; background: var(--warn-soft); color: var(--warn); border-bottom: 1px solid var(--line); font-size: 14px; }
+.announce .wrap { display: flex; gap: 10px; align-items: baseline; padding-top: 8px; padding-bottom: 8px; }
+.announce b { flex: none; }
+.announce button { flex: none; border: 0; background: none; color: inherit; font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
 @media (max-width: 640px) { .topfab { right: 12px; bottom: 58px; width: 40px; height: 40px; font-size: 18px; } }
 @media print { .fbfab, .topfab { display: none; } }
 .item .qpv { align-self: center; flex: none; margin-left: auto; }

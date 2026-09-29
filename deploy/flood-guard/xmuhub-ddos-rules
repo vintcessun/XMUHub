@@ -1,24 +1,28 @@
 #!/bin/bash
 # XMUHub flood guard: rules that must be present (idempotent; run at boot and every minute,
 # so a firewalld / 宝塔 reload that wipes them gets them back within a minute).
-# - Cloudflare's ranges and the owner's address: never limited or banned
-# - at most 30 concurrent connections per source to 80/443
+# - Cloudflare's ranges and the addresses in /etc/xmuhub/ddos-allow: never limited or banned
+# - at most 100 concurrent connections per source to 80/443
 # - sources in ddos_ban / ddos_ban6 (filled by xmuhub-ddos-ban) dropped before conntrack
-MINE=112.51.40.178
 
+ALLOW=/etc/xmuhub/ddos-allow  # one address or range per line; kept in .secrets/, never in the repo
 ipset create -exist cf4 hash:net family inet
 ipset create -exist cf6 hash:net family inet6
-for n in 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 $MINE/32; do ipset add -exist cf4 $n; done
+for n in 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22; do ipset add -exist cf4 $n; done
+[ -r $ALLOW ] && grep -vE '^\s*(#|$)' $ALLOW | while read -r n; do
+  if [[ $n == *:* ]]; then ipset add -exist cf6 "$n"; else ipset add -exist cf4 "$n"; fi
+done
 for n in 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32; do ipset add -exist cf6 $n; done
 ipset create -exist ddos_ban hash:ip family inet timeout 3600
 ipset create -exist ddos_ban6 hash:ip family inet6 timeout 3600
 
 top() { $1 ${2:+-t $2} -C $3 "${@:4}" 2>/dev/null || $1 ${2:+-t $2} -I $3 1 "${@:4}"; }
-# Inserted at the top in reverse order: exemption, then limit.
-top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 30 --connlimit-mask 32 -j REJECT --reject-with tcp-reset
-top iptables  "" INPUT -p tcp -m multiport --dports 80,443 -m set --match-set cf4 src -j ACCEPT
-top ip6tables "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 30 --connlimit-mask 64 -j REJECT --reject-with tcp-reset
-top ip6tables "" INPUT -p tcp -m multiport --dports 80,443 -m set --match-set cf6 src -j ACCEPT
+top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 32 -j REJECT --reject-with tcp-reset
+# The exemption must stay above the limit: always move it back to the top.
+first() { while $1 -D INPUT "${@:2}" 2>/dev/null; do :; done; $1 -I INPUT 1 "${@:2}"; }
+first iptables  -p tcp -m multiport --dports 80,443 -m set --match-set cf4 src -j ACCEPT
+top ip6tables "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 64 -j REJECT --reject-with tcp-reset
+first ip6tables -p tcp -m multiport --dports 80,443 -m set --match-set cf6 src -j ACCEPT
 top iptables  raw PREROUTING -m set --match-set ddos_ban src -j DROP
 top ip6tables raw PREROUTING -m set --match-set ddos_ban6 src -j DROP
 exit 0

@@ -1,8 +1,8 @@
 #!/bin/bash
 # XMUHub flood guard, every minute: puts the rules back if a firewall reload removed them,
-# then bans for an hour every source holding more than 60 connections to 80/443
-# (Cloudflare and the owner exempt). Bans expire by themselves (ipset timeout).
-LIMIT=60
+# then bans for an hour every source holding more than 100 connections to 80/443
+# (Cloudflare exempt). Bans expire by themselves (ipset timeout).
+LIMIT=100
 /usr/local/sbin/xmuhub-ddos-rules
 n=0
 for ip in $(ss -Htn state established '( sport = :80 or sport = :443 )' | awk '{print $4}' | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//; s/^::ffff://' | sort | uniq -c | awk -v l=$LIMIT '$1 > l {print $2}'); do

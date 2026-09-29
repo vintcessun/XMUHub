@@ -50,9 +50,18 @@ function pager(total, size) {
   const pages = Math.min(50, Math.ceil(total / size));
   if (pages <= 1) return '';
   return (page > 1 ? `<a class="btn sm" href="${url({ page: page - 1 })}">上一页</a>` : '') +
-    `<span class="small muted">第 ${page} / ${pages} 页</span>` +
+    `<form class="jump small muted" id="jump">第 <input class="input" name="p" type="number" min="1" max="${pages}" value="${page}" aria-label="页码"> / ${pages} 页 <button class="btn sm" type="submit">跳转</button></form>` +
     (page < pages ? `<a class="btn sm" href="${url({ page: page + 1 })}">下一页</a>` : '');
 }
+
+// 跳转: any page from 1 to the last one.
+$('#pager').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const box = e.target.elements.p;
+  const n = Math.round(Number(box.value));
+  if (!n || n < 1 || n > Number(box.max)) { box.value = page; box.select(); return; }
+  if (n !== page) go(url({ page: n }));
+});
 
 async function run() {
   const box = $('#results');

@@ -857,3 +857,7 @@ img.avatar { object-fit: cover; background: var(--surface-2); }
 .rank li .v { margin-left: auto; font-weight: 600; white-space: nowrap; }
 .weekbars { display: flex; align-items: flex-end; gap: 3px; height: 140px; }
 .weekbars i { flex: 1; min-width: 4px; border-radius: 3px 3px 0 0; background: var(--navy); opacity: .85; }
+
+/* search pager: 跳到第几页 */
+.jump { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.jump .input, .jump .input:focus { width: 4.5em; min-height: 32px; padding: 4px 6px; text-align: center; }

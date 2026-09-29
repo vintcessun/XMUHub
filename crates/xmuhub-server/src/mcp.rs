@@ -331,7 +331,7 @@ fn absolute_targets(v: &mut Value, base: &str) {
 }
 
 /// Largest JSON answer read back from an in-process call (the whole tree is a few MB).
-const MAX_ANSWER: usize = 16 << 20;
+const MAX_ANSWER: usize = 8 << 20;
 
 /// Runs one `/api` request through the site's own router, as the token's owner.
 async fn call_api(app: &Arc<App>, ctx: &Ctx, method: &str, path: &str, query: Option<&Value>, body: Option<&Value>) -> Result<Value, String> {

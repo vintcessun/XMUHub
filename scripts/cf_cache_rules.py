@@ -124,3 +124,21 @@ else:
 # 3. Smart Tiered Cache.
 r = call('PATCH', f'{Z}/cache/tiered_cache_smart_topology_enable', {'value': 'on'})
 print('3. smart tiered cache:', 'on' if r['success'] else r.get('errors'))
+
+# 4. Pages: the cache key leaves out the query string. The server returns the same HTML
+#    whatever the query (page scripts read it from the address bar), and a flood of
+#    "/?x=<random>" otherwise misses the cache every time and lands on the origin
+#    (2026-09-29: 1.7 million a day from one address).
+page = next((r for r in rs['rules'] if r.get('description', '').startswith('XMUHub pages')), None)
+if page is None:
+    print('4. page cache key: rule "XMUHub pages" not found, left alone')
+elif page['action_parameters'].get('cache_key', {}).get('custom_key', {}).get('query_string') == {'exclude': {'all': True}}:
+    print('4. page cache key: already done')
+else:
+    body = {k: page[k] for k in ('description', 'expression', 'action', 'action_parameters', 'enabled') if k in page}
+    body['action_parameters'] = dict(body['action_parameters'])
+    key = dict(body['action_parameters'].get('cache_key', {}))
+    key['custom_key'] = dict(key.get('custom_key', {}), query_string={'exclude': {'all': True}})
+    body['action_parameters']['cache_key'] = key
+    r = call('PATCH', f"{Z}/rulesets/{rs['id']}/rules/{page['id']}", body)
+    print('4. page cache key (ignore query string):', 'ok' if r['success'] else r.get('errors'))

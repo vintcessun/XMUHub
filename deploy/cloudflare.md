@@ -7,7 +7,7 @@ xmu.vintces.icu 经 Cloudflare 代理（橙色云），其他子域名都是「�
 | 设置 | 值 | 为什么 |
 |---|---|---|
 | Browser Cache TTL | Respect Existing Headers | 默认 4 小时会把我们的 `no-cache` 改成 `max-age=14400`，部署后浏览器拿旧 JS 配新页面，页面直接坏掉（2026-09-29 出过一次）。 |
-| 缓存规则 1「XMUHub pages」 | 非 `/api/`、`/mcp`、`/d/`、`/cdn-cgi/`、`/assets/`、`/vendor/` 的 GET：边缘缓存 1 天，3xx–5xx 不缓存，浏览器缓存遵从源站 | 页面对所有人都一样（登录信息由页面脚本另取），只在部署时变化；刷首页的流量在边缘就挡掉。 |
+| 缓存规则 1「XMUHub pages」 | 非 `/api/`、`/mcp`、`/d/`、`/cdn-cgi/`、`/assets/`、`/vendor/` 的 GET：边缘缓存 1 天，3xx–5xx 不缓存，浏览器缓存遵从源站；缓存键不含查询参数 | 页面对所有人都一样（登录信息和地址栏参数由页面脚本另取），只在部署时变化；刷首页的流量在边缘就挡掉。2026-09-29 有人用 `/?x=随机数` 一天刷了 170 万次绕过缓存，所以缓存键忽略查询参数（`scripts/cf_cache_rules.py` 第 4 步）。 |
 | 缓存规则 2「XMUHub public API」 | `/api/tree`、`/api/meta`、`/api/recent`、`/api/popular`、`/api/links`、`/api/search`、`/api/stats`、`/api/me`、`/api/nodes/*`、`/api/resources/<id>`（只有一层，不含 `/download` 等）、`/api/resources/<id>/social` 的 GET，**且没有 `xh_sid` Cookie、没有 `Authorization` 头**：边缘缓存 60 秒 | 只缓存访客看到的公开数据（访客的 `/api/me` 永远是 `{"user":null}`）；登录用户、令牌、下载（按 IP 选镜像）、上传、审核一律直达源站。 |
 | URL 改写「/n/<id>」「/r/<id>」 | GET `/n/*` → `/n/_`，`/r/*` → `/r/_`（改写在缓存之前） | 服务器返回的课程页、资料页与编号无关（页面脚本从地址栏读编号），几千个地址共用一条缓存。 |
 | Smart Tiered Cache | 开 | 新加坡 / 香港 / 东京等节点没命中时先问上层节点，少回源。 |

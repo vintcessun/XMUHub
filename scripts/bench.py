@@ -211,7 +211,7 @@ def run():
     ]
 
     report = {'data': {'courses': len(courses), 'files_in_course': len(res), 'biggest_course': biggest['count']}, 'latency': {}, 'throughput': {}}
-    print(f"data: {len(courses)} courses with files; biggest course has {len(res)} files\n")
+    print(f"data: {len(courses)} courses with files; reads use one with {len(res)} files, the biggest has {biggest['count']}\n")
     print(f"{'endpoint':<36}{'p50':>9}{'p90':>9}{'p99':>9}   (ms, {A.n} requests each; writes {max(20, A.n // 10)})")
     for label, fn in reads + writes:
         n = A.n if (label, fn) in reads else max(20, A.n // 10)

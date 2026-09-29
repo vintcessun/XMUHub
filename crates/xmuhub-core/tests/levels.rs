@@ -31,6 +31,8 @@ fn set_level(h: &Hub, v: Viewer, id: Id, level: u8) {
 
 /// Course names matching `q` under a level filter.
 fn courses(h: &Hub, v: Viewer, q: &str, level: Option<u8>) -> Vec<String> {
+    // Searches may lag writes by up to search::FRESH; the test wants them right away.
+    h.search.flush().unwrap();
     let f = Filter { ty: Some(DocType::Node), level, ..Default::default() };
     let mut names: Vec<String> = h.search(v, q, f, 50, 0).unwrap().0.into_iter().filter_map(|i| match i {
         xmuhub_core::hub::SearchItem::Node { node, .. } => Some(node.name),

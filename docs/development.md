@@ -121,3 +121,16 @@ python scripts/import_archive.py 资料库备份.zip --base https://<你的域�
 ```sh
 claude mcp add --transport http <site.json 里的 mcp_name> https://<你的域名>/mcp --header "Authorization: Bearer xmh_…"
 ```
+
+## 性能基准测试
+
+`scripts/bench.py` 在**本地**测试服务器上造出和线上规模相当的假数据（10 个学院、200 门课、3000 份资料），然后逐个测接口的单次耗时（中位数 / p90 / p99），再测 16 个客户端同时读、以及批量上传进行时读的吞吐。它只连本机，不会对线上发请求。
+
+```sh
+XMUHUB_DATA=/tmp/bench XMUHUB_STORAGE=local XMUHUB_SCRIPT_TOKEN=<至少 32 位> XMUHUB_RATE_LIMIT=1000000   XMUHUB_SECURE_COOKIE=0 cargo run --release -p xmuhub-server
+python3 scripts/bench.py seed --token <同一个令牌>
+python3 scripts/bench.py run  --token <同一个令牌> --json report.json
+```
+
+2026-09-30 的结果（Windows 本机，release 编译）：读接口单次都在 1 ms 左右（课程树 0.8 ms、搜索资料 0.5 ms），上传登记一份资料全流程约 20 ms；16 个客户端同时读每秒约 6000 次，批量上传进行时约 4400 次（p99 20 ms）。搜索索引的提交放到后台、最多每 0.5 秒一次之前，批量上传时只有约 2300 次（p99 29 ms）。
+

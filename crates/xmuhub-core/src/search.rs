@@ -82,9 +82,16 @@ pub struct Search {
     reader: IndexReader,
     /// Changes staged since the last commit. Writes don't commit (it made every upload,
     /// new course or review wait, and during a batch upload each one queued behind the
-    /// others); [`Search::flush`] does, from a background tick and before every search.
+    /// others); [`Search::flush`] does, from a background tick and, when the last commit is
+    /// older than [`FRESH`], before a search.
     dirty: AtomicBool,
+    last_commit: Mutex<std::time::Instant>,
 }
+
+/// How stale search results may be. A search doesn't commit more often than this: during a
+/// batch upload the index is always dirty, and committing on every search made searches
+/// queue behind the uploads (half the throughput in scripts/bench.py).
+pub const FRESH: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn key(ty: DocType, id: Id) -> u64 {
     ((ty as u64) << 56) | id
@@ -120,7 +127,7 @@ impl Search {
         let index = Index::create_in_ram(sb.build());
         let writer = index.writer_with_num_threads(1, WRITER_BUDGET)?;
         let reader = index.reader_builder().reload_policy(ReloadPolicy::Manual).try_into()?;
-        Ok(Search { f, writer: Mutex::new(writer), reader, dirty: AtomicBool::new(false) })
+        Ok(Search { f, writer: Mutex::new(writer), reader, dirty: AtomicBool::new(false), last_commit: Mutex::new(std::time::Instant::now()) })
     }
 
     pub fn put_node(&self, n: &Node, at: &Placement, weight: u64, is_course: bool, level: u8) -> Result<()> {
@@ -187,6 +194,7 @@ impl Search {
         let t = std::time::Instant::now();
         self.writer.lock().commit()?;
         self.reader.reload()?;
+        *self.last_commit.lock() = std::time::Instant::now();
         if t.elapsed() > std::time::Duration::from_millis(500) {
             tracing::warn!(ms = t.elapsed().as_millis() as u64, "slow search commit");
         }
@@ -205,8 +213,10 @@ impl Search {
     }
 
     pub fn search(&self, q: &str, filter: Filter, limit: usize, offset: usize) -> Result<(Vec<Hit>, usize)> {
-        // A search right after a write sees it (the background tick may not have run yet).
-        self.flush()?;
+        // Results are at most FRESH old: a search right after a write sees it.
+        if self.dirty.load(Ordering::Acquire) && self.last_commit.lock().elapsed() >= FRESH {
+            self.flush()?;
+        }
         let strict = self.run(&query_units(q), false, filter, limit, offset)?;
         if strict.1 > 0 {
             return Ok(strict);
@@ -371,8 +381,9 @@ mod deferred_commit_tests {
         s.put_node(&node(7, "微积分"), &at, 100, true, 0).unwrap();
         assert!(s.dirty.load(Ordering::Acquire), "a write only stages");
         assert_eq!(s.reader.searcher().num_docs(), 0, "not committed by the write");
+        std::thread::sleep(FRESH);
         let (hits, total) = s.search("微积分", Filter::default(), 10, 0).unwrap();
-        assert_eq!((hits.len(), total), (1, 1), "a search commits what is pending first");
+        assert_eq!((hits.len(), total), (1, 1), "a search commits what is pending (once FRESH has passed)");
         assert!(!s.dirty.load(Ordering::Acquire));
         s.remove(DocType::Node, 7);
         s.flush().unwrap();

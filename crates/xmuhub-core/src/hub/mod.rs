@@ -475,13 +475,13 @@ impl Hub {
     pub fn open(db: Arc<Db>, storage: Storage, limits: Limits, admins: Vec<String>) -> Result<Hub> {
         let st = State::from_db(&db)?;
         let search = Arc::new(Search::new()?);
-        // Background tick: pending search changes become visible within a second.
+        // Background tick: pending search changes become visible within search::FRESH.
         let weak = Arc::downgrade(&search);
         std::thread::Builder::new()
             .name("search-commit".into())
             .spawn(move || {
                 while let Some(s) = {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    std::thread::sleep(crate::search::FRESH);
                     weak.upgrade()
                 } {
                     if let Err(e) = s.flush() {

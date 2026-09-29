@@ -86,7 +86,7 @@ fn text(s: &str, max: usize) -> String {
 }
 
 impl Hub {
-    fn person(&self, st: &State, user: Id) -> Person {
+    pub(super) fn person(&self, st: &State, user: Id) -> Person {
         let u = st.users.get(&user);
         Person {
             nickname: u.map(|u| u.nickname.clone()).unwrap_or_default(),

@@ -348,6 +348,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/me/questions", get(my_questions))
         .route("/links", get(links).post(add_link))
         .route("/links/{id}", axum::routing::patch(update_link).delete(delete_link))
+        .route("/links/suggestions", get(link_suggestions).post(suggest_link))
+        .route("/links/suggestions/{id}/review", post(review_link_suggestion))
         .route("/wants", get(wants).post(add_want))
         .route("/wants/{id}", get(want))
         .route("/wants/{id}/review", post(review_want))
@@ -1263,6 +1265,59 @@ async fn update_link(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Jso
     let user = auth.user.clone();
     let l = blocking(move || hub.update_link(Viewer { user: user.as_ref() }, id, &b.title, &b.url, &b.note, b.sort)).await?;
     Ok(Json(json!(l)))
+}
+
+#[derive(Deserialize)]
+struct SuggestLinkIn {
+    title: String,
+    url: String,
+    #[serde(default)]
+    note: String,
+}
+
+async fn suggest_link(State(app): S, auth: Auth, Json(b): Json<SuggestLinkIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let s = blocking(move || hub.suggest_link(Viewer { user: user.as_ref() }, &b.title, &b.url, &b.note)).await?;
+    Ok(Json(json!(s)))
+}
+
+/// Staff: the suggestions waiting for review. Anyone else: their own.
+async fn link_suggestions(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.link_suggestions(auth.viewer())?)))
+}
+
+#[derive(Deserialize)]
+struct LinkReviewIn {
+    approve: bool,
+    /// Why it's turned down.
+    #[serde(default)]
+    reason: String,
+    /// The entry as the reviewer tidied it (all of title / url given), else as suggested.
+    title: Option<String>,
+    url: Option<String>,
+    #[serde(default)]
+    note: String,
+    #[serde(default = "default_link_sort")]
+    sort: u32,
+}
+
+fn default_link_sort() -> u32 {
+    100
+}
+
+async fn review_link_suggestion(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<LinkReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let l = blocking(move || {
+        let edit = match (&b.title, &b.url) {
+            (Some(t), Some(u)) => Some((t.as_str(), u.as_str(), b.note.as_str(), b.sort)),
+            _ => None,
+        };
+        hub.review_link_suggestion(Viewer { user: user.as_ref() }, id, b.approve, &b.reason, edit)
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true, "link": l })))
 }
 
 async fn delete_link(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {

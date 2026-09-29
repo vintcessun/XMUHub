@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickNode, preview, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -243,7 +243,7 @@ async function renderManage(r, me) {
   });
   if (canEdit) {
     $('#f_pick').onclick = async () => {
-      const t = await pickNode('把这份资料放到哪个分类');
+      const t = (await pickFromTree('把这份资料放到哪个分类'))?.node;
       if (!t) return;
       nodeId = t.id;
       $('#f_nodename').textContent = t.name;

@@ -40,6 +40,8 @@ pub const QUESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("questio
 pub const RESOURCE_MAJORS: TableDefinition<u64, &str> = TableDefinition::new("resource_majors");
 /// id → Link (a recommended outside source: another repo, a netdisk collection …).
 pub const LINKS: TableDefinition<u64, &[u8]> = TableDefinition::new("links");
+/// id → LinkSuggestion (a 站外资源 link waiting for a reviewer, or its outcome).
+pub const LINK_SUGGESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("link_suggestions");
 /// id → Want (a 求资料 post).
 pub const WANTS: TableDefinition<u64, &[u8]> = TableDefinition::new("wants");
 /// id → WantReply
@@ -95,6 +97,7 @@ pub struct Snapshot {
     pub wants: Vec<Want>,
     pub want_replies: Vec<WantReply>,
     pub want_votes: Vec<(Id, Id)>,
+    pub link_suggestions: Vec<LinkSuggestion>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -136,6 +139,7 @@ impl Db {
         txn.open_table(WANTS)?;
         txn.open_table(WANT_REPLIES)?;
         txn.open_table(WANT_VOTES)?;
+        txn.open_table(LINK_SUGGESTIONS)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -217,6 +221,9 @@ impl Db {
         for row in txn.open_table(WANTS)?.iter()? {
             snap.wants.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(LINK_SUGGESTIONS)?.iter()? {
+            snap.link_suggestions.push(decode(row?.1.value())?);
+        }
         for row in txn.open_table(WANT_REPLIES)?.iter()? {
             snap.want_replies.push(decode(row?.1.value())?);
         }
@@ -271,6 +278,7 @@ impl Db {
             wants: snap.wants,
             want_replies: snap.want_replies,
             want_votes: snap.want_votes,
+            link_suggestions: snap.link_suggestions,
         };
         serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
@@ -319,6 +327,8 @@ pub struct Dump {
     pub want_replies: Vec<WantReply>,
     #[serde(default)]
     pub want_votes: Vec<(Id, Id)>,
+    #[serde(default)]
+    pub link_suggestions: Vec<LinkSuggestion>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -445,6 +455,10 @@ impl Tx<'_> {
     }
     pub fn del_link(&self, id: Id) -> Result<()> {
         self.txn.open_table(LINKS)?.remove(id)?;
+        Ok(())
+    }
+    pub fn put_link_suggestion(&self, s: &LinkSuggestion) -> Result<()> {
+        self.txn.open_table(LINK_SUGGESTIONS)?.insert(s.id, encode(s).as_slice())?;
         Ok(())
     }
     pub fn put_want(&self, w: &Want) -> Result<()> {

@@ -41,7 +41,15 @@ async function queueUI(box, items, intro, actions, categoryFilters = false, opts
     box.innerHTML = '<div class="card empty"><b>这里是空的</b>辛苦了 ☕</div>';
     return;
   }
-  const [M, categories] = await Promise.all([meta(), categoryFilters ? tree() : Promise.resolve(null)]);
+  const [M, t] = await Promise.all([meta(), tree()]);
+  const categories = categoryFilters ? t : null;
+  // Where a file sits, as 「栏目 / 学院 / 课程」 linking to the course (same-named courses
+  // exist in several colleges).
+  const where = (r) => {
+    const chain = [];
+    for (let n = t.byId.get(r.node.id); n; n = t.byId.get(n.parent)) chain.unshift(n);
+    return `<a class="faint" data-where href="/n/${r.node.id}" target="_blank" title="在新标签页打开这门课">${esc(chain.map((n) => n.name).join(' / ') || r.node.name)}</a>`;
+  };
   const byId = new Map(items.map((r) => [String(r.id), r]));
   const locations = new Map();
   const groups = new Map();
@@ -71,6 +79,7 @@ async function queueUI(box, items, intro, actions, categoryFilters = false, opts
     <div class="list">${items.map((r) => `<div data-id="${r.id}">${resourceItem(r)}
       <div class="row small" style="padding:0 4px 14px 58px;gap:8px">
         <input type="checkbox" class="qsel">
+        ${where(r)}<button class="btn sm" data-recourse type="button" title="在分类树里选另一门课，文件名随之更新">改课程</button>
         <span class="faint">${esc(r.original_name || '')}</span>
         ${r.uploader ? `<span class="faint">· ${esc(r.uploader.nickname)}</span>` : ''}<span class="faint">· ${ago(r.created_at)}</span>
         <span class="grow"></span>
@@ -158,6 +167,19 @@ async function queueUI(box, items, intro, actions, categoryFilters = false, opts
       const text = prompt('想问上传者什么？对方会在资料页和「我的」页看到，回答后这份会回到待审池子。');
       if (!text || !text.trim()) return;
       try { await api(`/resources/${wrap.dataset.id}/questions`, { method: 'POST', body: { text } }); toast('已发给上传者'); gone(wrap); } catch (err) { toast(err.message, true); }
+      return;
+    }
+    const rc = e.target.closest('[data-recourse]');
+    if (rc) {
+      const wrap = rc.closest('[data-id]');
+      if (!(await moveResources([Number(wrap.dataset.id)]))) return;
+      try {
+        const r = await api(`/resources/${wrap.dataset.id}`);
+        byId.set(String(r.id), r);
+        const item = wrap.querySelector('.item');
+        if (item) item.outerHTML = resourceItem(r);
+        wrap.querySelector('[data-where]').outerHTML = where(r);
+      } catch (err) { toast(err.message, true); }
       return;
     }
     if (e.target.closest('[data-move]')) {
@@ -403,6 +425,29 @@ const panels = {
       const note = it.querySelector('input').value.trim();
       if (b.dataset.a === 'no' && !note) return toast('写一下驳回原因', true);
       try { await api(`/wants/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已通过' : '已驳回'); } catch (err) { toast(err.message, true); }
+    };
+  },
+  async links(box) {
+    const list = await api('/links/suggestions');
+    const host = (u) => { try { return new URL(u).host; } catch { return ''; } };
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学推荐的站外资源，采纳后显示在<a href="/links" target="_blank">站外资源</a>页。先打开链接看一下：是学习资料、不是钓鱼或广告、不需要付费再采纳；名称和说明可以改好再采纳。不采纳要写原因（推荐人能看到）。自己推荐的要由其他审核员审核。</p>
+      ${list.length ? list.map((s) => `<div class="item" data-id="${s.id}"><div class="body">
+        <div class="fields-2"><label class="field"><span>名称</span><input class="input" data-f="title" maxlength="40" value="${esc(s.title)}"></label>
+          <label class="field"><span>链接 · <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer nofollow">打开看看</a> <span class="faint mono">${esc(host(s.url))}</span></span><input class="input" data-f="url" maxlength="400" value="${esc(s.url)}"></label></div>
+        <label class="field"><span>说明</span><input class="input" data-f="note" maxlength="200" value="${esc(s.note)}"></label>
+        <div class="meta"><span>${avatar(s.by.avatar, s.by.nickname, 20)} ${esc(s.by.nickname)} 推荐</span><span>${ago(s.created_at)}</span></div>
+        ${s.mine ? '<p class="small faint">这是你推荐的，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><label class="small">排序 <input class="input" data-f="sort" type="number" min="0" value="100" style="max-width:80px;min-height:30px;padding:3px 8px"></label><button class="btn sm ok" data-a="ok" type="button">采纳</button>
+          <input class="input" data-f="reason" placeholder="不采纳的原因（推荐人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不采纳</button></div>`}
+      </div></div>`).join('') : '<div class="empty"><b>没有待审核的推荐</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a]');
+      if (!b) return;
+      const it = b.closest('[data-id]');
+      const f = (k) => it.querySelector(`[data-f="${k}"]`).value;
+      const approve = b.dataset.a === 'ok';
+      if (!approve && !f('reason').trim()) return toast('写一下不采纳的原因', true);
+      const body = approve ? { approve, title: f('title'), url: f('url'), note: f('note'), sort: Number(f('sort')) || 0 } : { approve, reason: f('reason') };
+      try { await api(`/links/suggestions/${it.dataset.id}/review`, { method: 'POST', body }); it.remove(); toast(approve ? '已加入站外资源' : '已处理'); } catch (err) { toast(err.message, true); }
     };
   },
   async announce(box) {

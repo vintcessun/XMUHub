@@ -43,7 +43,8 @@ pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
-pub use wants::{WantFilter, WantReplyView, WantView};
+pub use links::LinkSuggestionView;
+pub use wants::{Person, WantFilter, WantReplyView, WantView};
 
 const SEQ_KEY: &str = "seq";
 /// Longest search query looked at (characters); the rest is ignored.
@@ -121,6 +122,7 @@ pub(crate) struct State {
     want_replies: HashMap<Id, WantReply>,
     /// want → users who said 「我也要」
     want_votes: HashMap<Id, HashSet<Id>>,
+    link_suggestions: HashMap<Id, LinkSuggestion>,
     /// The site-wide notice, once an admin has set one.
     announcement: Option<Announcement>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
@@ -193,6 +195,7 @@ impl State {
         st.links = snap.links.into_iter().map(|l| (l.id, l)).collect();
         st.wants = snap.wants.into_iter().map(|w| (w.id, w)).collect();
         st.want_replies = snap.want_replies.into_iter().map(|r| (r.id, r)).collect();
+        st.link_suggestions = snap.link_suggestions.into_iter().map(|s| (s.id, s)).collect();
         for (want, user) in snap.want_votes {
             st.want_votes.entry(want).or_default().insert(user);
         }

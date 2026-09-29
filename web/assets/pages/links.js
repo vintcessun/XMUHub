@@ -1,7 +1,8 @@
-import { api, esc, layout, linkify, toast, $ } from '../app.js';
+import { ago, api, esc, layout, linkify, loginUrl, toast, $ } from '../app.js';
 
-// 站外资源: a list staff keep of outside collections. Everyone reads it; reviewers and admins
-// add, edit and remove entries right here.
+// 站外资源: outside collections. Everyone reads the list; signed-in students suggest links,
+// which a reviewer adds on the admin page (「站外链接」). Reviewers and admins also add, edit
+// and remove entries right here.
 
 const host = (url) => { try { return new URL(url).host; } catch { return ''; } };
 
@@ -45,6 +46,34 @@ function showForm(l = null) {
   if (l) $('#lcancel').onclick = () => showForm();
 }
 
+const SUGG = { pending: ['等待审核', 'pending'], approved: ['已采纳', 'published'], rejected: ['未采纳', 'rejected'] };
+
+function suggestForm() {
+  $('#sform').innerHTML = `<div class="fields-2">
+      <label class="field"><span>名称 <em>*</em></span><input class="input" id="stitle" maxlength="40" placeholder="如 XMU-CS-exam（信息学院试卷）"></label>
+      <label class="field"><span>链接 <em>*</em></span><input class="input" id="surl" maxlength="400" placeholder="https://…"></label></div>
+    <label class="field"><span>说明（选填：是什么、适合谁）</span><input class="input" id="snote" maxlength="200"></label>
+    <div class="row"><button class="btn primary sm" id="ssend" type="button">提交推荐</button></div>`;
+  $('#ssend').onclick = async () => {
+    try {
+      await api('/links/suggestions', { method: 'POST', body: { title: $('#stitle').value, url: $('#surl').value, note: $('#snote').value } });
+      toast('已提交，审核员核实后会加到列表里');
+      suggestForm();
+      mine();
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+async function mine() {
+  const list = await api('/links/suggestions').catch(() => []);
+  const own = list.filter((s) => s.mine);
+  $('#mine').innerHTML = own.length ? `<h4 style="margin:16px 0 6px">我推荐的</h4><div class="list">${own.map((s) => {
+    const [label, cls] = SUGG[s.status] || [s.status, ''];
+    return `<div class="item"><div class="body"><b>${esc(s.title)}</b> <span class="faint mono small">${esc(s.url)}</span>
+      <div class="meta"><span class="badge ${cls}">${label}</span><span>${ago(s.created_at)}</span>${s.review_note ? `<span style="color:var(--bad)">原因：${esc(s.review_note)}</span>` : ''}</div></div></div>`;
+  }).join('')}</div>` : '';
+}
+
 async function load() {
   try { list = await api('/links'); } catch (e) { $('#links').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
   render();
@@ -54,6 +83,7 @@ async function load() {
   const me = await layout('links');
   staff = !!me && me.level >= 3;
   await load();
+  if (me) { suggestForm(); mine(); } else $('#sform').innerHTML = `<p class="small"><a href="${loginUrl()}">登录</a>后可以推荐。</p>`;
   if (!staff) return;
   showForm();
   $('#links').onclick = async (e) => {

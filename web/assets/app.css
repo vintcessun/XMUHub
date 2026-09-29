@@ -383,9 +383,6 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
 .stack > .card + .card { margin-top: 0; }
 pre.code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-size: 12.5px; white-space: pre; }
 .item .subtitle { font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
-.picklist { list-style: none; margin: 10px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
-.picklist li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
-.picklist li:hover { background: var(--surface-2); }
 .chart { width: 100%; height: auto; display: block; }
 .chart text { fill: var(--muted); font-size: 11px; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }

@@ -621,6 +621,25 @@ impl WantStatus {
     }
 }
 
+/// A link a student suggests for 站外资源: a reviewer (not the one who suggested it) adds it
+/// to the list or turns it down with a reason.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LinkSuggestion {
+    pub id: Id,
+    pub user: Id,
+    pub title: String,
+    pub url: String,
+    pub note: String,
+    pub created_at: i64,
+    /// "pending", "approved" or "rejected".
+    pub status: String,
+    pub reviewed_by: Option<Id>,
+    /// Why it was turned down (shown to whoever suggested it).
+    pub review_note: String,
+    /// The entry it became on the list.
+    pub link: Option<Id>,
+}
+
 /// A 求资料 post: a student asking for material the site doesn't have yet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Want {

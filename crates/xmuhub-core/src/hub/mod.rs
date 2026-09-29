@@ -48,7 +48,7 @@ pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
 pub use collections::CollectionView;
-pub use series::{SeriesItem, SeriesView};
+pub use series::{SeriesItem, SeriesText, SeriesView};
 pub use links::LinkSuggestionView;
 pub use notices::NoticeList;
 pub use stats_public::SiteStats;

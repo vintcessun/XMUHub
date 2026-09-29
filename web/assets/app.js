@@ -654,6 +654,9 @@ export async function moveResources(ids) {
 
 // ---------------------------------------------------------------- 合集
 
+/** 「来源 · 年份」 of a 合集, when given. */
+export const seriesAbout = (s) => [s.source, s.year].filter(Boolean).map(esc).join(' · ');
+
 const byName = (a, b) => a.title.localeCompare(b.title, 'zh-CN', { numeric: true });
 
 /**
@@ -674,7 +677,11 @@ export async function seriesEditor(node, series = null, pick = []) {
   return new Promise((resolve) => {
     body.innerHTML = `<p class="small muted" style="margin-top:0">把这门课里连续的资料（第1讲…第12讲、历年期末…）按顺序排好，课程页上会合成一行，资料页可以直接切到上一份 / 下一份。
       一份资料只能在一个合集里。${admin ? '你是管理员，提交后直接生效。' : '提交后由审核员审核，通过后显示。'}</p>
-      <label class="field"><span>合集名称 <em>*</em></span><input class="input" id="s_title" maxlength="40" value="${esc(series ? series.title : '')}" placeholder="如：数据结构课件（第1–12章）"></label>
+      <div class="fields-3">
+        <label class="field"><span>合集名称 <em>*</em></span><input class="input" id="s_title" maxlength="40" value="${esc(series ? series.title : '')}" placeholder="如：数据结构课件（第1–12章）"></label>
+        <label class="field"><span>来源（选填）</span><input class="input" id="s_source" maxlength="60" value="${esc(series ? series.source : '')}" placeholder="如：张老师班、学长整理"></label>
+        <label class="field"><span>年份（选填）</span><input class="input" id="s_year" maxlength="20" value="${esc(series ? series.year : '')}" placeholder="如：2024 或 2019–2024"></label>
+      </div>
       <div class="row small" style="margin:10px 0 6px"><b id="s_count"></b><span class="grow"></span><button class="btn sm" id="s_sort" type="button">按名称排序</button></div>
       <ol class="series-edit" id="s_list"></ol>
       <details class="series-add"><summary class="small">添加这门课的其他资料</summary>
@@ -711,7 +718,7 @@ export async function seriesEditor(node, series = null, pick = []) {
     };
     const send = async (list) => {
       try {
-        const s = await api(series ? `/series/${series.id}` : '/series', { method: series ? 'PUT' : 'POST', body: { node, title: body.querySelector('#s_title').value, items: list } });
+        const s = await api(series ? `/series/${series.id}` : '/series', { method: series ? 'PUT' : 'POST', body: { node, title: body.querySelector('#s_title').value, source: body.querySelector('#s_source').value, year: body.querySelector('#s_year').value, items: list } });
         const live = !s.draft;
         toast(live ? (list.length ? '合集已更新' : '合集已解散') : '已提交，审核通过后显示');
         body.close();

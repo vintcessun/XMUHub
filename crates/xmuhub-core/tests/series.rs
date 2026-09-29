@@ -10,7 +10,7 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use xmuhub_core::Hub;
 use xmuhub_core::db::Db;
-use xmuhub_core::hub::{AdminExtras, CodePurpose, Limits, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, Viewer};
+use xmuhub_core::hub::{AdminExtras, CodePurpose, Limits, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SeriesText, Viewer};
 use xmuhub_core::model::{Id, Level, User};
 use xmuhub_core::storage::local::LocalBackend;
 use xmuhub_core::storage::{Receipt, Storage};
@@ -28,6 +28,10 @@ fn register(h: &Hub, email: &str, nick: &str) -> User {
 
 fn node(h: &Hub, v: Viewer, parent: Option<Id>, kind: &str, name: &str) -> Id {
     h.create_node(v, NodeInput { parent, kind: kind.into(), code: String::new(), name: name.into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id
+}
+
+fn t(title: &str) -> SeriesText<'_> {
+    SeriesText { title, source: "张老师", year: "2023" }
 }
 
 async fn upload(h: &Hub, dir: &std::path::Path, v: Viewer<'_>, node: Id, content: &[u8]) -> Id {
@@ -67,22 +71,22 @@ async fn series_are_proposed_then_reviewed() {
     let hidden = upload(&h, &dir, reviewer, course, b"pending one").await;
 
     // Checks on what goes in.
-    assert!(h.propose_series(guest, None, course, "讲义", &files).is_err(), "signed-in only");
-    assert!(h.propose_series(me, None, course, "讲义", &files[..1]).is_err(), "two files at least");
-    assert!(h.propose_series(me, None, course, "", &files).is_err(), "needs a name");
-    assert!(h.propose_series(me, None, course, "讲义", &[files[0], elsewhere]).is_err(), "one course");
-    assert!(h.propose_series(me, None, course, "讲义", &[files[0], hidden]).is_err(), "someone else's unpublished file");
-    assert!(h.propose_series(me, None, section, "讲义", &files).is_err(), "not on a section");
+    assert!(h.propose_series(guest, None, course, t("讲义"), &files).is_err(), "signed-in only");
+    assert!(h.propose_series(me, None, course, t("讲义"), &files[..1]).is_err(), "two files at least");
+    assert!(h.propose_series(me, None, course, t(""), &files).is_err(), "needs a name");
+    assert!(h.propose_series(me, None, course, t("讲义"), &[files[0], elsewhere]).is_err(), "one course");
+    assert!(h.propose_series(me, None, course, t("讲义"), &[files[0], hidden]).is_err(), "someone else's unpublished file");
+    assert!(h.propose_series(me, None, section, t("讲义"), &files).is_err(), "not on a section");
 
     // A student's proposal: invisible until a reviewer approves it.
     let order = [files[2], files[0], files[1]];
-    let s = h.propose_series(me, None, course, "数据结构讲义", &order).unwrap();
+    let s = h.propose_series(me, None, course, t("数据结构讲义"), &order).unwrap();
     assert_eq!(s.status, "new");
     assert!(s.draft.as_ref().unwrap().mine);
     assert!(h.node_series(guest, course).is_empty());
     assert!(h.series_of(guest, files[0]).is_none());
     assert!(h.series(guest, s.id).is_err());
-    assert!(h.propose_series(me, None, course, "又一个", &[files[0], files[3]]).is_err(), "a file is in one 合集");
+    assert!(h.propose_series(me, None, course, t("又一个"), &[files[0], files[3]]).is_err(), "a file is in one 合集");
     assert_eq!(h.pending_series(reviewer).unwrap().len(), 1);
     assert!(h.pending_series(me).is_err());
     assert!(h.review_series(me, s.id, true, "").is_err(), "students can't review");
@@ -99,24 +103,34 @@ async fn series_are_proposed_then_reviewed() {
 
     // A change waits while the approved version stays up; only one change at a time.
     let longer = [files[0], files[1], files[2], files[3]];
-    h.propose_series(me, Some(s.id), course, "数据结构讲义（全）", &longer).unwrap();
+    h.propose_series(me, Some(s.id), course, t("数据结构讲义（全）"), &longer).unwrap();
     assert_eq!(h.node_series(guest, course)[0].items.len(), 3);
     assert!(h.node_series(guest, course)[0].draft.is_none(), "drafts are for their author and staff");
-    assert!(h.propose_series(reviewer, Some(s.id), course, "别的", &files).is_err(), "someone else's change is waiting");
+    assert!(h.propose_series(reviewer, Some(s.id), course, t("别的"), &files).is_err(), "someone else's change is waiting");
     h.review_series(reviewer, s.id, false, "标题不用改").unwrap();
     assert_eq!(h.node_series(guest, course)[0].title, "数据结构讲义");
-    h.propose_series(me, Some(s.id), course, "数据结构讲义", &longer).unwrap();
+    h.propose_series(me, Some(s.id), course, t("数据结构讲义"), &longer).unwrap();
     h.review_series(reviewer, s.id, true, "").unwrap();
     assert_eq!(h.series_of(guest, files[3]).unwrap().items.len(), 4);
 
     // Reviewers don't pass their own proposals; admins' apply at once.
-    h.propose_series(reviewer, Some(s.id), course, "讲义", &files[..2]).unwrap();
+    h.propose_series(reviewer, Some(s.id), course, t("讲义"), &files[..2]).unwrap();
     assert!(h.review_series(reviewer, s.id, true, "").is_err(), "not their own");
     h.review_series(staff, s.id, true, "").unwrap();
     assert_eq!(h.series_of(guest, files[0]).unwrap().items.len(), 2);
-    let direct = h.propose_series(staff, Some(s.id), course, "讲义", &[]).unwrap();
+    let direct = h.propose_series(staff, Some(s.id), course, t("讲义"), &[]).unwrap();
     assert_eq!(direct.status, "closed", "an empty list 解散 the 合集");
     assert!(h.node_series(guest, course).is_empty());
+
+    // At upload time: a student puts their own waiting files into a new 合集 with its source
+    // and year; one approval passes the 合集 and the files in it.
+    let mine = [upload(&h, &dir, me, other, b"lab 1").await, upload(&h, &dir, me, other, b"lab 2").await];
+    let lab = h.propose_series(me, None, other, SeriesText { title: "操作系统实验", source: "李老师班", year: "2024" }, &mine).unwrap();
+    let d = lab.draft.as_ref().unwrap();
+    assert_eq!((d.source.as_str(), d.year.as_str(), d.items.len()), ("李老师班", "2024", 2));
+    assert_eq!(h.review_series_with_files(reviewer, lab.id).unwrap(), 2);
+    let live = h.series_of(guest, mine[1]).unwrap();
+    assert_eq!((live.items.len(), live.source.as_str(), live.year.as_str()), (2, "李老师班", "2024"));
 
     // Survives a restart.
     drop(h);

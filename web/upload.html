@@ -56,6 +56,17 @@
       </div>
       <div class="frows" id="rows"></div>
     </section>
+    <section class="card" id="albumcard">
+      <h2>3 · 放进合集 <span class="small muted" style="font-weight:400">（选填）</span></h2>
+      <p class="small muted" style="margin-top:0">同一套资料（第1讲…第12讲、某位老师的历年试卷…）可以整理成合集：课程页上合成一行，大家按顺序看、一键下载。合集和资料一起交给审核员，审核更快。</p>
+      <div class="row"><select class="input" id="al_pick" style="max-width:360px"><option value="">不放进合集</option></select></div>
+      <div class="fields-3" id="al_new" hidden style="margin-top:10px">
+        <label class="field"><span>合集名称 <em>*</em></span><input class="input" id="al_title" maxlength="40" placeholder="如：数据结构课件（第1–12章）"></label>
+        <label class="field"><span>来源（选填）</span><input class="input" id="al_source" maxlength="60" placeholder="如：张老师班、学长整理"></label>
+        <label class="field"><span>年份（选填）</span><input class="input" id="al_year" maxlength="20" placeholder="如：2024 或 2019–2024"></label>
+      </div>
+      <p class="small faint" id="al_tip" style="margin:8px 0 0"></p>
+    </section>
     <section class="card">
       <div id="status"></div>
       <div class="progress" id="prog" hidden><i></i></div>

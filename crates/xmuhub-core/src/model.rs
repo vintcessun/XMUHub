@@ -669,6 +669,10 @@ pub struct Series {
     pub node: Id,
     /// What visitors see (empty until the first proposal is approved).
     pub title: String,
+    /// Where the set comes from (a teacher, a senior's notes, a public course site …).
+    pub source: String,
+    /// The year(s) it covers, as the proposer wrote it (2023, 2019–2024 …).
+    pub year: String,
     pub items: Vec<Id>,
     pub created_by: Id,
     pub created_at: i64,
@@ -686,6 +690,8 @@ pub struct Series {
 pub struct SeriesDraft {
     pub by: Id,
     pub title: String,
+    pub source: String,
+    pub year: String,
     pub items: Vec<Id>,
     pub at: i64,
 }

@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtSize, layout, loginUrl, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, seriesEditor, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, loginUrl, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, seriesAbout, seriesEditor, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -34,7 +34,7 @@ function seriesRow(s, items) {
   return `<details class="series" data-sid="${s.id}"${openSeries.has(s.id) ? ' open' : ''}>
     <summary class="item series-head"><div class="ficon series-icon" aria-hidden="true">合集</div>
       <div class="body"><span class="title">${esc(s.title)}</span>
-        <div class="meta"><span class="tag t-series">合集</span><span>共 ${items.length} 份</span><span>${fmtSize(size)}</span></div></div>
+        <div class="meta"><span class="tag t-series">合集</span>${seriesAbout(s) ? `<span>${seriesAbout(s)}</span>` : ''}<span>共 ${items.length} 份</span><span>${fmtSize(size)}</span></div></div>
       <span class="series-toggle small muted"></span></summary>
     <div class="series-items">${items.map((r, i) => row(r).replace('<div class="item">', `<div class="item"><span class="series-no">${i + 1}</span>`)).join('')}
       <div class="row series-tools"><button class="btn sm" data-sdl="${s.id}" type="button">下载整个合集</button>

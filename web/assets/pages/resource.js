@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, seriesEditor, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, seriesAbout, seriesEditor, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -197,7 +197,7 @@ function seriesCard(r, me) {
   const prev = s.items[at - 1];
   const next = s.items[at + 1];
   box.innerHTML = `<div class="row"><b>合集</b><span class="grow"></span><span class="small muted">第 ${at + 1} / ${s.items.length} 份</span></div>
-    <p class="series-name">${esc(s.title)}</p>
+    <p class="series-name">${esc(s.title)}${seriesAbout(s) ? `<span class="small muted" style="display:block;font-weight:400">${seriesAbout(s)}</span>` : ''}</p>
     <div class="row series-nav">${prev ? `<a class="btn sm" href="/r/${prev.id}" title="${esc(prev.title)}">‹ 上一份</a>` : '<span class="btn sm" aria-disabled="true">‹ 上一份</span>'}
       ${next ? `<a class="btn sm primary" href="/r/${next.id}" title="${esc(next.title)}">下一份 ›</a>` : '<span class="btn sm" aria-disabled="true">下一份 ›</span>'}</div>
     <ol class="series-list">${s.items.map((i, k) => `<li${i.id === r.id ? ' class="on" aria-current="true"' : ''}><span class="series-no">${k + 1}</span>

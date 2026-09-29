@@ -12,7 +12,7 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use xmuhub_core::hub::{AdminExtras, CodePurpose, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SearchItem, Viewer, WantFilter};
+use xmuhub_core::hub::{AdminExtras, CodePurpose, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, SearchItem, SeriesText, Viewer, WantFilter};
 use xmuhub_core::model::{Id, Level, Node, NodeStatus, Report, Resource, Status, TYPE_WORDS, Tag, User, WantStatus, now};
 use xmuhub_core::search::{DocType, Filter};
 use xmuhub_core::storage::Receipt;
@@ -1381,30 +1381,48 @@ struct SeriesIn {
     #[serde(default)]
     title: String,
     #[serde(default)]
+    source: String,
+    #[serde(default)]
+    year: String,
+    #[serde(default)]
     items: Vec<Id>,
 }
 
 async fn create_series(State(app): S, auth: Auth, Json(b): Json<SeriesIn>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
-    Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, None, b.node, &b.title, &b.items)).await?)))
+    Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, None, b.node, SeriesText { title: &b.title, source: &b.source, year: &b.year }, &b.items)).await?)))
 }
 
 async fn change_series(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<SeriesIn>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
-    Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, Some(id), b.node, &b.title, &b.items)).await?)))
+    Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, Some(id), b.node, SeriesText { title: &b.title, source: &b.source, year: &b.year }, &b.items)).await?)))
 }
 
 async fn series(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
     Ok(Json(json!(app.hub.series(auth.viewer(), id)?)))
 }
 
-async fn review_series(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<CollectionReviewIn>) -> R<Json<Value>> {
+#[derive(Deserialize)]
+struct SeriesReviewIn {
+    approve: bool,
+    #[serde(default)]
+    note: String,
+    /// Also pass the files in it that still wait for review.
+    #[serde(default)]
+    with_files: bool,
+}
+
+async fn review_series(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<SeriesReviewIn>) -> R<Json<Value>> {
     let hub = app.hub.clone();
     let user = auth.user.clone();
-    blocking(move || hub.review_series(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
-    Ok(Json(json!({ "ok": true })))
+    let passed = blocking(move || {
+        let v = Viewer { user: user.as_ref() };
+        if b.approve && b.with_files { hub.review_series_with_files(v, id) } else { hub.review_series(v, id, b.approve, &b.note).map(|_| 0) }
+    })
+    .await?;
+    Ok(Json(json!({ "ok": true, "files_approved": passed })))
 }
 
 async fn pending_series(State(app): S, auth: Auth) -> R<Json<Value>> {

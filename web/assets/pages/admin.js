@@ -481,11 +481,13 @@ const panels = {
         const renamed = s.status === 'public' && s.title !== d.title;
         return `<div class="item" data-id="${s.id}"><div class="body">
         <b>${closing ? `申请解散合集「${esc(s.title)}」` : esc(d.title)}</b>${renamed ? ` <span class="small faint">原名「${esc(s.title)}」</span>` : ''}
+        ${!closing && (d.source || d.year) ? `<div class="small muted">${[d.source && `来源：${esc(d.source)}`, d.year && `年份：${esc(d.year)}`].filter(Boolean).join(' · ')}</div>` : ''}
         <div class="meta"><span>${s.status === 'public' ? '修改' : '新合集'}</span><a href="/n/${s.node}" target="_blank">${esc(s.node_name)}</a>
           <span>${avatar(d.by.avatar, d.by.nickname, 20)} ${esc(d.by.nickname)}${d.by.role ? ` · ${d.by.role}` : ''}</span><span>${ago(d.at)}</span></div>
         ${closing ? '' : `<ol class="series-review">${d.items.map((i) => itemLi(i, s.status === 'public' && !was.has(i.id) ? 'add' : '')).join('')}</ol>`}
         ${s.items.some((i) => !now.has(i.id)) ? `<ul class="series-review">${s.items.filter((i) => !now.has(i.id)).map((i) => itemLi(i, 'gone')).join('')}</ul>` : ''}
         ${d.mine && me.level < 4 ? '<p class="small faint">这是你提议的，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button>
+          ${d.items.some((i) => i.status === 'pending') ? `<button class="btn sm ok" data-a="all" type="button" title="上传者已经把这些资料整理成一套，逐个点开确认过内容后可以一起通过">通过，并一起通过里面 ${d.items.filter((i) => i.status === 'pending').length} 份待审资料</button>` : ''}
           <input class="input" placeholder="不通过的原因（提议人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不通过</button></div>`}
       </div></div>`;
       }).join('') : '<div class="empty"><b>没有待审核的合集</b></div>'}</section>`;
@@ -495,7 +497,12 @@ const panels = {
       const it = b.closest('[data-id]');
       const note = it.querySelector('input').value.trim();
       if (b.dataset.a === 'no' && !note) return toast('写一下不通过的原因', true);
-      try { await api(`/series/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已通过' : '已处理'); } catch (err) { toast(err.message, true); }
+      const approve = b.dataset.a !== 'no';
+      try {
+        const r = await api(`/series/${it.dataset.id}/review`, { method: 'POST', body: { approve, note, with_files: b.dataset.a === 'all' } });
+        it.remove();
+        toast(!approve ? '已处理' : b.dataset.a === 'all' ? `已通过合集和其中 ${r.files_approved} 份资料` : '已通过');
+      } catch (err) { toast(err.message, true); }
     };
   },
   async announce(box) {

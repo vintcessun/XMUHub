@@ -14,9 +14,19 @@ use crate::error::{Error, Result, bad};
 use crate::model::*;
 
 const TITLE_MAX: usize = 40;
+const SOURCE_MAX: usize = 60;
+const YEAR_MAX: usize = 20;
 const ITEMS_MAX: usize = 300;
 const DRAFTS_PER_USER: usize = 20;
 const DRAFTS_MAX: usize = 300;
+
+/// What a proposer writes about a 合集: its name, where it comes from, the year(s).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SeriesText<'a> {
+    pub title: &'a str,
+    pub source: &'a str,
+    pub year: &'a str,
+}
 
 /// One file of a 合集.
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +42,8 @@ pub struct SeriesDraftView {
     pub by: Person,
     pub mine: bool,
     pub title: String,
+    pub source: String,
+    pub year: String,
     pub items: Vec<SeriesItem>,
     pub at: i64,
 }
@@ -44,6 +56,8 @@ pub struct SeriesView {
     /// "new" (waiting for its first approval), "public", "closed" (解散) or "rejected".
     pub status: String,
     pub title: String,
+    pub source: String,
+    pub year: String,
     /// The approved files that are public and still in this course, in order.
     pub items: Vec<SeriesItem>,
     pub updated_at: i64,
@@ -70,6 +84,8 @@ impl Hub {
             by: self.person(st, d.by),
             mine: me == Some(d.by),
             title: d.title.clone(),
+            source: d.source.clone(),
+            year: d.year.clone(),
             items: d.items.iter().filter_map(|id| Self::series_item(st, *id)).collect(),
             at: d.at,
         });
@@ -79,6 +95,8 @@ impl Hub {
             node_name: st.nodes.get(&s.node).map(|n| n.name.clone()).unwrap_or_default(),
             status: s.status.clone(),
             title: s.title.clone(),
+            source: s.source.clone(),
+            year: s.year.clone(),
             items: live,
             updated_at: s.updated_at,
             draft,
@@ -114,9 +132,10 @@ impl Hub {
 
     /// Proposes a new 合集 (`id` None) or a change to one. No files (for an existing one) means
     /// 解散. The proposal waits for a reviewer other than its author.
-    pub fn propose_series(&self, viewer: Viewer, id: Option<Id>, node: Id, title: &str, items: &[Id]) -> Result<SeriesView> {
+    pub fn propose_series(&self, viewer: Viewer, id: Option<Id>, node: Id, text: SeriesText, items: &[Id]) -> Result<SeriesView> {
         let me = viewer.at_least(Level::Contributor)?.id;
-        let title = clean(title, TITLE_MAX);
+        let title = clean(text.title, TITLE_MAX);
+        let (source, year) = (clean(text.source, SOURCE_MAX), clean(text.year, YEAR_MAX));
         let mut list: Vec<Id> = Vec::with_capacity(items.len().min(ITEMS_MAX));
         for i in items {
             if !list.contains(i) {
@@ -153,7 +172,7 @@ impl Hub {
                         return Err(bad("合集要建在课程里"));
                     }
                     let t = now();
-                    Series { id: 0, node, title: String::new(), items: Vec::new(), created_by: me, created_at: t, updated_at: t, status: "new".into(), draft: None, reviewed_by: None, review_note: String::new() }
+                    Series { id: 0, node, title: String::new(), source: String::new(), year: String::new(), items: Vec::new(), created_by: me, created_at: t, updated_at: t, status: "new".into(), draft: None, reviewed_by: None, review_note: String::new() }
                 }
             };
             for rid in &list {
@@ -184,11 +203,11 @@ impl Hub {
             if id.is_none() {
                 s.id = st.next_id(tx)?;
             }
-            let title = if closing { s.title.clone() } else { title };
-            if s.status == "public" && s.title == title && s.items == list {
+            let (title, source, year) = if closing { (s.title.clone(), s.source.clone(), s.year.clone()) } else { (title, source, year) };
+            if s.status == "public" && s.title == title && s.source == source && s.year == year && s.items == list {
                 s.draft = None;
             } else {
-                s.draft = Some(SeriesDraft { by: me, title, items: list, at: now() });
+                s.draft = Some(SeriesDraft { by: me, title, source, year, items: list, at: now() });
             }
             if viewer.exempt()
                 && let Some(d) = s.draft.take()
@@ -205,6 +224,8 @@ impl Hub {
     fn apply_series(s: &mut Series, d: SeriesDraft, by: Id) {
         s.status = if d.items.is_empty() { "closed" } else { "public" }.into();
         s.title = d.title;
+        s.source = d.source;
+        s.year = d.year;
         s.items = d.items;
         s.updated_at = now();
         s.reviewed_by = Some(by);
@@ -218,6 +239,23 @@ impl Hub {
         let mut v: Vec<&Series> = st.series.values().filter(|s| s.draft.is_some()).collect();
         v.sort_by_key(|s| s.draft.as_ref().map_or(0, |d| d.at));
         Ok(v.into_iter().map(|s| self.series_view(&st, viewer, s)).collect())
+    }
+
+    /// Approves a 合集 and, with it, its files still waiting for review (one decision for a
+    /// set the uploader already put together). Files the reviewer can't pass (their own, or
+    /// still in 「待整理」) are left for someone else; returns how many were passed.
+    pub fn review_series_with_files(&self, viewer: Viewer, id: Id) -> Result<usize> {
+        let waiting: Vec<Id> = {
+            let st = self.st.read();
+            let s = st.series.get(&id).ok_or(Error::NotFound("合集"))?;
+            s.draft.as_ref().map(|d| d.items.clone()).unwrap_or_default()
+        };
+        self.review_series(viewer, id, true, "")?;
+        let pending: Vec<Id> = {
+            let st = self.st.read();
+            waiting.into_iter().filter(|r| st.resources.get(r).is_some_and(|r| r.status == Status::Pending)).collect()
+        };
+        Ok(pending.into_iter().filter(|r| self.review(viewer, *r, "approve", "").is_ok()).count())
     }
 
     /// A reviewer other than the proposal's author approves it, or turns it down with a reason.

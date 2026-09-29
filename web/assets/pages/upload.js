@@ -80,6 +80,7 @@ window.addEventListener('beforeunload', (e) => {
   if (startNode) {
     try { const d = await api(`/nodes/${startNode}`); pick(d.node, d.path); } catch { /* ignore */ }
   }
+  if (!state.node) albumOptions();
   showDraftNotice();
   if (me.level !== 2) $('#hint').textContent = me.level >= 4 ? '你是管理员，上传后直接公开。' : me.level >= 3 ? '你的上传要由另一位审核员通过后公开。' : '你的上传会在审核通过后公开。';
 })();
@@ -109,9 +110,66 @@ function pick(node, path) {
     <div class="small faint">${isInbox(node)
       ? '审核员会把这些文件归到正确的课程、改好名字后再公开。备注里写一句是什么课、什么内容会更快。'
       : `文件名将以「${esc(node.label || node.name)}」开头`}</div></div><span class="grow"></span><a href="#" id="unpick">更换</a>`;
-  $('#unpick').onclick = (e) => { e.preventDefault(); state.node = null; saveDraft(); $('#picked').hidden = true; $('#nodepick').hidden = false; $('#nq').focus(); };
+  $('#unpick').onclick = (e) => { e.preventDefault(); state.node = null; saveDraft(); $('#picked').hidden = true; $('#nodepick').hidden = false; $('#nq').focus(); albumOptions(); };
   saveDraft();
   renderRows();
+  albumOptions();
+}
+
+// ---------------------------------------------------------------- 合集 (optional)
+//
+// The uploader can put this batch into a new 合集 (name, source, year) or add it to one the
+// course already has. After the files are in, the 合集 is proposed with them, in file-name
+// order; a reviewer approves it together with the files.
+
+let albums = [];
+async function albumOptions() {
+  const sel = $('#al_pick');
+  const n = state.node;
+  albums = [];
+  if (n && !isInbox(n)) {
+    try { albums = (await api(`/nodes/${n.id}`)).series || []; } catch { /* no list: new only */ }
+  }
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">不放进合集</option>' + (n && !isInbox(n)
+    ? `<option value="new">新建合集…</option>${albums.map((s) => `<option value="${s.id}">加到「${esc(s.title)}」（已有 ${s.items.length} 份）</option>`).join('')}` : '');
+  sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
+  $('#al_tip').textContent = n && !isInbox(n) ? '' : '先在第 1 步选好课程，才能放进合集（一个合集里的资料要在同一门课）。';
+  sel.disabled = !n || isInbox(n);
+  $('#al_new').hidden = sel.value !== 'new';
+}
+$('#al_pick').onchange = () => { $('#al_new').hidden = $('#al_pick').value !== 'new'; if ($('#al_pick').value === 'new') $('#al_title').focus(); };
+
+/** Checks the 合集 choice before anything is sent; null when it's fine. */
+function albumProblem(todo) {
+  const v = $('#al_pick').value;
+  if (!v) return null;
+  if (v === 'new' && !$('#al_title').value.trim()) return '请填写合集名称，或者选「不放进合集」';
+  if (todo.some((r) => nodeOf(r)?.id !== state.node.id)) return `放进合集的文件要都在「${state.node.name}」里：有文件单独选了别的分类`;
+  if (v === 'new' && todo.length < 2) return '合集至少要有两份资料';
+  return null;
+}
+
+/** Proposes the 合集 with the files just uploaded. */
+async function sendAlbum(done) {
+  const v = $('#al_pick').value;
+  if (!v || !done.length) return '';
+  const ids = done.slice().sort((a, b) => a.file.name.localeCompare(b.file.name, 'zh-CN', { numeric: true })).map((r) => r.rid);
+  try {
+    let s;
+    if (v === 'new') {
+      if (ids.length < 2) return '<div class="notice warn">只传成功了一份，没有建合集；其他文件传好后可以在课程页勾选「整理成合集」。</div>';
+      s = await api('/series', { method: 'POST', body: { node: state.node.id, title: $('#al_title').value, source: $('#al_source').value, year: $('#al_year').value, items: ids } });
+    } else {
+      const cur = await api(`/series/${v}`);
+      s = await api(`/series/${v}`, { method: 'PUT', body: { title: cur.title, source: cur.source, year: cur.year, items: [...cur.items.map((i) => i.id), ...ids] } });
+    }
+    $('#al_pick').value = '';
+    $('#al_new').hidden = true;
+    return `<div class="notice ok">${s.draft ? `合集「${esc(s.draft.title)}」已提交，审核员会和资料一起审核。` : `合集「${esc(s.title)}」已更新。`}</div>`;
+  } catch (err) {
+    return `<div class="notice warn">资料已上传，但合集没建成：${esc(err.message)}。可以到<a href="/n/${state.node.id}">课程页</a>勾选这些资料再点「整理成合集」。</div>`;
+  }
 }
 
 let timer = 0;
@@ -571,6 +629,7 @@ async function uploadRow(r, bar, base, total) {
     throw err;
   }
   r.done = true;
+  r.rid = res.id;
   r.sel = false;
   r.upload_id = null;
   if (draft.files) delete draft.files[fileKey(r.file)];
@@ -642,6 +701,8 @@ $('#submit').onclick = async () => {
   const todo = state.rows.filter((r) => !r.done);
   if (!todo.length) return toast('请先添加文件', true);
   if (!(await confirmCategory(todo))) return;
+  const albumErr = albumProblem(todo);
+  if (albumErr) { $('#albumcard').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast(albumErr, true); }
   // Files with no category (none picked, none recognised from the name) go to 「待整理」.
   if (todo.some((r) => !nodeOf(r))) {
     try {
@@ -673,5 +734,6 @@ $('#submit').onclick = async () => {
   state.busy = false;
   $('#submit').disabled = false;
   renderRows();
-  $('#status').innerHTML = `<div class="notice ${ok === todo.length ? 'ok' : 'warn'}">完成 ${ok} / ${todo.length} 个文件${ok < todo.length ? '，失败的可以直接再点一次上传重试' : '，谢谢你的分享！'}</div>`;
+  const album = await sendAlbum(todo.filter((r) => r.done && r.rid));
+  $('#status').innerHTML = `<div class="notice ${ok === todo.length ? 'ok' : 'warn'}">完成 ${ok} / ${todo.length} 个文件${ok < todo.length ? '，失败的可以直接再点一次上传重试' : '，谢谢你的分享！'}</div>${album}`;
 };

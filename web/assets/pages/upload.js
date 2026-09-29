@@ -1,4 +1,4 @@
-import { api, esc, fmtSize, layout, loginUrl, meta, modal, pathText, pickFromTree, qs, sendPart, store, toast, tree, $ } from '../app.js';
+import { api, arrowKeys, esc, fmtSize, layout, loginUrl, meta, modal, pathText, pickFromTree, qs, sendPart, store, toast, tree, $ } from '../app.js';
 
 const state = { node: null, path: [], rows: [], busy: false };
 let M = null; // meta
@@ -199,6 +199,9 @@ $('#nq').oninput = () => {
   }, 160);
 };
 document.addEventListener('click', (e) => { if (!e.target.closest('.suggest')) $('#ns').hidden = true; });
+// ↑ ↓ through the suggestions, Enter picks, Esc closes.
+arrowKeys($('#nq'), $('#ns'), 'li[data-i], li[data-new]');
+$('#nq').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#ns').hidden = true; });
 
 /** New-course form: pick the category (校选课 / 公共课 / 专业课 / 体育课 …), then the offering
  * college or group, as on the course-selection site. */

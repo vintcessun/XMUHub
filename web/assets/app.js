@@ -578,6 +578,34 @@ export async function preview(id, box) {
 /** Picks a category from the whole tree in a dialog (expand a section / college, or filter
  * by name), without leaving the page. Resolves to { node, path } (path = its ancestors) or
  * null. Sections only expand: files go into a college, group or course. */
+/**
+ * ↑ / ↓ (also the numeric keypad's arrows with Num Lock off) move a highlight through the
+ * `items` of `list` while focus stays in `input`; the list scrolls along. Enter acts on the
+ * highlighted one (`act`, default: click it). When the list is redrawn the highlight starts
+ * over, unless `act` hands back the element to keep highlighted.
+ */
+export function arrowKeys(input, list, items, act = (el) => el.click()) {
+  let cur = null;
+  const all = () => [...list.querySelectorAll(items)].filter((el) => el.offsetParent !== null);
+  const mark = (el) => {
+    list.querySelectorAll('.on').forEach((x) => x.classList.remove('on'));
+    cur = el;
+    if (el) { el.classList.add('on'); el.scrollIntoView({ block: 'nearest' }); }
+  };
+  input.addEventListener('keydown', (e) => {
+    const els = all();
+    const at = els.indexOf(cur);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!els.length) return;
+      e.preventDefault();
+      mark(els[e.key === 'ArrowDown' ? (at + 1) % els.length : (at <= 0 ? els.length : at) - 1]);
+    } else if (e.key === 'Enter' && at >= 0) {
+      e.preventDefault();
+      mark(act(cur) || null);
+    }
+  });
+}
+
 export async function pickFromTree(title = '在分类树里选') {
   const t = await tree();
   return new Promise((resolve) => {
@@ -634,6 +662,12 @@ export async function pickFromTree(title = '在分类树里选') {
       render();
     };
     input.oninput = () => { filter = input.value.trim(); render(); };
+    // ↑ ↓ through the rows, Enter = click the name (a course is picked, a college opens);
+    // the list is redrawn when a college opens, so the highlight moves back to its row.
+    arrowKeys(input, ul, '.row-n', (row) => {
+      row.querySelector('a.n').click();
+      return ul.isConnected ? ul.querySelector(`.row-n[data-t="${row.dataset.t}"]`) : null;
+    });
     render();
     input.focus();
   });

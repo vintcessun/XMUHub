@@ -1,0 +1,11 @@
+/www/wwwlogs/xmu.vintces.icu.timing.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        [ -f /www/server/nginx/logs/nginx.pid ] && kill -USR1 $(cat /www/server/nginx/logs/nginx.pid)
+    endscript
+}

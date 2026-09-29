@@ -10,6 +10,9 @@ mod batches;
 mod imports;
 mod inbox;
 mod links;
+mod notices;
+mod collections;
+mod stats_public;
 mod resources;
 mod social;
 mod stats;
@@ -43,7 +46,10 @@ pub use tokens::{TOKEN_PREFIX, TokenView};
 pub use resources::{AdminExtras, DownloadPart, DownloadPlan, ResourceInput};
 pub use tree::{NodeInput, NodePage, NodePatch};
 pub use uploads::{PartPlan, PartSpec, UploadPlan, content_key};
+pub use collections::CollectionView;
 pub use links::LinkSuggestionView;
+pub use notices::NoticeList;
+pub use stats_public::SiteStats;
 pub use wants::{Person, WantFilter, WantReplyView, WantView};
 
 const SEQ_KEY: &str = "seq";
@@ -123,6 +129,12 @@ pub(crate) struct State {
     /// want → users who said 「我也要」
     want_votes: HashMap<Id, HashSet<Id>>,
     link_suggestions: HashMap<Id, LinkSuggestion>,
+    /// node → users following it, and user → nodes they follow
+    followers: HashMap<Id, HashSet<Id>>,
+    following: HashMap<Id, HashSet<Id>>,
+    /// user → their 站内提醒, oldest first
+    notices: HashMap<Id, Vec<Notice>>,
+    collections: HashMap<Id, Collection>,
     /// The site-wide notice, once an admin has set one.
     announcement: Option<Announcement>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
@@ -196,6 +208,16 @@ impl State {
         st.wants = snap.wants.into_iter().map(|w| (w.id, w)).collect();
         st.want_replies = snap.want_replies.into_iter().map(|r| (r.id, r)).collect();
         st.link_suggestions = snap.link_suggestions.into_iter().map(|s| (s.id, s)).collect();
+        for (user, node) in snap.follows {
+            st.followers.entry(node).or_default().insert(user);
+            st.following.entry(user).or_default().insert(node);
+        }
+        let mut notices = snap.notices;
+        notices.sort_by_key(|n| n.id);
+        for n in notices {
+            st.notices.entry(n.user).or_default().push(n);
+        }
+        st.collections = snap.collections.into_iter().map(|c| (c.id, c)).collect();
         for (want, user) in snap.want_votes {
             st.want_votes.entry(want).or_default().insert(user);
         }
@@ -250,6 +272,9 @@ impl State {
 
     fn put_resource(&mut self, tx: &Tx, r: Resource) -> Result<()> {
         tx.put_resource(&r)?;
+        // Newly public (a new file, or one just approved): tell whoever follows its course.
+        let was = self.resources.get(&r.id).map(|o| o.status);
+        let newly_public = r.status == Status::Published && matches!(was, None | Some(Status::Pending));
         match self.resources.get(&r.id) {
             Some(old) if old.node != r.node => {
                 if let Some(v) = self.by_node.get_mut(&old.node) {
@@ -259,6 +284,9 @@ impl State {
             }
             Some(_) => {}
             None => self.by_node.entry(r.node).or_default().push(r.id),
+        }
+        if newly_public {
+            self.tell_followers(tx, &r)?;
         }
         self.resources.insert(r.id, r);
         Ok(())

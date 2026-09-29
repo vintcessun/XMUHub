@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtSize, layout, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, loginUrl, levelBadge, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -87,10 +87,29 @@ async function load() {
   renderList();
 
   const me = await mePromise;
+  followButton(n, me);
   if (me && me.level >= 3) {
     renderEditor(n);
     if (!staff) { staff = true; renderList(); }
   }
+}
+
+/** 关注: new files approved here (or in any course under a college) show up in 站内提醒. */
+async function followButton(n, me) {
+  const b = $('#follow');
+  b.hidden = n.kind === 'section';
+  if (b.hidden) return;
+  const paint = (on) => { b.textContent = on ? '✓ 已关注' : '关注'; b.classList.toggle('primary', false); b.dataset.on = on ? '1' : ''; };
+  paint(me ? (await api(`/nodes/${n.id}/follow`).catch(() => ({}))).following : false);
+  b.onclick = async () => {
+    if (!me) { location.href = loginUrl(); return; }
+    const on = !b.dataset.on;
+    try {
+      await api(`/nodes/${n.id}/follow`, { method: 'PUT', body: { on } });
+      paint(on);
+      toast(on ? '已关注，有新资料时会在「提醒」里告诉你' : '已取消关注');
+    } catch (e) { toast(e.message, true); }
+  };
 }
 
 $('#buckets').onclick = (e) => {

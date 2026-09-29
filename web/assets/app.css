@@ -838,3 +838,22 @@ img.avatar { object-fit: cover; background: var(--surface-2); }
 #nav-me { display: inline-flex; align-items: center; gap: 7px; }
 #nav-me .avatar { margin: -3px 0; }
 .who-inline { display: inline-flex; align-items: center; gap: 6px; }
+
+/* 站内提醒: the unread count on the header link, and the list */
+.nav .bell { position: relative; }
+.nav .bell .count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.notice-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.notice-item:last-child { border-bottom: 0; }
+.notice-item.unread .ntext { font-weight: 600; }
+.notice-item.unread::before { content: ''; flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--bad); }
+.notice-item.read::before { content: ''; flex: none; width: 8px; }
+/* 统计 */
+.statnums { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.statnums div { padding: 14px; border-radius: 12px; background: var(--surface-2); }
+.statnums b { display: block; font-size: 24px; }
+.rank { list-style: none; margin: 0; padding: 0; counter-reset: r; }
+.rank li { display: flex; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); counter-increment: r; }
+.rank li::before { content: counter(r); flex: none; width: 1.6em; color: var(--faint); font-weight: 700; }
+.rank li .v { margin-left: auto; font-weight: 600; white-space: nowrap; }
+.weekbars { display: flex; align-items: flex-end; gap: 3px; height: 140px; }
+.weekbars i { flex: 1; min-width: 4px; border-radius: 3px 3px 0 0; background: var(--navy); opacity: .85; }

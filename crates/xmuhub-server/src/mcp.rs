@@ -145,6 +145,14 @@ fn tools(max_part: u64, max_file: u64) -> Value {
           "inputSchema": { "type": "object", "properties": { "id": id("帖子 id"), "status": { "type": "string", "enum": ["found", "closed", "open"] }, "resource": id("找到的资料 id") }, "required": ["id", "status"] } },
         { "name": "review_want", "description": "审核员：通过或驳回（要写原因）一条求资料帖。",
           "inputSchema": { "type": "object", "properties": { "id": id("帖子 id"), "approve": { "type": "boolean" }, "note": { "type": "string" } }, "required": ["id", "approve"] } },
+        { "name": "site_stats", "description": "公开统计：资料数、课程数、总下载量，下载最多/资料最多/近 30 天新增最多的课程，每周新增。",
+          "inputSchema": { "type": "object", "properties": {} } },
+        { "name": "follow_course", "description": "关注（on=true）或取消关注一门课程/学院；关注后有新资料审核通过会收到站内提醒（需要令牌）。",
+          "inputSchema": { "type": "object", "properties": { "id": id("课程/学院 id"), "on": { "type": "boolean" } }, "required": ["id", "on"] } },
+        { "name": "list_notices", "description": "我的站内提醒（新资料、审核结果、求资料回复等）和未读数；mark_read=true 同时全部标为已读。",
+          "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer", "maximum": 200 }, "mark_read": { "type": "boolean" } } } },
+        { "name": "favorite", "description": "把一份资料放进收藏夹（on=false 拿出）。不给 collection 时用「我的收藏」（没有就新建）。",
+          "inputSchema": { "type": "object", "properties": { "resource": id("资料 id"), "collection": id("收藏夹 id（选填）"), "on": { "type": "boolean", "description": "默认 true" } }, "required": ["resource"] } },
         { "name": "list_api", "description": "网站 /api 接口列表（方法、路径、用途和参数），配合 call_api 使用。",
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "call_api", "description": "以令牌主人的身份调用网站的任意 /api 接口，权限检查和网页上操作完全一样。登录注册、令牌管理和传文件字节的接口除外。",
@@ -212,6 +220,22 @@ const API: &[(&str, &str, &str)] = &[
     ("PUT", "/wants/{id}/vote", "{on}"),
     ("POST", "/wants/{id}/replies", "回复 {body?, resource?}"),
     ("DELETE", "/want-replies/{id}", "删回复"),
+    ("GET", "/stats", "公开统计：总数、下载最多/资料最多/近 30 天新增最多的课程、每周新增"),
+    ("GET", "/notices?limit=", "我的站内提醒和未读数"),
+    ("POST", "/notices/read", "标为已读 {id?}（不给 id 则全部）"),
+    ("GET", "/nodes/{id}/follow", "我是否关注了这门课/学院"),
+    ("PUT", "/nodes/{id}/follow", "关注或取消 {on}（有新资料审核通过时会收到提醒）"),
+    ("GET", "/me/follows", "我关注的课程/学院"),
+    ("GET", "/collections?scope=mine|public", "我的收藏夹 / 大家公开分享的收藏夹"),
+    ("POST", "/collections", "新建收藏夹 {title, note?}"),
+    ("GET", "/collections/{id}", "收藏夹和里面的资料"),
+    ("PATCH", "/collections/{id}", "改名/改说明 {title, note?}（已分享的会重新审核）"),
+    ("DELETE", "/collections/{id}", "删除收藏夹（资料本身不受影响）"),
+    ("PUT", "/collections/{id}/items/{resource}", "放入或拿出一份资料 {on}"),
+    ("POST", "/collections/{id}/share", "申请公开分享或取消分享 {on}（审核员通过后公开）"),
+    ("GET", "/resources/{id}/collections", "这份资料在我的哪些收藏夹里"),
+    ("GET", "/review/collections", "审核员：申请公开的收藏夹"),
+    ("POST", "/collections/{id}/review", "审核员：{approve, note?（不通过时必填）}"),
     ("GET", "/links", "友情链接"),
         ("PATCH", "/links/{id}", "审核员：改友情链接的名称、说明、排序 {title, url（不能改）, note?, sort?}"),
     ("DELETE", "/links/{id}", "审核员：删友情链接"),
@@ -563,6 +587,35 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ctx: &Ctx, ip: &str, name: &str,
             let approve = a.get("approve").and_then(Value::as_bool).ok_or("缺少参数 approve")?;
             let body = json!({ "approve": approve, "note": arg_str(a, "note") });
             call_api(app, ctx, "POST", &format!("/wants/{}/review", arg_id(a, "id")?), None, Some(&body)).await?
+        }
+        "site_stats" => call_api(app, ctx, "GET", "/stats", None, None).await?,
+        "follow_course" => {
+            let on = a.get("on").and_then(Value::as_bool).ok_or("缺少参数 on")?;
+            call_api(app, ctx, "PUT", &format!("/nodes/{}/follow", arg_id(a, "id")?), None, Some(&json!({ "on": on }))).await?
+        }
+        "list_notices" => {
+            let list = call_api(app, ctx, "GET", "/notices", Some(&json!({ "limit": a.get("limit") })), None).await?;
+            if a.get("mark_read").and_then(Value::as_bool).unwrap_or(false) {
+                call_api(app, ctx, "POST", "/notices/read", None, Some(&json!({}))).await?;
+            }
+            list
+        }
+        "favorite" => {
+            let resource = arg_id(a, "resource")?;
+            let on = a.get("on").and_then(Value::as_bool).unwrap_or(true);
+            let id = match a.get("collection").and_then(Value::as_u64) {
+                Some(id) => id,
+                None => {
+                    let mine = call_api(app, ctx, "GET", "/collections", None, None).await?;
+                    let found = mine.as_array().and_then(|l| l.iter().find(|c| c["title"] == "我的收藏")).and_then(|c| c["id"].as_u64());
+                    match found {
+                        Some(id) => id,
+                        None => call_api(app, ctx, "POST", "/collections", None, Some(&json!({ "title": "我的收藏" }))).await?["id"].as_u64().ok_or("新建收藏夹失败")?,
+                    }
+                }
+            };
+            let r = call_api(app, ctx, "PUT", &format!("/collections/{id}/items/{resource}"), None, Some(&json!({ "on": on }))).await?;
+            json!({ "collection": id, "in": r["in"] })
         }
         "list_api" => json!({
             "note": "路径相对于 /api；{id} 等换成实际值；{…} 是 JSON 请求体。权限和网页上相同。",

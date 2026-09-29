@@ -159,9 +159,11 @@ impl Hub {
             if st.questions.values().any(|q| q.resource == resource && q.answer.is_empty()) {
                 return Err(Error::Conflict("已经问过了，正在等上传者回答".into()));
             }
+            let (uploader, name) = (r.uploader, r.name.stem());
             let q = Question { id: st.next_id(tx)?, resource, asker: me, text, asked_at: now(), answer: String::new(), answered_at: 0 };
             tx.put_question(&q)?;
             st.questions.insert(q.id, q.clone());
+            st.notify(tx, uploader, "question", None, format!("审核员对你上传的「{name}」有个问题，回答后才能继续审核"), format!("/r/{resource}"))?;
             Ok(Self::question_view(st, &q))
         })?;
         // It waits for the answer outside any batch.

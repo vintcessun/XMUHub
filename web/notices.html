@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>站内提醒 · 鹭岛书阁</title>
+<meta name="description" content="鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。">
+<meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/assets/logo.png" type="image/png">
+<link rel="preload" href="/assets/xmu-campus-background.jpg" as="image">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="notices">
+<header id="top" class="top"></header>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
+<main><div class="wrap" style="max-width:860px">
+  <div class="page-head"><div><h1>站内提醒</h1><div class="muted small">你关注的课程有新资料、你的上传和求助有了结果、有人回复你，都会在这里提醒。只在站内，不发邮件。提醒保留 90 天。</div></div>
+    <div class="row"><button class="btn" id="readall" type="button">全部标为已读</button></div></div>
+  <section class="card"><div id="nlist"><div class="skeleton"></div></div></section>
+  <section class="card"><h3>我关注的课程</h3><p class="small muted" style="margin-top:0">在课程或学院页面点「关注」。关注学院会收到它下面所有课程的新资料提醒；同一门课一天内的新资料合并成一条。</p><div id="flist"><div class="skeleton"></div></div></section>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script>try{var f=sessionStorage.getItem('ludao.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>
+<script type="module" src="/assets/pages/notices.js"></script>
+</body>
+</html>

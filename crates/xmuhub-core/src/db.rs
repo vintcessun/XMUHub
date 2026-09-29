@@ -40,6 +40,12 @@ pub const QUESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("questio
 pub const RESOURCE_MAJORS: TableDefinition<u64, &str> = TableDefinition::new("resource_majors");
 /// id → Link (a recommended outside source: another repo, a netdisk collection …).
 pub const LINKS: TableDefinition<u64, &[u8]> = TableDefinition::new("links");
+/// (user id, node id) → 1: the user follows that course / college.
+pub const FOLLOWS: TableDefinition<&[u8], u8> = TableDefinition::new("follows");
+/// id → Notice (站内提醒).
+pub const NOTICES: TableDefinition<u64, &[u8]> = TableDefinition::new("notices");
+/// id → Collection (收藏夹).
+pub const COLLECTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("collections");
 /// id → LinkSuggestion (a 站外资源 link waiting for a reviewer, or its outcome).
 pub const LINK_SUGGESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("link_suggestions");
 /// id → Want (a 求资料 post).
@@ -98,6 +104,9 @@ pub struct Snapshot {
     pub want_replies: Vec<WantReply>,
     pub want_votes: Vec<(Id, Id)>,
     pub link_suggestions: Vec<LinkSuggestion>,
+    pub follows: Vec<(Id, Id)>,
+    pub notices: Vec<Notice>,
+    pub collections: Vec<Collection>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -140,6 +149,9 @@ impl Db {
         txn.open_table(WANT_REPLIES)?;
         txn.open_table(WANT_VOTES)?;
         txn.open_table(LINK_SUGGESTIONS)?;
+        txn.open_table(FOLLOWS)?;
+        txn.open_table(NOTICES)?;
+        txn.open_table(COLLECTIONS)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -224,6 +236,19 @@ impl Db {
         for row in txn.open_table(LINK_SUGGESTIONS)?.iter()? {
             snap.link_suggestions.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(FOLLOWS)?.iter()? {
+            let k = row?.0;
+            let k = k.value();
+            if k.len() == 16 {
+                snap.follows.push((u64::from_be_bytes(k[..8].try_into().unwrap()), u64::from_be_bytes(k[8..].try_into().unwrap())));
+            }
+        }
+        for row in txn.open_table(NOTICES)?.iter()? {
+            snap.notices.push(decode(row?.1.value())?);
+        }
+        for row in txn.open_table(COLLECTIONS)?.iter()? {
+            snap.collections.push(decode(row?.1.value())?);
+        }
         for row in txn.open_table(WANT_REPLIES)?.iter()? {
             snap.want_replies.push(decode(row?.1.value())?);
         }
@@ -279,6 +304,9 @@ impl Db {
             want_replies: snap.want_replies,
             want_votes: snap.want_votes,
             link_suggestions: snap.link_suggestions,
+            follows: snap.follows,
+            notices: snap.notices,
+            collections: snap.collections,
         };
         serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
@@ -329,6 +357,12 @@ pub struct Dump {
     pub want_votes: Vec<(Id, Id)>,
     #[serde(default)]
     pub link_suggestions: Vec<LinkSuggestion>,
+    #[serde(default)]
+    pub follows: Vec<(Id, Id)>,
+    #[serde(default)]
+    pub notices: Vec<Notice>,
+    #[serde(default)]
+    pub collections: Vec<Collection>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -455,6 +489,32 @@ impl Tx<'_> {
     }
     pub fn del_link(&self, id: Id) -> Result<()> {
         self.txn.open_table(LINKS)?.remove(id)?;
+        Ok(())
+    }
+    pub fn put_follow(&self, user: Id, node: Id, on: bool) -> Result<()> {
+        let mut t = self.txn.open_table(FOLLOWS)?;
+        let k = rating_key(user, node);
+        if on {
+            t.insert(k.as_slice(), 1u8)?;
+        } else {
+            t.remove(k.as_slice())?;
+        }
+        Ok(())
+    }
+    pub fn put_notice(&self, n: &Notice) -> Result<()> {
+        self.txn.open_table(NOTICES)?.insert(n.id, encode(n).as_slice())?;
+        Ok(())
+    }
+    pub fn del_notice(&self, id: Id) -> Result<()> {
+        self.txn.open_table(NOTICES)?.remove(id)?;
+        Ok(())
+    }
+    pub fn put_collection(&self, c: &Collection) -> Result<()> {
+        self.txn.open_table(COLLECTIONS)?.insert(c.id, encode(c).as_slice())?;
+        Ok(())
+    }
+    pub fn del_collection(&self, id: Id) -> Result<()> {
+        self.txn.open_table(COLLECTIONS)?.remove(id)?;
         Ok(())
     }
     pub fn put_link_suggestion(&self, s: &LinkSuggestion) -> Result<()> {

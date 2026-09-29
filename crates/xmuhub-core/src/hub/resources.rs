@@ -436,6 +436,7 @@ impl Hub {
             r.reviewed_by = Some(me.id);
             r.updated_at = now();
             st.put_resource(tx, r.clone())?;
+            st.tell_uploader(tx, &r, action)?;
             if matches!(r.status, Status::Removed | Status::Rejected) {
                 let open: Vec<Id> = st.resource_change_requests.values()
                     .filter(|q| q.resource == id && q.status == "pending")
@@ -532,6 +533,12 @@ impl Hub {
             q.review_note = note.clone();
             tx.put_resource_change_request(&q)?;
             st.resource_change_requests.insert(q.id, q.clone());
+            {
+                let what = if q.kind == "delete" { "下架申请" } else { "改备注申请" };
+                let verdict = if approve { "已同意".to_string() } else if note.is_empty() { "没有同意".to_string() } else { format!("没有同意：{note}") };
+                let text = format!("你对「{}」的{what}{verdict}", r.name.stem());
+                st.notify(tx, q.uploader, "change", None, text, format!("/r/{}", q.resource))?;
+            }
             let e = ReviewEvent {
                 id: st.next_id(tx)?, resource: r.id, actor: me.id,
                 action: format!("{}_{}", q.kind, q.status), note, at: now(),

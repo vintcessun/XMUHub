@@ -306,6 +306,7 @@ export async function layout(active) {
       <a href="/wants" data-k="wants">求资料</a>
       <a href="https://github.com/vintcessun/XMUHub" class="gh" rel="noopener" target="_blank" title="本站完全开源，欢迎 Star 和参与开发">⭐ 开源</a>
       <a href="/admin" data-k="admin" hidden>审核</a>
+      <a href="/notices" data-k="notices" id="nav-bell" class="bell" title="站内提醒" hidden>提醒<span class="count" hidden></span></a>
       <a href="/me" data-k="me" id="nav-me">登录</a>
       <a href="/upload" data-k="upload" class="up">上传</a>
     </nav></div>`;
@@ -314,7 +315,7 @@ export async function layout(active) {
   foot.className = 'foot';
   foot.innerHTML = `<div class="wrap">
     <span>鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关</span>
-    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/wants">求资料</a> · <a href="/links">站外资源</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
+    <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/wants">求资料</a> · <a href="/collections">收藏夹</a> · <a href="/links">站外资源</a> · <a href="/stats">统计</a> · <a href="https://github.com/vintcessun/XMUHub" rel="noopener">源代码（AGPL-3.0）</a> · 资料由同学上传，仅供学习交流</span>
     <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内删除。<a href="/about#copyright">版权声明</a></span></div>`;
   feedbackButton(active !== 'feedback');
   topButton();
@@ -324,6 +325,8 @@ export async function layout(active) {
   if (user) {
     navMe.innerHTML = `${avatar(user.avatar, user.nickname, 22)}<span>${esc(user.nickname)}</span>`;
     if (user.level >= 3) top.querySelector('[data-k="admin"]').hidden = false;
+    top.querySelector('#nav-bell').hidden = false;
+    setBell(user.unread || 0);
   } else {
     navMe.href = loginUrl();
   }
@@ -336,6 +339,55 @@ export async function layout(active) {
   // Prefetching /me and /upload on hover: see assets/speculation-rules.json (sent by the
   // server in a Speculation-Rules header, since the CSP doesn't allow inline rules).
   return user;
+}
+
+/** The header's 提醒 link: its unread count, if any. */
+export function setBell(n) {
+  const c = document.querySelector('#nav-bell .count');
+  if (!c) return;
+  c.hidden = !n;
+  c.textContent = n > 99 ? '99+' : String(n || '');
+  document.querySelector('#nav-bell').title = n ? `${n} 条未读提醒` : '站内提醒';
+}
+
+// ---------------------------------------------------------------- 收藏夹
+
+/** Puts a file on the viewer's 收藏夹 lists (a dialog with a checkbox per list and a quick
+ * 「新建」). Resolves once closed. */
+export async function favoriteDialog(resourceId) {
+  const [lists, inIds] = await Promise.all([api('/collections'), api(`/resources/${resourceId}/collections`)]);
+  const inSet = new Set(inIds);
+  const body = modal('收藏到…');
+  const render = () => {
+    body.innerHTML = `${lists.length ? `<div class="list">${lists.map((c) => `<label class="item" style="cursor:pointer"><input type="checkbox" data-c="${c.id}"${inSet.has(c.id) ? ' checked' : ''}>
+        <div class="body"><b>${esc(c.title)}</b> <span class="small faint">${c.count} 份${c.status === 'public' ? ' · 已公开' : ''}</span></div></label>`).join('')}</div>` : '<p class="small muted">还没有收藏夹，新建一个吧。</p>'}
+      <div class="row" style="margin-top:12px"><input class="input" id="fvnew" maxlength="40" placeholder="新收藏夹的名字，如「高数期末」" style="max-width:260px"><button class="btn sm" id="fvadd" type="button">新建并收藏</button>
+      <span class="grow"></span><a class="small" href="/collections">管理收藏夹</a></div>`;
+    body.querySelector('#fvadd').onclick = async () => {
+      const title = body.querySelector('#fvnew').value.trim() || '我的收藏';
+      try {
+        const c = await api('/collections', { method: 'POST', body: { title } });
+        await api(`/collections/${c.id}/items/${resourceId}`, { method: 'PUT', body: { on: true } });
+        lists.unshift({ ...c, count: 1 });
+        inSet.add(c.id);
+        toast(`已收藏到「${c.title}」`);
+        render();
+      } catch (e) { toast(e.message, true); }
+    };
+  };
+  body.onchange = async (e) => {
+    const box = e.target.closest('[data-c]');
+    if (!box) return;
+    const id = Number(box.dataset.c);
+    try {
+      await api(`/collections/${id}/items/${resourceId}`, { method: 'PUT', body: { on: box.checked } });
+      const c = lists.find((x) => x.id === id);
+      if (box.checked) { inSet.add(id); c.count++; } else { inSet.delete(id); c.count--; }
+      toast(box.checked ? `已收藏到「${c.title}」` : `已从「${c.title}」拿出`);
+    } catch (err) { box.checked = !box.checked; toast(err.message, true); }
+  };
+  render();
+  return inSet;
 }
 
 // ---------------------------------------------------------------- downloads

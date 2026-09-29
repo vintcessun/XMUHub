@@ -255,11 +255,13 @@ impl Hub {
             }
             w.status = if approve { WantStatus::Open } else { WantStatus::Rejected };
             w.reviewed_by = Some(me);
-            w.review_note = if approve { String::new() } else { note };
+            w.review_note = if approve { String::new() } else { note.clone() };
             w.updated_at = now();
             tx.put_want(&w)?;
+            let text = if approve { format!("你的求助「{}」已通过审核，大家都能看到了", w.title) } else { format!("你的求助「{}」没有通过审核：{note}", w.title) };
+            let author = w.user;
             st.wants.insert(id, w);
-            Ok(())
+            st.notify(tx, author, "want", None, text, format!("/wants?id={id}"))
         })
     }
 
@@ -288,7 +290,12 @@ impl Hub {
             w.resource = if status == WantStatus::Found { resource } else { None };
             w.updated_at = now();
             tx.put_want(&w)?;
+            let (author, title) = (w.user, w.title.clone());
             st.wants.insert(id, w);
+            if author != me && status != WantStatus::Open {
+                let what = if status == WantStatus::Found { "标记为已找到" } else { "关闭" };
+                st.notify(tx, author, "want", None, format!("你的求助「{title}」被审核员{what}"), format!("/wants?id={id}"))?;
+            }
             Ok(())
         })
     }
@@ -347,7 +354,11 @@ impl Hub {
             if let Some(mut w) = st.wants.get(&id).cloned() {
                 w.updated_at = t;
                 tx.put_want(&w)?;
+                let (author, title) = (w.user, w.title.clone());
                 st.wants.insert(id, w);
+                if author != me {
+                    st.notify(tx, author, "want", None, format!("你的求助「{title}」有新回复"), format!("/wants?id={id}"))?;
+                }
             }
             Ok(())
         })

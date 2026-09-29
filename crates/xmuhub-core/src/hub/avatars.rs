@@ -133,7 +133,12 @@ impl Hub {
             a.reviewed_by = Some(me.id);
             tx.put_avatar(&a)?;
             st.avatars.insert(user, a);
-            Ok(())
+            let text = match action {
+                "approve" => "你的新头像已通过审核",
+                "reject" => "你的新头像没有通过审核，可以换一张再试",
+                _ => "你的头像被审核员移除了",
+            };
+            st.notify(tx, user, "avatar", None, text.into(), "/me".into())
         })
     }
 }

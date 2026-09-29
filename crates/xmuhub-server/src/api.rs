@@ -358,6 +358,18 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/wants/{id}/replies", post(reply_want))
         .route("/want-replies/{id}", axum::routing::delete(delete_want_reply))
         .route("/announcement", put(set_announcement))
+        .route("/stats", get(site_stats))
+        .route("/notices", get(notices))
+        .route("/notices/read", post(read_notices))
+        .route("/nodes/{id}/follow", get(follow_state).put(follow))
+        .route("/me/follows", get(my_follows))
+        .route("/collections", get(collections).post(create_collection))
+        .route("/collections/{id}", get(collection).patch(update_collection).delete(delete_collection))
+        .route("/collections/{id}/items/{resource}", put(collect))
+        .route("/collections/{id}/share", post(share_collection))
+        .route("/collections/{id}/review", post(review_collection))
+        .route("/review/collections", get(pending_collections))
+        .route("/resources/{id}/collections", get(collections_with))
         .route("/admin/avatars", get(pending_avatars))
         .route("/admin/avatars/{user}", post(review_avatar))
         .route("/admin/reports", get(reports))
@@ -436,6 +448,7 @@ fn me_view(app: &App, u: &User) -> Value {
     let (avatar, pending) = app.hub.own_avatar(u.id);
     v["avatar"] = json!(avatar);
     v["avatar_pending"] = json!(pending);
+    v["unread"] = json!(app.hub.unread_notices(u.id));
     v
 }
 
@@ -1237,6 +1250,143 @@ async fn set_announcement(State(app): S, auth: Auth, Json(b): Json<AnnouncementI
     let user = auth.user.clone();
     let a = blocking(move || hub.set_announcement(Viewer { user: user.as_ref() }, &b.text)).await?;
     Ok(Json(json!(a)))
+}
+
+// ------------------------------------------------------------------ 统计, 提醒, 关注, 收藏夹
+
+/// The public 统计 page. Nobody's own data is in it, so shared caches may keep it a while.
+async fn site_stats(State(app): S) -> Response {
+    let mut res = Json(json!(app.hub.site_stats())).into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=300"));
+    res
+}
+
+#[derive(Deserialize)]
+struct NoticesQ {
+    limit: Option<usize>,
+}
+
+async fn notices(State(app): S, auth: Auth, Query(q): Query<NoticesQ>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.notices(auth.viewer(), q.limit.unwrap_or(50).clamp(1, 200))?)))
+}
+
+#[derive(Deserialize)]
+struct ReadIn {
+    /// One reminder; all of them when absent.
+    id: Option<Id>,
+}
+
+async fn read_notices(State(app): S, auth: Auth, Json(b): Json<ReadIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.read_notices(Viewer { user: user.as_ref() }, b.id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn follow_state(State(app): S, auth: Auth, Path(id): Path<Id>) -> Json<Value> {
+    Json(json!({ "following": auth.user.as_ref().is_some_and(|u| app.hub.is_following(u.id, id)) }))
+}
+
+#[derive(Deserialize)]
+struct OnIn {
+    on: bool,
+}
+
+async fn follow(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<OnIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let on = blocking(move || hub.follow(Viewer { user: user.as_ref() }, id, b.on)).await?;
+    Ok(Json(json!({ "following": on })))
+}
+
+async fn my_follows(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let list = app.hub.following(auth.viewer())?;
+    Ok(Json(json!(list.iter().map(|(n, path)| json!({ "node": node_view(&app.hub, n, 0), "path": path.iter().map(node_brief).collect::<Vec<_>>() })).collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct CollectionsQ {
+    /// "public" (shared lists) or "mine" (default).
+    #[serde(default)]
+    scope: String,
+}
+
+async fn collections(State(app): S, auth: Auth, Query(q): Query<CollectionsQ>) -> R<Json<Value>> {
+    Ok(Json(if q.scope == "public" { json!(app.hub.public_collections(auth.viewer(), 100)) } else { json!(app.hub.my_collections(auth.viewer())?) }))
+}
+
+#[derive(Deserialize)]
+struct CollectionIn {
+    title: String,
+    #[serde(default)]
+    note: String,
+}
+
+async fn create_collection(State(app): S, auth: Auth, Json(b): Json<CollectionIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    Ok(Json(json!(blocking(move || hub.create_collection(Viewer { user: user.as_ref() }, &b.title, &b.note)).await?)))
+}
+
+async fn collection(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let v = auth.viewer();
+    let (c, items) = app.hub.collection(v, id)?;
+    let items: Vec<Value> = items
+        .iter()
+        .map(|(rid, hit)| match hit {
+            Some((r, n)) => json!({ "id": rid, "resource": resource_view(&app, r, n, &[], v) }),
+            None => json!({ "id": rid, "gone": true }),
+        })
+        .collect();
+    Ok(Json(json!({ "collection": c, "items": items })))
+}
+
+async fn update_collection(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<CollectionIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    Ok(Json(json!(blocking(move || hub.update_collection(Viewer { user: user.as_ref() }, id, &b.title, &b.note)).await?)))
+}
+
+async fn delete_collection(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_collection(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn collect(State(app): S, auth: Auth, Path((id, resource)): Path<(Id, Id)>, Json(b): Json<OnIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let on = blocking(move || hub.collect(Viewer { user: user.as_ref() }, id, resource, b.on)).await?;
+    Ok(Json(json!({ "in": on })))
+}
+
+async fn share_collection(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<OnIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    Ok(Json(json!(blocking(move || hub.share_collection(Viewer { user: user.as_ref() }, id, b.on)).await?)))
+}
+
+#[derive(Deserialize)]
+struct CollectionReviewIn {
+    approve: bool,
+    #[serde(default)]
+    note: String,
+}
+
+async fn review_collection(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<CollectionReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.review_collection(Viewer { user: user.as_ref() }, id, b.approve, &b.note)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn pending_collections(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.pending_collections(auth.viewer())?)))
+}
+
+async fn collections_with(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.collections_with(auth.viewer(), id)?)))
 }
 
 async fn links(State(app): S) -> Json<Value> {

@@ -621,6 +621,43 @@ impl WantStatus {
     }
 }
 
+/// One entry in a user's 站内提醒 (new files in a followed course, a review decision, a reply).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Notice {
+    pub id: Id,
+    pub user: Id,
+    /// "course" (new files where they follow), "upload", "want", "link", "question",
+    /// "avatar", "change", "collection".
+    pub kind: String,
+    pub text: String,
+    /// Where it leads on the site (a path such as /r/123).
+    pub link: String,
+    /// The course a "course" notice is about: that day's new files there are one notice.
+    pub node: Option<Id>,
+    pub count: u32,
+    pub created_at: i64,
+    pub read: bool,
+}
+
+/// A named list of files a user keeps (收藏夹). Private unless its owner shares it and a
+/// reviewer other than the owner approves its title and note.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Collection {
+    pub id: Id,
+    pub user: Id,
+    pub title: String,
+    pub note: String,
+    /// File ids, in the order they were added.
+    pub items: Vec<Id>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    /// "private", "pending" (asked to share), "public" or "rejected".
+    pub status: String,
+    pub reviewed_by: Option<Id>,
+    /// Why sharing was turned down (shown to the owner).
+    pub review_note: String,
+}
+
 /// A link a student suggests for 站外资源: a reviewer (not the one who suggested it) adds it
 /// to the list or turns it down with a reason.
 #[derive(Debug, Clone, Serialize, Deserialize)]

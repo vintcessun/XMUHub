@@ -155,9 +155,12 @@ impl Hub {
             }
             s.status = if approve { "approved" } else { "rejected" }.into();
             s.reviewed_by = Some(me);
-            s.review_note = if approve { String::new() } else { reason };
+            s.review_note = if approve { String::new() } else { reason.clone() };
             tx.put_link_suggestion(&s)?;
+            let text = if approve { format!("你推荐的「{}」已加入站外资源", s.title) } else { format!("你推荐的「{}」没有被采纳：{reason}", s.title) };
+            let user = s.user;
             st.link_suggestions.insert(id, s);
+            st.notify(tx, user, "link", None, text, "/links".into())?;
             Ok(added)
         })
     }

@@ -450,6 +450,24 @@ const panels = {
       try { await api(`/links/suggestions/${it.dataset.id}/review`, { method: 'POST', body }); it.remove(); toast(approve ? '已加入站外资源' : '已处理'); } catch (err) { toast(err.message, true); }
     };
   },
+  async collections(box) {
+    const list = await api('/review/collections');
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学申请公开分享的收藏夹，通过后显示在<a href="/collections" target="_blank">收藏夹</a>页。看名字和说明是否合适（没有广告、联系方式、不当内容），点开看看里面的资料。不通过要写原因（本人能看到）。自己的收藏夹要由其他审核员审核。</p>
+      ${list.length ? list.map((c) => `<div class="item" data-id="${c.id}"><div class="body">
+        <a class="title" href="/collections?id=${c.id}" target="_blank">${esc(c.title)}</a>${c.note ? `<div class="note">${esc(c.note)}</div>` : ''}
+        <div class="meta"><span>${c.count} 份</span><span>${avatar(c.owner.avatar, c.owner.nickname, 20)} ${esc(c.owner.nickname)}</span><span>${ago(c.updated_at)}</span></div>
+        ${c.mine ? '<p class="small faint">这是你的收藏夹，要由其他审核员审核。</p>' : `<div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button>
+          <input class="input" placeholder="不通过的原因（本人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不通过</button></div>`}
+      </div></div>`).join('') : '<div class="empty"><b>没有待审核的收藏夹</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a]');
+      if (!b) return;
+      const it = b.closest('[data-id]');
+      const note = it.querySelector('input').value.trim();
+      if (b.dataset.a === 'no' && !note) return toast('写一下不通过的原因', true);
+      try { await api(`/collections/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已公开' : '已处理'); } catch (err) { toast(err.message, true); }
+    };
+  },
   async announce(box) {
     const a = (await meta()).announcement || { text: '' };
     box.innerHTML = `<section class="card"><h3 style="margin-top:0">全站公告</h3>

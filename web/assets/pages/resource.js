@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -58,6 +58,23 @@ async function load() {
   if (!unavailable && previewable && r.size <= 8 * 1024 * 1024 && !$('#pvgo').hidden) { $('#pvgo').hidden = true; preview(id, $('#pv')); }
   $('#dl').textContent = `下载 · ${fmtSize(r.size)}`;
 
+  $('#fav').hidden = r.status !== 'published';
+  if (me) {
+    api(`/resources/${id}/collections`).then((ids) => { if (ids.length) $('#fav').textContent = '★ 已收藏'; }).catch(() => {});
+  }
+  $('#fav').onclick = async () => {
+    if (!me) { location.href = loginUrl(); return; }
+    try {
+      const inSet = await favoriteDialog(id);
+      // The dialog updates the set as boxes are ticked; repaint the button when it closes.
+      const obs = new MutationObserver(() => {
+        if (document.querySelector('.modal')) return;
+        obs.disconnect();
+        $('#fav').textContent = inSet.size ? '★ 已收藏' : '☆ 收藏';
+      });
+      obs.observe(document.body, { childList: true });
+    } catch (e) { toast(e.message, true); }
+  };
   if (me && (me.level >= 3 || r.mine)) renderManage(r, me);
   if (me && me.level >= 3) loadHistory();
   loadSocial(me);

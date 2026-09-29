@@ -10,8 +10,8 @@ use std::sync::Arc;
 use sha2::{Digest, Sha256};
 use xmuhub_core::Hub;
 use xmuhub_core::db::Db;
-use xmuhub_core::hub::{AdminExtras, CodePurpose, Limits, NodeInput, PartSpec, Registration, ResourceInput, Viewer, needs_captcha};
-use xmuhub_core::model::{Id, Level, Status, User};
+use xmuhub_core::hub::{AdminExtras, CodePurpose, Limits, NodeInput, NodePatch, PartSpec, Registration, ResourceInput, Viewer, needs_captcha};
+use xmuhub_core::model::{Id, Level, NodeStatus, Status, User};
 use xmuhub_core::storage::local::LocalBackend;
 use xmuhub_core::storage::{Receipt, Storage};
 
@@ -39,7 +39,7 @@ fn input(node: Id) -> ResourceInput {
         paper: String::new(),
         with_answer: false,
         extra: String::new(),
-        note: String::new(),
+        note: String::new(),
         subtitle: None,
         major: None,
     }
@@ -168,5 +168,31 @@ async fn staff_uploads_wait_for_another_reviewer() {
     assert_eq!(h.review_batch(reviewer, None, true).unwrap().len(), 1);
     h.review(reviewer, id, "approve", "").unwrap();
     assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Published);
+
+    // Categories staff create wait for another reviewer too (approving a file in it counts).
+    let course_node = h.node(staff, course).unwrap().0.node;
+    assert_eq!(course_node.status, NodeStatus::Active, "confirmed by approving the file in it");
+    let other = h.create_node(staff, NodeInput { parent: Some(section), kind: "course".into(), code: String::new(), name: "操作系统".into(), label: String::new(), aliases: Vec::new(), bucketed: false, sort: 0, level: 0 }).unwrap().id;
+    assert_eq!(h.node(staff, other).unwrap().0.node.status, NodeStatus::Pending);
+    assert!(h.update_node(staff, other, NodePatch { approve: true, ..Default::default() }).is_err(), "not their own");
+    h.update_node(reviewer, other, NodePatch { approve: true, ..Default::default() }).unwrap();
+
+    // Editing their own published file sends it back to review; so does asking to publish directly.
+    let mut changed = input(course);
+    changed.extra = "改过".into();
+    h.update_resource(staff, id, changed, AdminExtras::default()).unwrap();
+    assert_eq!(h.resource(staff, id).unwrap().0.status, Status::Pending);
+    h.review(reviewer, id, "approve", "").unwrap();
+    let sha = hex::encode(Sha256::digest(b"straight to published?"));
+    let plan = h.begin_upload(staff, "卷子.pdf", "application/pdf", vec![PartSpec { size: 22, sha256: sha.clone() }]).await.unwrap();
+    std::fs::write(dir.join("files").join(&sha), b"straight to published?").unwrap();
+    h.confirm_part(staff, plan.upload_id, 0, Receipt { asset_id: None }).await.unwrap();
+    let extras = AdminExtras { status: Some("published".into()), ..Default::default() };
+    assert_eq!(h.create_resource(staff, plan.upload_id, input(other), extras).unwrap().status, Status::Pending);
+
+    // Their own note / removal requests go to someone else as well.
+    let q = h.request_resource_change(staff, id, "note", "新备注").unwrap();
+    assert!(h.review_resource_change(staff, q.id, true, "").is_err());
+    h.review_resource_change(reviewer, q.id, true, "").unwrap();
     let _ = std::fs::remove_dir_all(dir);
 }

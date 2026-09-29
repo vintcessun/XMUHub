@@ -67,7 +67,7 @@ impl Hub {
             tx.put_upload(&up)?;
             st.uploads.insert(up.id, up.clone());
             let mut a = st.avatars.get(&me.id).cloned().unwrap_or_else(|| Avatar { user: me.id, ..Default::default() });
-            if me.level >= Level::Reviewer {
+            if actor.system() {
                 a.current = up.key;
                 a.pending.clear();
                 a.reviewed_by = Some(me.id);
@@ -120,6 +120,9 @@ impl Hub {
         let me = actor.at_least(Level::Reviewer)?.clone();
         self.mutate(|st, tx| {
             let mut a = st.avatars.get(&user).cloned().ok_or(Error::NotFound("头像"))?;
+            if action == "approve" && user == me.id {
+                return Err(bad("自己的头像要由其他审核员审核"));
+            }
             match action {
                 "approve" if !a.pending.is_empty() => a.current = std::mem::take(&mut a.pending),
                 "reject" => a.pending.clear(),

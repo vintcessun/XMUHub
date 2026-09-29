@@ -170,8 +170,13 @@ impl Hub {
         v
     }
 
+    /// Straight onto the list: only the owner's import account. Everyone else, staff too,
+    /// suggests a link for another reviewer.
     pub fn add_link(&self, actor: Viewer, title: &str, url: &str, note: &str, sort: u32) -> Result<Link> {
         let me = actor.at_least(Level::Reviewer)?.id;
+        if !actor.system() {
+            return Err(bad("新链接请在「推荐一个」里提交，由其他审核员审核"));
+        }
         let (title, url, note) = checked(title, url, note)?;
         self.mutate(|st, tx| {
             let l = Link { id: st.next_id(tx)?, title, url, note, sort, created_by: me, created_at: now() };
@@ -181,11 +186,15 @@ impl Hub {
         })
     }
 
+    /// Staff fix an entry's name, note and order; a different address is a new link to suggest.
     pub fn update_link(&self, actor: Viewer, id: Id, title: &str, url: &str, note: &str, sort: u32) -> Result<Link> {
         actor.at_least(Level::Reviewer)?;
         let (title, url, note) = checked(title, url, note)?;
         self.mutate(|st, tx| {
             let mut l = st.links.get(&id).cloned().ok_or(Error::NotFound("链接"))?;
+            if l.url != url && !actor.system() {
+                return Err(bad("换链接地址请重新推荐，由其他审核员审核"));
+            }
             l.title = title;
             l.url = url;
             l.note = note;

@@ -206,7 +206,8 @@ impl Hub {
                 aliases: input.aliases.iter().map(|a| clean(a, 30)).filter(|a| !a.is_empty()).take(20).collect(),
                 bucketed: input.bucketed,
                 sort: input.sort,
-                status: if staff { NodeStatus::Active } else { NodeStatus::Pending },
+                // Staff can file new categories anywhere, but another reviewer confirms them.
+                status: if actor.system() { NodeStatus::Active } else { NodeStatus::Pending },
                 created_by: me.id,
                 created_at: now(),
             };
@@ -225,7 +226,7 @@ impl Hub {
     }
 
     pub fn update_node(&self, actor: Viewer, id: Id, p: NodePatch) -> Result<Node> {
-        actor.at_least(Level::Reviewer)?;
+        let me = actor.at_least(Level::Reviewer)?.id;
         let (n, touched) = self.mutate(|st, tx| {
             let mut n = st.nodes.get(&id).cloned().ok_or(Error::NotFound("分类"))?;
             if let Some(v) = p.code {
@@ -258,6 +259,9 @@ impl Hub {
                 n.parent = Some(target);
             }
             if p.approve && n.status == NodeStatus::Pending {
+                if n.created_by == me && !actor.system() {
+                    return Err(bad("自己新建的分类要由其他审核员确认"));
+                }
                 n.status = NodeStatus::Active;
             }
             if let Some(l) = p.level {

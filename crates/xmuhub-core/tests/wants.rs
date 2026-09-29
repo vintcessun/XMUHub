@@ -79,8 +79,10 @@ async fn wants_are_reviewed_then_answered() {
     let mine = h.wants(me, WantFilter::Mine, None).unwrap();
     assert_eq!(mine.iter().find(|x| x.id == bad.id).unwrap().review_note, "和资料无关");
 
-    // Staff posts are public at once; a user can't flood the queue.
-    assert_eq!(h.add_want(staff, "征集马原期末", "", None).unwrap().status, "open");
+    // Staff posts wait for another reviewer too; a user can't flood the queue.
+    let own = h.add_want(staff, "征集马原期末", "", None).unwrap();
+    assert_eq!(own.status, "pending");
+    assert!(h.review_want(staff, own.id, true, "").is_err(), "not their own");
     for i in 0..3 {
         h.add_want(me, &format!("资料 {i}"), "", None).unwrap();
     }

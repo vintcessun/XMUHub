@@ -35,7 +35,7 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
       const nav = document.querySelector('#nav-me');
       if (nav) nav.innerHTML = `${avatar(now.avatar, now.nickname, 22)}<span>${esc(now.nickname)}</span>`;
       forgetMe(); // the next page rebuilds the header with the new picture
-      toast(me.level >= 3 ? '头像已更新' : '已提交，审核通过后别人就能看到');
+      toast('已提交，审核通过后别人就能看到');
     } catch (err) { toast(err.message, true); showAvatar(me); }
   };
   $('#avclear').onclick = async () => {

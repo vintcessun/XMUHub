@@ -370,6 +370,12 @@ impl Viewer<'_> {
     pub fn staff(&self) -> bool {
         self.level() >= Level::Reviewer
     }
+    /// The owner's import account (the script token). Everything a person submits, reviewers
+    /// and admins included, waits for another reviewer; only this account's bulk imports
+    /// (already vetted by the owner) don't.
+    pub fn system(&self) -> bool {
+        self.user.is_some_and(|u| u.email == SYSTEM_EMAIL)
+    }
     pub(crate) fn at_least(&self, l: Level) -> Result<&User> {
         match self.user {
             Some(u) if u.level >= l => Ok(u),

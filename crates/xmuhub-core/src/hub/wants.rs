@@ -219,7 +219,7 @@ impl Hub {
                 return Err(Error::TooMany("待审核的求助太多了，请稍后再发".into()));
             }
         }
-        let status = if viewer.staff() { WantStatus::Open } else { WantStatus::Pending };
+        let status = if viewer.system() { WantStatus::Open } else { WantStatus::Pending };
         let w = self.mutate(|st, tx| {
             let w = Want {
                 id: st.next_id(tx)?,
@@ -229,7 +229,7 @@ impl Hub {
                 body,
                 created_at: t,
                 status,
-                reviewed_by: viewer.staff().then_some(me),
+                reviewed_by: viewer.system().then_some(me),
                 review_note: String::new(),
                 resource: None,
                 updated_at: t,
@@ -247,6 +247,12 @@ impl Hub {
         let note = clean(note, 200);
         self.mutate(|st, tx| {
             let mut w = st.wants.get(&id).cloned().ok_or(Error::NotFound("求助"))?;
+            if w.user == me {
+                return Err(bad("自己发的求助要由其他审核员审核"));
+            }
+            if w.status != WantStatus::Pending {
+                return Err(Error::Conflict("这条求助已经审核过了".into()));
+            }
             w.status = if approve { WantStatus::Open } else { WantStatus::Rejected };
             w.reviewed_by = Some(me);
             w.review_note = if approve { String::new() } else { note };

@@ -136,10 +136,11 @@ async fn avatars_wait_for_review() {
     assert_eq!(h.avatar_of(student.id), pending);
     assert!(dir.join("files").join(hex::encode(Sha256::digest(b"picture two"))).exists());
 
-    // Staff pictures need no review; a user can take theirs down.
+    // Staff pictures wait too, for another reviewer; a user can take theirs down.
     let pic3 = send(&h, &dir, staff, "avatar.webp", "image/webp", b"picture three").await;
     h.set_avatar(staff, pic3).unwrap();
-    assert!(!h.avatar_of(admin.id).is_empty());
+    assert!(h.avatar_of(admin.id).is_empty());
+    assert!(h.review_avatar(staff, admin.id, "approve").is_err(), "not their own");
     h.clear_avatar(me).unwrap();
     assert!(h.avatar_of(student.id).is_empty());
 

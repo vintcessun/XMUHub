@@ -167,8 +167,13 @@ impl Hub {
     pub fn create_resource(&self, actor: Viewer, upload_id: Id, input: ResourceInput, extras: AdminExtras) -> Result<Resource> {
         let me = actor.at_least(Level::Contributor)?.clone();
         let staff = me.level >= Level::Reviewer;
+        let system = actor.system();
+        // Staff may file their upload as internal-only, but never publish it themselves.
         let status_override = match extras.status.as_deref() {
-            Some(s) if staff => Some(Status::parse(s).ok_or_else(|| bad("未知状态"))?),
+            Some(s) if staff => match Status::parse(s).ok_or_else(|| bad("未知状态"))? {
+                Status::Published if !system => Some(Status::Pending),
+                s => Some(s),
+            },
             _ => None,
         };
         let r = self.mutate(|st, tx| {
@@ -203,7 +208,7 @@ impl Hub {
             // "upload" by hash) must not bring it back past review.
             let revived = st.resources.values().any(|x| x.blob == up.key && matches!(x.status, Status::Removed | Status::Rejected))
                 && !st.resources.values().any(|x| x.blob == up.key && matches!(x.status, Status::Published | Status::Pending));
-            let status = if inbox || (revived && !staff) {
+            let status = if inbox || (revived && !system) {
                 Status::Pending
             } else {
                 status_override.unwrap_or(if me.level.publishes_directly() { Status::Published } else { Status::Pending })
@@ -261,7 +266,10 @@ impl Hub {
             if !staff && !own {
                 return Err(Error::Forbidden);
             }
-            if !staff && clean(&input.note, 500) != r.note {
+            // Staff tidying other people's files. Their own files follow the uploader rules
+            // below (a changed published file goes back to review by someone else).
+            let moderating = staff && (r.uploader != me.id || actor.system());
+            if !moderating && clean(&input.note, 500) != r.note {
                 return Err(bad("修改备注需要提交申请，由审核员同意后生效"));
             }
             let (mut name, tag) = Self::build_name(st, &input, &extras, staff, Some(id))?;
@@ -279,7 +287,7 @@ impl Hub {
             let same_subtitle = input.subtitle.as_deref().is_none_or(|s| clean(s, 80) == st.subtitle(&r));
             let major = input.major.as_deref().map(clean_major);
             let same_major = major.as_ref().is_none_or(|m| st.majors.get(&r.id).map(String::as_str).unwrap_or("") == m);
-            if !staff && node == r.node && name == r.name && tag == r.tag && same_subtitle && same_major {
+            if !moderating && node == r.node && name == r.name && tag == r.tag && same_subtitle && same_major {
                 return Ok((r, old_node));
             }
             r.node = node;
@@ -302,7 +310,7 @@ impl Hub {
                 r.status = Status::Pending;
                 r.needs_review = false;
             }
-            if !staff {
+            if !moderating {
                 // An edited published file is checked again, by the same rule as a new upload:
                 // trusted uploaders stay public and are re-checked, others wait for approval.
                 if r.status == Status::Published {
@@ -409,9 +417,11 @@ impl Hub {
                     r.status = Status::Published;
                     r.needs_review = false;
                     r.uncertain = false;
-                    // Approving a resource also confirms the node it created.
+                    // Approving a resource also confirms the node it created (unless the reviewer
+                    // created that node: nobody confirms their own).
                     if let Some(mut n) = st.nodes.get(&r.node).cloned()
                         && n.status == NodeStatus::Pending
+                        && n.created_by != me.id
                     {
                         n.status = NodeStatus::Active;
                         st.put_node(tx, n)?;
@@ -497,6 +507,7 @@ impl Hub {
         let (q, changed) = self.mutate(|st, tx| {
             let mut q = st.resource_change_requests.get(&id).cloned().ok_or(Error::NotFound("申请"))?;
             if q.status != "pending" { return Err(Error::Conflict("申请已处理".into())); }
+            if q.uploader == me.id { return Err(bad("自己的申请要由其他审核员审核")); }
             let mut r = st.resources.get(&q.resource).cloned().ok_or(Error::NotFound("资料"))?;
             if approve && matches!(r.status, Status::Removed | Status::Rejected) {
                 return Err(bad("资料已下架或未通过审核，无法同意申请"));

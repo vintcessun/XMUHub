@@ -172,7 +172,9 @@ $('#report').onclick = async (e) => {
 async function renderManage(r, me) {
   const box = $('#manage');
   box.hidden = false;
-  const staff = me.level >= 3;
+  // On their own files reviewers are uploaders like anyone: someone else reviews the file,
+  // its edits and their note / removal requests.
+  const staff = me.level >= 3 && !r.mine;
   // Uploaders edit their pending and published files (a published one goes back to review).
   const canEdit = staff || r.status === 'pending' || r.status === 'published';
   const m = canEdit ? await meta() : null;

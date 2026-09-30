@@ -93,6 +93,17 @@ pub struct Search {
 /// queue behind the uploads (half the throughput in scripts/bench.py).
 pub const FRESH: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// How many of a query's units a document must match.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Need {
+    /// 70% of them (a stray typo in a long query is forgiven).
+    Most,
+    /// Every Chinese unit; letters and numbers only add to the score.
+    EveryCjk,
+    /// Half of them.
+    Half,
+}
+
 fn key(ty: DocType, id: Id) -> u64 {
     ((ty as u64) << 56) | id
 }
@@ -217,19 +228,30 @@ impl Search {
         if self.dirty.load(Ordering::Acquire) && self.last_commit.lock().elapsed() >= FRESH {
             self.flush()?;
         }
-        let strict = self.run(&query_units(q), false, filter, limit, offset)?;
+        let units = query_units(q);
+        let strict = self.run(&units, Need::Most, filter, limit, offset)?;
         if strict.1 > 0 {
             return Ok(strict);
         }
+        // Abbreviation fallback: every Chinese character present somewhere ("高数" finds
+        // "高等数学"). Letters and numbers only rank: "高数b" / "微积分b" still find the course
+        // when its name has no B.
         let loose = loose_units(q);
-        if loose.len() < 2 {
-            return Ok(strict);
+        if loose.iter().filter(|u| u.chars().all(crate::text::is_cjk)).count() >= 2 {
+            let found = self.run(&loose, Need::EveryCjk, filter, limit, offset)?;
+            if found.1 > 0 {
+                return Ok(found);
+            }
         }
-        // Abbreviation fallback: every character must be present somewhere.
-        self.run(&loose, true, filter, limit, offset)
+        // Last resort before an empty page: half of the words ("财务管理a期中" still finds
+        // 财务管理 when nothing there says 期中). Best matches rank first.
+        if units.len() >= 3 {
+            return self.run(&units, Need::Half, filter, limit, offset);
+        }
+        Ok(strict)
     }
 
-    fn run(&self, units: &[String], all: bool, filter: Filter, limit: usize, offset: usize) -> Result<(Vec<Hit>, usize)> {
+    fn run(&self, units: &[String], need: Need, filter: Filter, limit: usize, offset: usize) -> Result<(Vec<Hit>, usize)> {
         if units.is_empty() || limit == 0 {
             return Ok((Vec::new(), 0));
         }
@@ -247,12 +269,17 @@ impl Search {
                     vec![term_q(f.main, u, 3.0), term_q(f.py, u, 2.0), term_q(f.sub, u, 1.0)]
                 };
                 let any_field = BooleanQuery::new(fields);
-                (Occur::Should, Box::new(any_field) as Box<dyn Query>)
+                let occur = if need == Need::EveryCjk && u.chars().all(crate::text::is_cjk) { Occur::Must } else { Occur::Should };
+                (occur, Box::new(any_field) as Box<dyn Query>)
             })
             .collect();
         // Most units must hit; a stray typo in a long query shouldn't empty the results.
-        let need = if all { units.len() } else { (units.len() * 7).div_ceil(10).max(1) };
-        let text = BooleanQuery::with_minimum_required_clauses(unit_queries, need);
+        let required = match need {
+            Need::Most => (units.len() * 7).div_ceil(10).max(1),
+            Need::Half => units.len().div_ceil(2),
+            Need::EveryCjk => 0,
+        };
+        let text = BooleanQuery::with_minimum_required_clauses(unit_queries, required);
 
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, Box::new(text))];
         let exact = |field: Field, v: u64| -> (Occur, Box<dyn Query>) {
@@ -359,6 +386,28 @@ mod tests {
         assert_eq!(count(&index, "算法", files), 0);
         // Other API callers keep the existing broader search behavior.
         assert_eq!(count(&index, "重点整理", Filter { ty: Some(DocType::Resource), ..Default::default() }), 1);
+    }
+
+    #[test]
+    fn abbreviations_letters_and_extra_words_still_find_the_course() {
+        let index = Search::new().unwrap();
+        let place = Placement { node: 1, ancestors: &[], path_text: "", aliases_text: "" };
+        index.put_node(&node(1, "高等数学", NodeKind::Course), &place, 100, true, 0).unwrap();
+        index.put_node(&node(2, "微积分I", NodeKind::Course), &place, 100, true, 0).unwrap();
+        index.put_node(&node(3, "财务管理A", NodeKind::Course), &place, 100, true, 0).unwrap();
+        index.put_node(&node(4, "数据结构", NodeKind::Course), &place, 100, true, 0).unwrap();
+        index.commit().unwrap();
+        let all = Filter::default();
+        // Searches students actually made that came back empty (server log, 2026-10-01).
+        assert_eq!(count(&index, "高数", all), 1);
+        assert_eq!(count(&index, "高数b", all), 1);
+        assert_eq!(count(&index, "微积分b", all), 1);
+        assert_eq!(count(&index, "财务管理a期中", all), 1);
+        // What already worked keeps working, and unrelated text still finds nothing.
+        assert_eq!(count(&index, "高等数学", all), 1);
+        assert_eq!(count(&index, "数据结构", all), 1);
+        assert_eq!(count(&index, "四史", all), 0);
+        assert_eq!(count(&index, "有限元分析", all), 0);
     }
 }
 

@@ -8,8 +8,8 @@
 site/<你的站>/
   site.json          必需：站点信息（见下表）
   assets/site/       可选：图片，同名替换默认图
-    logo.png           256×256，页头和浏览器图标
-    background.jpg     全站背景，建议 1920×1280、200–400 KB
+    logo.*             256×256，页头和浏览器图标（png / jpg / webp / svg 都行，只放一个）
+    background.*       全站背景，建议 1920×1280、200–400 KB（png / jpg / webp 都行，只放一个）
     home-left.png      首页标题两侧的装饰图（透明 PNG，约 660 px 宽）；不要就别放
     home-right.png
   about.html …       可选：整页替换 web/ 里的同名页面（一般不需要）

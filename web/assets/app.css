@@ -651,7 +651,7 @@ body { background: #101d2d; min-height: 100vh; }
    changes. */
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  background: #101d2d url('/assets/site/background.jpg') center center / cover no-repeat;
+  background: #101d2d url('{{site.background}}') center center / cover no-repeat;
 }
 .top, .foot, .card, .hero, .page-head, .tabs, .drop, .modal-box,
 .suggest ul, .picked, .bulkbar, .frow, .kpi, .notice, .oss {

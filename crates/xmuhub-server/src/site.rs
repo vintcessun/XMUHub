@@ -66,6 +66,23 @@ pub fn get() -> &'static Site {
     SITE.get().expect("site loaded at start-up")
 }
 
+/// Pictures a site may replace in any of [`IMAGE_TYPES`] (`assets/site/<stem>.<ext>`).
+const IMAGES: [&str; 2] = ["logo", "background"];
+const IMAGE_TYPES: [&str; 5] = ["webp", "png", "jpg", "jpeg", "svg"];
+
+/// `/assets/site/<stem>.<ext>`: the site folder's own picture, else the generic one in `web/`.
+fn site_image(stem: &str, site_dir: &Path, web_dir: &Path) -> anyhow::Result<String> {
+    for root in [site_dir, web_dir] {
+        let found: Vec<&str> = IMAGE_TYPES.iter().copied().filter(|ext| root.join("assets/site").join(format!("{stem}.{ext}")).is_file()).collect();
+        match found.as_slice() {
+            [] => continue,
+            [ext] => return Ok(format!("/assets/site/{stem}.{ext}")),
+            more => anyhow::bail!("{}: more than one {stem} picture ({}), keep one", root.join("assets/site").display(), more.join(", ")),
+        }
+    }
+    anyhow::bail!("no assets/site/{stem}.* in {} or {}", site_dir.display(), web_dir.display())
+}
+
 /// Characters a value may not contain: it lands inside HTML attributes and JS strings unescaped.
 const FORBIDDEN: &[char] = &['<', '>', '"', '\'', '`', '\\', '\n', '\r', '{', '}'];
 
@@ -86,7 +103,7 @@ impl Site {
         web_dir.parent().unwrap_or(Path::new(".")).join("site").join(name)
     }
 
-    pub fn load(dir: &Path) -> anyhow::Result<&'static Site> {
+    pub fn load(dir: &Path, web_dir: &Path) -> anyhow::Result<&'static Site> {
         let path = dir.join("site.json");
         let text = std::fs::read_to_string(&path).map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
         let config: SiteConfig = serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
@@ -113,6 +130,11 @@ impl Site {
         }
         for (k, v) in &config.extra {
             vars.insert(format!("extra.{k}"), v.clone());
+        }
+        // The logo and background may be any picture format: pages say {{site.logo}} and
+        // {{site.background}}, which become the file actually there.
+        for stem in IMAGES {
+            vars.insert(stem.to_string(), site_image(stem, dir, web_dir)?);
         }
         for (k, v) in &vars {
             if let Some(c) = v.chars().find(|c| FORBIDDEN.contains(c)) {
@@ -170,6 +192,25 @@ mod tests {
         assert_eq!(s.fill("a.js", "no placeholders {{x}}").unwrap(), "no placeholders {{x}}");
         assert!(s.fill("a.html", "{{site.nmae}}").is_err(), "a typo is caught at start-up");
         assert!(s.fill("a.html", "{{site.name").is_err());
+    }
+
+    #[test]
+    fn site_pictures_are_found_by_name_whatever_their_type() {
+        let root = std::env::temp_dir().join(format!("xmuhub-site-image-{}", std::process::id()));
+        let (site, web) = (root.join("site"), root.join("web"));
+        for d in [&site, &web] {
+            std::fs::create_dir_all(d.join("assets/site")).unwrap();
+        }
+        std::fs::write(web.join("assets/site/background.jpg"), b"x").unwrap();
+        std::fs::write(web.join("assets/site/logo.png"), b"x").unwrap();
+        assert_eq!(site_image("background", &site, &web).unwrap(), "/assets/site/background.jpg", "the generic one by default");
+        std::fs::write(site.join("assets/site/background.png"), b"x").unwrap();
+        assert_eq!(site_image("background", &site, &web).unwrap(), "/assets/site/background.png", "the site's own wins");
+        std::fs::write(site.join("assets/site/background.webp"), b"x").unwrap();
+        assert!(site_image("background", &site, &web).is_err(), "two of them is a mistake");
+        assert_eq!(site_image("logo", &site, &web).unwrap(), "/assets/site/logo.png");
+        assert!(site_image("missing", &site, &web).is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

@@ -122,8 +122,8 @@ for (const f of scripts.filter((p) => p.startsWith(join(web, 'assets')))) {
 //  - pages and scripts use only known {{site.…}} keys;
 //  - no site's own words (name, school, domain, contact) are written into web/ or the code.
 
-const SITE_KEYS = ['name', 'subtitle', 'school', 'school_short', 'description', 'slogan', 'footer', 'domain', 'repo', 'mcp_name', 'community', 'icp', 'verified_label', 'link_example', 'verified_emails'];
-const REQUIRED = SITE_KEYS.filter((k) => k !== 'community' && k !== 'icp' && k !== 'verified_emails').concat(['announcement']);
+const SITE_KEYS = ['name', 'subtitle', 'school', 'school_short', 'description', 'slogan', 'footer', 'domain', 'repo', 'mcp_name', 'community', 'icp', 'verified_label', 'link_example', 'verified_emails', 'logo', 'background'];
+const REQUIRED = SITE_KEYS.filter((k) => !['community', 'icp', 'verified_emails', 'logo', 'background'].includes(k)).concat(['announcement']);
 const FORBIDDEN = /[<>"'`\\\n\r{}]/;
 const siteRoot = join(root, 'site');
 const sites = existsSync(siteRoot) ? readdirSync(siteRoot).filter((n) => existsSync(join(siteRoot, n, 'site.json'))) : [];

@@ -301,7 +301,7 @@ export async function layout(active) {
   const q = qs.get('q') || '';
   top.className = 'top';
   top.innerHTML = `<div class="wrap">
-    <a class="brand" href="/"><img class="logo" src="/assets/site/logo.png" alt=""><span><b>{{site.name}}</b><small>{{site.subtitle}}</small></span></a>
+    <a class="brand" href="/"><img class="logo" src="{{site.logo}}" alt=""><span><b>{{site.name}}</b><small>{{site.subtitle}}</small></span></a>
     ${active === 'home' || active === 'search' ? '<span class="grow"></span>' : `<form action="/search" role="search"><input name="q" value="${esc(q)}" placeholder="搜索课程名称…" aria-label="搜索"></form>`}
     <nav class="nav">
       <a href="/browse" data-k="browse">分类</a>

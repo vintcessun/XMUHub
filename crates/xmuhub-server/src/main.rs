@@ -59,7 +59,7 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let cfg = Config::from_env()?;
-    site::Site::load(&site::Site::locate(&cfg.web_dir))?;
+    site::Site::load(&site::Site::locate(&cfg.web_dir), &cfg.web_dir)?;
     // Two cores on the host: keep the runtime small and predictable.
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

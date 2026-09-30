@@ -7,8 +7,8 @@
 <meta name="description" content="{{site.description}}">
 <meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="/assets/site/logo.png" type="image/png">
-<link rel="preload" href="/assets/site/background.jpg" as="image">
+<link rel="icon" href="{{site.logo}}">
+<link rel="preload" href="{{site.background}}" as="image">
 <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body data-page="home">
@@ -18,7 +18,7 @@
   <section class="hero">
     <img class="home-calligraphy home-calligraphy-left" src="/assets/site/home-left.png" alt="" aria-hidden="true" draggable="false">
     <img class="home-calligraphy home-calligraphy-right" src="/assets/site/home-right.png" alt="" aria-hidden="true" draggable="false">
-    <img class="logo" src="/assets/site/logo.png" alt="">
+    <img class="logo" src="{{site.logo}}" alt="">
     <h1><b>{{site.name}}</b></h1>
     <div class="slogan" id="slogan"></div>
     <p>{{site.slogan}}</p>

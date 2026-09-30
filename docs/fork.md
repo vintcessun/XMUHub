@@ -34,7 +34,7 @@ cp -r site/example site/<你的站>      # 文件夹名用英文，比如 site/f
 ```
 
 - 编辑 `site/<你的站>/site.json`：每一项的含义见 [site/README.md](../site/README.md)。`repo` 改成你 fork 的地址，`verified_domains` 填你们学校的邮箱域名。
-- 放你的图片（可选，不放就用默认的简洁样式）：`site/<你的站>/assets/site/logo.png`、`background.jpg`、`home-left.png`、`home-right.png`。
+- 放你的图片（可选，不放就用默认的简洁样式）：`site/<你的站>/assets/site/logo.*`、`background.*`（png / jpg / webp 任选，同名只放一个）、`home-left.png`、`home-right.png`。
 - 想整页改「使用须知」「使用教程」等页面，就把 `web/about.html` 之类复制到 `site/<你的站>/about.html` 再改。它会覆盖默认页面，但以后上游对这个页面的改动你需要自己合并，所以能用 `site.json` 解决的尽量用 `site.json`。
 
 本地预览（不需要任何密钥，文件存在本地 `data/`）：

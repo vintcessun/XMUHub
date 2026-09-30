@@ -793,6 +793,20 @@ async function show(name) {
   } catch (e) {
     box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
   }
+  tabCounts();
+}
+
+/** How much waits in each queue, as a number on its tab (refreshed on every switch and each minute). */
+async function tabCounts() {
+  let c;
+  try { c = await api('/review/counts'); } catch { return; }
+  document.querySelectorAll('#tabs button').forEach((b) => {
+    let s = b.querySelector('.count');
+    const n = c[b.dataset.t] || 0;
+    if (!s) { s = document.createElement('span'); s.className = 'count'; b.append(s); }
+    s.textContent = n > 99 ? '99+' : String(n);
+    s.hidden = !n;
+  });
 }
 
 (async () => {
@@ -807,5 +821,6 @@ async function show(name) {
   if (me.level < 4) document.querySelectorAll('#tabs button').forEach((b) => { b.hidden = ADMIN_TABS.includes(b.dataset.t); });
   $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) show(b.dataset.t); };
   show(location.hash.slice(1) || 'dash');
+  setInterval(() => { if (!document.hidden) tabCounts(); }, 60000);
   window.addEventListener('hashchange', () => { if (location.hash.slice(1) !== current) show(location.hash.slice(1)); });
 })();

@@ -585,6 +585,8 @@ main { padding-top: 36px; padding-bottom: 72px; }
 .tabs button { padding: 10px 13px; border-radius: 8px 8px 0 0; }
 .tabs button:hover { background: var(--surface-2); color: var(--text); }
 .tabs button.on { background: var(--navy-soft); color: var(--navy); }
+.tabs button .count { display: inline-block; min-width: 18px; margin-left: 5px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+.tabs button .count[hidden] { display: none; }
 .table th { background: var(--surface-2); color: var(--muted); }
 .table th, .table td { padding: 11px 10px; }
 .table tbody tr:hover { background: var(--surface-2); }

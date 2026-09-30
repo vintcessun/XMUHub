@@ -225,6 +225,7 @@ const API: &[(&str, &str, &str)] = &[
     ("GET", "/links/suggestions", "我推荐的链接（审核员：待审核的推荐）"),
     ("POST", "/links/suggestions/{id}/review", "审核员：{approve, reason?（不采纳时必填）, title?, url?, note?, sort?}"),
     ("POST", "/resources/{id}/move-suggestion", "建议把资料换到另一门课程 {node, note?}（审核员采纳后移动）"),
+    ("GET", "/review/counts", "审核员：各审核队列待处理的数量"),
     ("GET", "/move-suggestions", "我提的分类建议（审核员：待审核的建议）"),
     ("POST", "/move-suggestions/{id}/review", "审核员：采纳（移动资料）或不采纳 {approve, reason?（不采纳时必填）}"),
     ("GET", "/review?status=&uncertain=&offset=&limit=", "审核员：审核队列（limit 默认 1000，最多 5000）"),

@@ -354,6 +354,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/links/suggestions/{id}/review", post(review_link_suggestion))
         .route("/resources/{id}/move-suggestion", post(suggest_move))
         .route("/move-suggestions", get(move_suggestions))
+        .route("/review/counts", get(review_counts))
         .route("/move-suggestions/{id}/review", post(review_move_suggestion))
         .route("/announcement", put(set_announcement))
         .route("/bulletins", get(bulletins).post(post_bulletin))
@@ -1433,6 +1434,11 @@ async fn suggest_move(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Js
     let user = auth.user.clone();
     let s = blocking(move || hub.suggest_move(Viewer { user: user.as_ref() }, id, b.node, &b.note)).await?;
     Ok(Json(json!(s)))
+}
+
+/// Pending items per review tab.
+async fn review_counts(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.review_counts(auth.viewer())?)))
 }
 
 /// Staff: the move suggestions waiting for review. Anyone else: their own.

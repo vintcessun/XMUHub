@@ -242,7 +242,15 @@ impl Hub {
             // Shown to the sender as the reply.
             f.handled_note = clean(note, 500);
             tx.put_feedback(&f)?;
+            // A sender with an account also hears about it in 站内提醒 (without one, they see it
+            // on the feedback page in the browser they sent it from).
+            let (sender, reply) = (f.user, f.handled_note.clone());
             st.feedback.insert(id, f);
+            if let Some(user) = sender.filter(|u| *u != me) {
+                let preview: String = reply.chars().take(60).collect();
+                let text = if reply.is_empty() { "你的反馈已处理".to_string() } else { format!("你的反馈有了回复：{preview}{}", if reply.chars().count() > 60 { "…" } else { "" }) };
+                st.notify(tx, user, "feedback", None, text, "/feedback".into())?;
+            }
             Ok(())
         })
     }

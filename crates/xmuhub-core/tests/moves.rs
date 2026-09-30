@@ -86,3 +86,33 @@ async fn move_suggestions_are_reviewed_by_someone_else() {
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn review_tabs_count_what_waits_and_feedback_replies_reach_the_sender() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-queues-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("files")).unwrap();
+    let h = open(&dir);
+    let admin = register(&h, "a@example.invalid", "admin");
+    let student = register(&h, "s@example.invalid", "student");
+    let (va, vs) = (Viewer { user: Some(&admin) }, Viewer { user: Some(&student) });
+    let section = node(&h, va, None, "section", "专业课");
+    let college = node(&h, va, Some(section), "group", "信息学院");
+    let a = node(&h, va, Some(college), "course", "操作系统");
+    let b = node(&h, va, Some(college), "course", "计算机网络");
+    let f = upload(&h, &dir, va, a, b"slides").await;
+    upload(&h, &dir, vs, a, b"waiting").await;
+    h.suggest_move(vs, f, b, "").unwrap();
+    let fb = h.submit_feedback(vs, "上传太慢了", "", "/upload", "1.1.1.1").unwrap();
+
+    assert!(h.review_counts(vs).is_err(), "reviewers only");
+    let c = h.review_counts(va).unwrap();
+    assert_eq!((c["queue"], c["moves"], c["feedback"]), (1, 1, 1));
+
+    h.handle_feedback(va, fb.id, "已经改成同时传三个文件了").unwrap();
+    assert_eq!(h.review_counts(va).unwrap()["feedback"], 0);
+    let got = h.notices(vs, 10).unwrap();
+    assert!(got.items.iter().any(|n| n.kind == "feedback" && n.text.contains("同时传三个文件")));
+    drop(h);
+    let _ = std::fs::remove_dir_all(dir);
+}

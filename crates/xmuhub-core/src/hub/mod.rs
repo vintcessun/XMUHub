@@ -11,6 +11,7 @@ mod imports;
 mod inbox;
 mod links;
 mod moves;
+mod queues;
 mod notices;
 mod collections;
 mod series;

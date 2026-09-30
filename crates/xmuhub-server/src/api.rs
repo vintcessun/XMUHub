@@ -353,6 +353,8 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/links/suggestions", get(link_suggestions).post(suggest_link))
         .route("/links/suggestions/{id}/review", post(review_link_suggestion))
         .route("/announcement", put(set_announcement))
+        .route("/bulletins", get(bulletins).post(post_bulletin))
+        .route("/bulletins/{id}", axum::routing::delete(delete_bulletin))
         .route("/stats", get(site_stats))
         .route("/notices", get(notices))
         .route("/notices/read", post(read_notices))
@@ -1159,6 +1161,25 @@ async fn set_announcement(State(app): S, auth: Auth, Json(b): Json<AnnouncementI
     let user = auth.user.clone();
     let a = blocking(move || hub.set_announcement(Viewer { user: user.as_ref() }, &b.text)).await?;
     Ok(Json(json!(a)))
+}
+
+/// 公告 shown in 站内提醒 (see `Hub::post_bulletin`).
+async fn bulletins(State(app): S) -> Json<Value> {
+    Json(json!(app.hub.bulletins()))
+}
+
+async fn post_bulletin(State(app): S, auth: Auth, Json(b): Json<AnnouncementIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let b = blocking(move || hub.post_bulletin(Viewer { user: user.as_ref() }, &b.text)).await?;
+    Ok(Json(json!(b)))
+}
+
+async fn delete_bulletin(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.delete_bulletin(Viewer { user: user.as_ref() }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 // ------------------------------------------------------------------ 统计, 提醒, 关注, 收藏夹

@@ -106,3 +106,30 @@ fn deleting_an_account_erases_who_it_was() {
     assert_ne!(again.id, b.id);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn bulletins_reach_every_account_as_a_reminder() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-bulletin-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let h = hub(&dir);
+    let a = register(&h, "a@x.com", "admin");
+    let b = register(&h, "b@x.com", "bob");
+
+    assert!(h.post_bulletin(Viewer { user: Some(&b) }, "x").is_err(), "admins only");
+    assert!(h.post_bulletin(Viewer { user: Some(&a) }, "  ").is_err());
+    let first = h.post_bulletin(Viewer { user: Some(&a) }, "第一条公告\n第二行").unwrap();
+    let second = h.post_bulletin(Viewer { user: Some(&a) }, "second").unwrap();
+    let got = h.notices(Viewer { user: Some(&b) }, 50).unwrap();
+    assert_eq!(got.unread, 2);
+    assert!(got.items.iter().any(|n| n.kind == "bulletin" && n.link == format!("/notices#b{}", first.id) && n.text.starts_with("公告：第一条公告")));
+    assert_eq!(h.bulletins().iter().map(|x| x.id).collect::<Vec<_>>(), vec![second.id, first.id], "newest first");
+
+    assert!(h.delete_bulletin(Viewer { user: Some(&b) }, first.id).is_err());
+    h.delete_bulletin(Viewer { user: Some(&a) }, first.id).unwrap();
+    drop(h);
+    let h = hub(&dir);
+    assert_eq!(h.bulletins().iter().map(|x| x.id).collect::<Vec<_>>(), vec![second.id], "kept across restarts");
+    drop(h);
+    let _ = std::fs::remove_dir_all(dir);
+}

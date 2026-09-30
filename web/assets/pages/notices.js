@@ -1,9 +1,9 @@
-import { ago, api, esc, layout, loginUrl, pathText, setBell, toast, $ } from '../app.js';
+import { ago, api, esc, fmtDate, layout, linkify, loginUrl, pathText, setBell, toast, $ } from '../app.js';
 
-// 站内提醒: new files where the reader follows, decisions on what they submitted, replies to
-// their 求资料 posts. Opening one marks it read. Below: the courses they follow.
+// 站内提醒: the admins' 公告 on top, then new files where the reader follows and decisions on
+// what they submitted. Opening one marks it read. Below: the courses they follow.
 
-const KIND = { course: '关注', approved: '审核', upload: '审核', want: '求资料', link: '站外资源', question: '提问', avatar: '头像', change: '申请', collection: '收藏夹' };
+const KIND = { bulletin: '公告', course: '关注', approved: '审核', upload: '审核', want: '求资料', link: '站外资源', question: '提问', avatar: '头像', change: '申请', collection: '收藏夹' };
 
 async function load() {
   let d;
@@ -15,6 +15,17 @@ async function load() {
         <div class="body" style="flex:1"><div class="ntext">${esc(n.text)}</div>
         <div class="small faint"><span class="tag">${KIND[n.kind] || '提醒'}</span> ${ago(n.created_at)}</div></div></a>`).join('')
     : '<div class="empty"><b>还没有提醒</b>关注几门课，有新资料时这里会告诉你</div>';
+}
+
+async function bulletins() {
+  let list;
+  try { list = await api('/bulletins'); } catch { return; }
+  $('#bulletins').hidden = !list.length;
+  $('#blist').innerHTML = list.map((b) => `<div class="bulletin" id="b${b.id}"><div style="white-space:pre-wrap;overflow-wrap:anywhere">${linkify(b.text)}</div>
+    <div class="small faint" style="margin-top:4px">${fmtDate(b.at, true)}</div></div>`).join('');
+  // A reminder links to /notices#b<id>: the list only exists now, so scroll to it by hand.
+  const target = location.hash && document.getElementById(location.hash.slice(1));
+  if (target) { target.classList.add('on'); target.scrollIntoView({ block: 'center' }); }
 }
 
 async function follows() {
@@ -45,6 +56,7 @@ $('#flist').addEventListener('click', async (e) => {
 (async () => {
   const me = await layout('notices');
   if (!me) { location.replace(loginUrl()); return; }
+  bulletins();
   load();
   follows();
 })();

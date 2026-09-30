@@ -490,13 +490,36 @@ const panels = {
   },
   async announce(box) {
     const a = (await meta()).announcement || { text: '' };
-    box.innerHTML = `<section class="card"><h3 style="margin-top:0">全站公告</h3>
+    box.innerHTML = `<section class="card"><h3 style="margin-top:0">顶部横幅公告</h3>
       <p class="small muted">显示在每个页面顶部；同学点 × 后不再显示，直到公告改了。留空则不显示。可以写网址，会自动变成链接。</p>
       <textarea class="input" id="antext" rows="3" maxlength="300">${esc(a.text)}</textarea>
       <div class="row" style="margin-top:8px"><button class="btn primary sm" id="ansave" type="button">保存</button><span class="small faint">保存后一分钟内所有人可见。</span></div></section>`;
     box.querySelector('#ansave').onclick = async () => {
       try { await api('/announcement', { method: 'PUT', body: { text: box.querySelector('#antext').value } }); toast('已保存'); } catch (err) { toast(err.message, true); }
     };
+    const sec = document.createElement('section');
+    sec.className = 'card';
+    box.append(sec);
+    const draw = async () => {
+      const list = await api('/bulletins');
+      sec.innerHTML = `<h3 style="margin-top:0">站内公告</h3>
+        <p class="small muted">放在「站内提醒」页顶部，不弹出；发布时每个账号会收到一条未读提醒（页头「提醒」上的红点）。可以换行，网址会自动变成链接。</p>
+        <textarea class="input" id="btext" rows="4" maxlength="1000" placeholder="公告内容"></textarea>
+        <div class="row" style="margin-top:8px"><button class="btn primary sm" id="bpost" type="button">发布</button></div>
+        <div class="list" style="margin-top:12px">${list.map((b) => `<div class="item" data-id="${b.id}"><div class="body"><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(b.text)}</div>
+          <div class="meta"><span class="faint">${fmtDate(b.at, true)}</span></div></div><button class="btn sm danger" data-del type="button">删除</button></div>`).join('') || '<p class="small faint">还没有站内公告。</p>'}</div>`;
+      sec.querySelector('#bpost').onclick = async () => {
+        const text = sec.querySelector('#btext').value.trim();
+        if (!text) return toast('请填写公告内容', true);
+        try { await api('/bulletins', { method: 'POST', body: { text } }); toast('已发布'); draw(); } catch (err) { toast(err.message, true); }
+      };
+      sec.querySelector('.list').onclick = async (e) => {
+        const b = e.target.closest('[data-del]');
+        if (!b) return;
+        try { await api(`/bulletins/${b.closest('[data-id]').dataset.id}`, { method: 'DELETE' }); toast('已删除'); draw(); } catch (err) { toast(err.message, true); }
+      };
+    };
+    draw().catch((err) => toast(err.message, true));
   },
   async log(box) {
     const list = await api('/admin/reviews');

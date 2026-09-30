@@ -22,6 +22,7 @@ mod thumbs;
 mod tokens;
 mod tree;
 mod uploads;
+mod bulletins;
 mod wants;
 
 use std::collections::{HashMap, HashSet};
@@ -54,6 +55,7 @@ pub use series::{SeriesItem, SeriesText, SeriesView};
 pub use links::LinkSuggestionView;
 pub use notices::NoticeList;
 pub use stats_public::SiteStats;
+pub use bulletins::Bulletin;
 pub use wants::{Person, WantFilter, WantReplyView, WantView};
 
 const SEQ_KEY: &str = "seq";
@@ -149,6 +151,7 @@ pub(crate) struct State {
     series: HashMap<Id, Series>,
     /// The site-wide notice, once an admin has set one.
     announcement: Option<Announcement>,
+    bulletins: Vec<bulletins::Bulletin>,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
     inbox: Option<Id>,
 }
@@ -170,6 +173,8 @@ impl State {
                 st.inbox = Some(u64::from_le_bytes(v.try_into().unwrap()));
             } else if k == wants::ANNOUNCEMENT_KEY {
                 st.announcement = serde_json::from_slice(&v).ok();
+            } else if k == bulletins::BULLETINS_KEY {
+                st.bulletins = serde_json::from_slice(&v).unwrap_or_default();
             }
         }
         for n in snap.nodes {

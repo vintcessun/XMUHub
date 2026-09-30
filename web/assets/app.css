@@ -845,6 +845,9 @@ img.avatar { object-fit: cover; background: var(--surface-2); }
 .nav .bell .count { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .notice-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--line); }
 .notice-item:last-child { border-bottom: 0; }
+.bulletin { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bulletin:last-child { border-bottom: 0; }
+.bulletin.on { background: var(--navy-soft); border-radius: 8px; padding: 10px; }
 .notice-item.unread .ntext { font-weight: 600; }
 .notice-item.unread::before { content: ''; flex: none; width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--bad); }
 .notice-item.read::before { content: ''; flex: none; width: 8px; }

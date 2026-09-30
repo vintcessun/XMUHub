@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>隐私政策 · {{site.name}}</title>
+<meta name="description" content="{{site.description}}">
+<meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/assets/site/logo.png" type="image/png">
+<link rel="preload" href="/assets/site/background.jpg" as="image">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="privacy">
+<header id="top" class="top"></header>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
+<main><div class="wrap">
+  <section class="card" style="max-width:760px">
+    <h1>隐私政策</h1>
+    <p class="small muted">更新日期：2026 年 9 月 30 日</p>
+    <p>本政策说明{{site.name}}（以下称「本站」）收集哪些个人信息、怎么使用和保存、交给谁处理，以及你有哪些权利。注册账号前请仔细阅读；<b>注册即表示你同意本政策，并单独同意下文「委托处理与出境」中的个人信息出境</b>。不注册也可以浏览、搜索和下载资料。</p>
+
+    <h2>1 · 我们收集的信息</h2>
+    <ul>
+      <li><b>注册与登录</b>：邮箱、昵称、密码（只保存经 Argon2 加密的哈希，任何人都看不到原文）、注册时间与注册时的 IP 地址、最近登录时间；每次登录会记录登录 IP，并在你的浏览器里保存一个登录凭证（Cookie，本站只保存它的哈希），30 天后失效。</li>
+      <li><b>你提交的内容</b>：上传资料时填写的信息（文件名、课程、备注、合集）和上传记录，评分，收藏夹，求资料帖和回复，推荐的站外链接，头像，删除或修改申请。</li>
+      <li><b>投诉与反馈</b>：你写的内容、你留下的联系方式、提交时所在的页面和 IP 地址。不登录也可以提交。</li>
+      <li><b>访问日志</b>：服务器和 CDN 会记录访问者的 IP 地址、访问时间、访问的网址、浏览器标识和响应耗时，用于安全防护、排查故障，并按《网络安全法》的要求保存<b>不少于六个月</b>。</li>
+      <li><b>浏览器本地存储</b>：上传草稿、未发出的反馈、界面偏好（例如展开了哪些分类）只保存在你自己的浏览器里，本站看不到。</li>
+    </ul>
+    <p>本站不收集手机号、身份证号、学号、真实姓名、位置信息，也不使用第三方统计或广告追踪。</p>
+
+    <h2>2 · 用途</h2>
+    <ul>
+      <li>提供账号、上传、审核、收藏、站内提醒等功能，给你发送验证码邮件；</li>
+      <li>防止滥用和攻击：限制请求频率、识别异常注册、封禁违规账号或 IP；</li>
+      <li>处理侵权投诉和反馈，必要时联系你；</li>
+      <li>履行法律法规规定的义务，配合有关部门依法调查。</li>
+    </ul>
+    <p>我们不会把个人信息用于上述以外的目的，不出售、不出租，也不用于广告。</p>
+
+    <h2>3 · 谁能看到</h2>
+    <ul>
+      <li><b>邮箱</b>只有管理员能看到，任何情况下都不会公开。</li>
+      <li><b>昵称和上传记录</b>默认只有审核员和管理员能看到；你可以在「我的」页面选择在自己上传的资料上公开昵称。</li>
+      <li><b>头像</b>审核通过后对所有人可见；求资料帖和回复会显示昵称。</li>
+      <li><b>IP 地址和日志</b>只有管理员能查看，只用于安全防护。</li>
+    </ul>
+
+    <h2 id="processors">4 · 委托处理与出境</h2>
+    <p>本站由个人维护，下列服务商会为本站处理一部分信息：</p>
+    <ul>
+      <li><b>阿里云</b>（中国境内）：服务器与数据库；邮件推送服务用来发送验证码邮件（处理你的邮箱地址）。</li>
+      <li><b>Cloudflare</b>（境外，美国）：网站加速和安全防护，会处理所有访问者的 IP 地址和请求信息；用不常见的邮箱注册时，人机验证（Turnstile）也由它提供。</li>
+      <li><b>GitHub</b>（境外，美国）：资料文件和头像的存储；另外，本站数据库每天会备份一份到 GitHub 的<b>私有</b>仓库，保留 30 天，其中包含上面第 1 条里的账号信息（邮箱、昵称、密码哈希、IP 等），只有本站管理者能访问，用于数据丢失时恢复。</li>
+      <li><b>国内公共加速镜像</b>：下载或预览资料时，你的浏览器直接连接镜像网站，镜像会看到你的 IP 地址。</li>
+    </ul>
+    <p>以上境外处理是本站能正常运行、防护攻击和备份数据所必需的。你可以通过下文的方式向我们查询境外接收方的情况、行使你的权利。</p>
+
+    <h2>5 · 保存期限</h2>
+    <ul>
+      <li>账号信息在账号存在期间保存；注销后我们会删除或匿名化你的邮箱、昵称、头像和登录记录，数据库备份会在 30 天内轮换掉。</li>
+      <li>为了能恢复每一个审核决定，已上传资料的记录（不含你的邮箱）会一直保留。</li>
+      <li>投诉、反馈和访问日志保存不少于六个月，之后按需清理。</li>
+    </ul>
+
+    <h2>6 · 你的权利</h2>
+    <ul>
+      <li><b>查看和更正</b>：在「我的」页面查看账号信息、上传记录，修改昵称、头像和密码。</li>
+      <li><b>删除和注销</b>：在<a href="/feedback">意见反馈</a>里写明你的注册邮箱并申请注销（为确认是你本人，请登录后提交），我们会在 15 个工作日内处理。</li>
+      <li><b>撤回同意</b>：撤回同意等同于注销账号；不影响撤回前已经进行的处理。</li>
+      <li>对个人信息处理有任何疑问、投诉，也可以通过意见反馈或{{site.community}}联系我们，15 个工作日内答复。</li>
+    </ul>
+
+    <h2>7 · 安全</h2>
+    <p>全站使用 HTTPS 加密传输；密码只保存加密哈希；管理后台只有管理员能进入。万一发生个人信息泄露，我们会及时通过站内公告或邮件告诉你，并按规定向有关部门报告。</p>
+
+    <h2>8 · 未成年人</h2>
+    <p>本站面向在校大学生。不满 14 周岁的未成年人请不要注册账号。</p>
+
+    <h2>9 · 政策更新</h2>
+    <p>本政策有重大变化时，会在网站公告里提示。继续使用账号即表示你同意更新后的政策。</p>
+  </section>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script>try{var f=sessionStorage.getItem('ludao.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>
+<script type="module" src="/assets/pages/static.js"></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 /www/wwwlogs/xmu.vintces.icu.timing.log {
     daily
-    rotate 7
+    # 《网络安全法》第二十一条：网络日志留存不少于六个月。
+    rotate 190
     compress
     delaycompress
     missingok

@@ -20,6 +20,7 @@ function setMode(m) {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === m));
   $('#codebox').hidden = m === 'login';
   $('#nickbox').hidden = m !== 'register';
+  $('#consentbox').hidden = m !== 'register';
   $('#pw2box').hidden = m === 'login';
   $('#password2').required = m !== 'login';
   $('#pwlabel').textContent = m === 'login' ? '密码' : m === 'reset' ? '新密码（至少 8 位）' : '设置密码（至少 8 位）';
@@ -65,9 +66,17 @@ async function showCaptcha(sitekey) {
   });
 }
 
+/** Signing up needs the privacy policy agreed to first (before the address is even mailed). */
+function consented() {
+  if (mode !== 'register' || $('#consent').checked) return true;
+  toast('请先阅读并勾选同意使用须知和隐私政策', true);
+  return false;
+}
+
 async function sendCode() {
   const email = $('#email').value.trim();
   if (!email) return toast('请先填写邮箱', true);
+  if (!consented()) return;
   $('#sendcode').disabled = true;
   try {
     await api('/auth/code', { method: 'POST', body: { email, purpose: mode === 'reset' ? 'reset' : 'register', captcha: captchaToken } });
@@ -95,6 +104,7 @@ $('#f').onsubmit = async (e) => {
     $('#msg').innerHTML = '<div class="notice bad">两次输入的密码不一致</div>';
     return;
   }
+  if (!consented()) return;
   const body = { email: $('#email').value.trim(), password: $('#password').value };
   if (mode !== 'login') body.code = $('#code').value.trim();
   if (mode === 'register') body.nickname = $('#nickname').value.trim();

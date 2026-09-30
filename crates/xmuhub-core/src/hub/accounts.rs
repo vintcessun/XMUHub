@@ -52,7 +52,11 @@ pub fn needs_captcha(email: &str) -> bool {
 
 /// Names nobody but staff may pick: they would pass for the site or its staff.
 /// The site's own name (from the site config) is reserved as well.
-const RESERVED_NICKNAMES: &[&str] = &["管理员", "审核员", "站长", "官方", "客服", "admin", "administrator", "moderator", "system", "xmuhub"];
+/// Words that make a nickname pass for the site's staff, or for a school office or teacher.
+const RESERVED_NICKNAMES: &[&str] = &[
+    "管理员", "审核员", "站长", "官方", "客服", "admin", "administrator", "moderator", "system", "xmuhub",
+    "教务", "辅导员", "学院", "大学", "学校", "老师", "教师", "教授", "校长", "书记", "院长", "学工", "团委", "学生会", "保卫处",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CodePurpose {

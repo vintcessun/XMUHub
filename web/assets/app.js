@@ -118,6 +118,7 @@ export const SLOGAN = '让每一份资料都被需要它的人找到';
 export const REPO_URL = '{{site.repo}}';
 
 export const COMMUNITY = '{{site.community}}';
+const ICP = '{{site.icp}}';
 /** The site's name, for page titles. */
 export const SITE_NAME = '{{site.name}}';
 
@@ -318,7 +319,8 @@ export async function layout(active) {
     <span>{{site.footer}}</span>
     <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/collections">收藏夹</a> · <a href="/links">站外资源</a> · <a href="/stats">统计</a> · <a href="${REPO_URL}" rel="noopener">源代码（AGPL-3.0）</a> · 资料由用户上传，仅供个人学习交流</span>
     <span>本站服务器不存储任何资料文件。文件的上传、存储及下载由第三方服务提供商（GitHub 及国内公共加速镜像）完成，本站仅提供上传辅助、资源信息展示及第三方链接索引服务。<a href="/about#hosting">文件托管说明</a> · <a href="/about">免责声明</a> · <a href="/privacy">隐私政策</a></span>
-    <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内下架。<a href="/about#copyright">版权声明与侵权投诉</a></span></div>`;
+    <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），核实后我们会在 48 小时内下架。<a href="/about#copyright">版权声明与侵权投诉</a></span>
+    ${ICP ? `<span><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">${esc(ICP)}</a></span>` : ''}</div>`;
   feedbackButton(active !== 'feedback');
   topButton();
   announcement();

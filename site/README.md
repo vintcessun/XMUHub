@@ -33,6 +33,7 @@ site/<你的站>/
 | `repo` | 页面上「开源」链接指向的仓库，fork 的人填自己的 | https://github.com/your-name/XMUHub |
 | `mcp_name` | MCP 服务名（`claude mcp add … <mcp_name> …`） | example-hub |
 | `community` | 意见反馈旁边的交流群等联系方式，可以留空 | QQ 群：123456 |
+| `icp` | ICP 备案号，显示在每页底部并链接到工信部备案网站；境内服务器或域名必须填写，可以留空 | 闽ICP备2025000000号 |
 | `verified_domains` | 学校邮箱域名（含子域名），用它注册的账号显示认证标记，注册也不需要人机验证 | ["example.edu.cn"] |
 | `verified_label` | 认证标记的文字 | 某大认证 |
 | `link_example` | 「站外资源」推荐表单的名称示例 | 如 某某学院历年试卷合集 |

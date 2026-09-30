@@ -36,6 +36,9 @@ pub struct SiteConfig {
     /// A chat group or other contact shown next to 意见反馈; empty for none.
     #[serde(default)]
     pub community: String,
+    /// ICP 备案号 shown at the bottom of every page, linked to beian.miit.gov.cn; empty for none.
+    #[serde(default)]
+    pub icp: String,
     /// The school's email domains; addresses there count as 认证.
     #[serde(default)]
     pub verified_domains: Vec<String>,
@@ -101,6 +104,7 @@ impl Site {
             ("repo", &config.repo),
             ("mcp_name", &config.mcp_name),
             ("community", &config.community),
+            ("icp", &config.icp),
             ("verified_label", &config.verified_label),
             ("link_example", &config.link_example),
             ("verified_emails", &domains.join(" / ")),

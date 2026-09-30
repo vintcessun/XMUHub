@@ -10,6 +10,7 @@
   "repo": "https://github.com/your-name/XMUHub",
   "mcp_name": "example-hub",
   "community": "",
+  "icp": "",
   "verified_domains": ["example.edu.cn"],
   "verified_label": "某大认证",
   "link_example": "如 某某学院历年试卷合集",

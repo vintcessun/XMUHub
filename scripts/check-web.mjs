@@ -122,8 +122,8 @@ for (const f of scripts.filter((p) => p.startsWith(join(web, 'assets')))) {
 //  - pages and scripts use only known {{site.…}} keys;
 //  - no site's own words (name, school, domain, contact) are written into web/ or the code.
 
-const SITE_KEYS = ['name', 'subtitle', 'school', 'school_short', 'description', 'slogan', 'footer', 'domain', 'repo', 'mcp_name', 'community', 'verified_label', 'link_example', 'verified_emails'];
-const REQUIRED = SITE_KEYS.filter((k) => k !== 'community' && k !== 'verified_emails').concat(['announcement']);
+const SITE_KEYS = ['name', 'subtitle', 'school', 'school_short', 'description', 'slogan', 'footer', 'domain', 'repo', 'mcp_name', 'community', 'icp', 'verified_label', 'link_example', 'verified_emails'];
+const REQUIRED = SITE_KEYS.filter((k) => k !== 'community' && k !== 'icp' && k !== 'verified_emails').concat(['announcement']);
 const FORBIDDEN = /[<>"'`\\\n\r{}]/;
 const siteRoot = join(root, 'site');
 const sites = existsSync(siteRoot) ? readdirSync(siteRoot).filter((n) => existsSync(join(siteRoot, n, 'site.json'))) : [];
@@ -138,7 +138,7 @@ for (const name of sites) {
     const values = k === 'extra' ? Object.values(v || {}) : Array.isArray(v) ? v : [v];
     for (const x of values) if (typeof x === 'string' && FORBIDDEN.test(x)) fail(file, `"${k}" may not contain < > " ' \` \\ { } or line breaks`);
   }
-  for (const k of ['name', 'school', 'school_short', 'domain', 'community']) {
+  for (const k of ['name', 'school', 'school_short', 'domain', 'community', 'icp']) {
     if (typeof cfg[k] === 'string' && cfg[k].trim().length >= 2) ownWords.set(cfg[k].trim(), `${name}/site.json "${k}"`);
   }
   for (const d of cfg.verified_domains || []) ownWords.set(String(d).replace(/^@/, ''), `${name}/site.json verified_domains`);

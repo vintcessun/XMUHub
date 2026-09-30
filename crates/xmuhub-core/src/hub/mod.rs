@@ -10,6 +10,7 @@ mod batches;
 mod imports;
 mod inbox;
 mod links;
+mod missing;
 mod moves;
 mod queues;
 mod notices;
@@ -55,6 +56,7 @@ pub use collections::CollectionView;
 pub use purge::PurgeReport;
 pub use series::{SeriesItem, SeriesText, SeriesView};
 pub use links::LinkSuggestionView;
+pub use missing::{MissingTerm, missing_key};
 pub use moves::MoveSuggestionView;
 pub use notices::NoticeList;
 pub use stats_public::SiteStats;
@@ -158,6 +160,7 @@ pub(crate) struct State {
     /// The site-wide notice, once an admin has set one.
     announcement: Option<Announcement>,
     bulletins: Vec<bulletins::Bulletin>,
+    missing: missing::MissingMap,
     /// The hidden 「待整理」 node: listed nowhere, its files can't be approved in place.
     inbox: Option<Id>,
 }
@@ -181,6 +184,8 @@ impl State {
                 st.announcement = serde_json::from_slice(&v).ok();
             } else if k == bulletins::BULLETINS_KEY {
                 st.bulletins = serde_json::from_slice(&v).unwrap_or_default();
+            } else if k == missing::MISSING_KEY {
+                st.missing = serde_json::from_slice(&v).unwrap_or_default();
             }
         }
         for n in snap.nodes {

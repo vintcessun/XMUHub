@@ -454,6 +454,25 @@ const panels = {
       try { await api(`/move-suggestions/${it.dataset.id}/review`, { method: 'POST', body: { approve, reason } }); it.remove(); toast(approve ? '已移动' : '已处理'); } catch (err) { toast(err.message, true); }
     };
   },
+  async missing(box, show = 'new') {
+    const all = await api('/admin/missing');
+    const S = { new: '待处理', public: '已公开征集', hidden: '已隐藏' };
+    const list = all.filter((m) => m.status === show);
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学搜了但一条结果都没有的词（每人每天同一个词只算一次）。是本站缺的课程就「公开征集」，会列在<a href="/missing" target="_blank">缺资料的课程</a>页，有资料后自动从那里消失；乱码、小说游戏、不适合公开的就「隐藏」。标了「现在能搜到」的说明已经有资料或加了别名。</p>
+      <div class="tabs" style="margin-bottom:10px">${Object.entries(S).map(([k, v]) => `<button type="button" data-s="${k}" class="${k === show ? 'on' : ''}">${v} ${all.filter((m) => m.status === k).length}</button>`).join('')}</div>
+      ${list.length ? `<table class="table"><thead><tr><th>搜索词</th><th>人次</th><th>最近</th><th></th></tr></thead><tbody>
+      ${list.map((m) => `<tr data-term="${esc(m.term)}"><td><a href="/search?q=${encodeURIComponent(m.term)}" target="_blank">${esc(m.term)}</a>${m.found ? ' <span class="badge published">现在能搜到</span>' : ''}</td><td>${m.count}</td><td class="small faint">${ago(m.last)}</td>
+        <td class="row" style="gap:6px;justify-content:flex-end">${show !== 'public' ? '<button class="btn sm ok" data-to="public" type="button">公开征集</button>' : ''}${show !== 'hidden' ? '<button class="btn sm" data-to="hidden" type="button">隐藏</button>' : ''}${show !== 'new' ? '<button class="btn sm" data-to="new" type="button">撤回</button>' : ''}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="empty"><b>这里没有</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const tab = e.target.closest('[data-s]');
+      if (tab) { panels.missing(box, tab.dataset.s); return; }
+      const b = e.target.closest('[data-to]');
+      if (!b) return;
+      const tr = b.closest('[data-term]');
+      try { await api('/admin/missing/status', { method: 'POST', body: { term: tr.dataset.term, status: b.dataset.to } }); tr.remove(); toast('已更新'); } catch (err) { toast(err.message, true); }
+    };
+  },
   async collections(box) {
     const list = await api('/review/collections');
     box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学申请公开分享的收藏夹，通过后显示在<a href="/collections" target="_blank">收藏夹</a>页。看名字和说明是否合适（没有广告、联系方式、不当内容），点开看看里面的资料。不通过要写原因（本人能看到）。自己的收藏夹要由其他审核员审核。</p>
@@ -776,7 +795,7 @@ function purgeDialog(u, done) {
   };
 }
 
-const ADMIN_TABS = ['reports', 'feedback', 'log', 'users', 'announce'];
+const ADMIN_TABS = ['reports', 'feedback', 'log', 'users', 'announce', 'missing'];
 
 async function show(name) {
   if (!panels[name] || (ADMIN_TABS.includes(name) && me.level < 4)) name = 'dash';

@@ -44,6 +44,8 @@ pub struct App {
     pub script_token: Option<String>,
     pub secure_cookie: bool,
     pub github: Option<Arc<xmuhub_core::storage::github::GitHubBackend>>,
+    /// Searches that found nothing, already counted today, as "ip term" (see `search`).
+    pub missing_seen: parking_lot::Mutex<(i64, std::collections::HashSet<String>)>,
     /// `/api/tree` as sent, with the tree generation it was built from (see `Hub::tree_generation`).
     /// Every page that shows the tree asks for it; rebuilding it took ~9 ms at 2 000 courses.
     pub tree_json: parking_lot::Mutex<Option<(u64, bytes::Bytes)>>,
@@ -355,6 +357,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/move-suggestion", post(suggest_move))
         .route("/move-suggestions", get(move_suggestions))
         .route("/review/counts", get(review_counts))
+        .route("/missing", get(missing_public))
+        .route("/admin/missing", get(missing_admin).post(missing_import))
+        .route("/admin/missing/status", post(missing_status))
         .route("/move-suggestions/{id}/review", post(review_move_suggestion))
         .route("/announcement", put(set_announcement))
         .route("/bulletins", get(bulletins).post(post_bulletin))
@@ -756,7 +761,7 @@ struct SearchQ {
     page: Option<String>,
 }
 
-async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<Value>> {
+async fn search(State(app): S, auth: Auth, h: HeaderMap, Query(q): Query<SearchQ>) -> R<Json<Value>> {
     const PAGE: usize = 20;
     let courses_only = q.ty.as_deref() == Some("course");
     let filter = Filter {
@@ -780,6 +785,25 @@ async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<V
     // Off the two async worker threads: a search takes CPU time.
     let (hub, user, text) = (app.hub.clone(), auth.user.clone(), q.q.clone().unwrap_or_default());
     let (items, total) = blocking(move || hub.search(Viewer { user: user.as_ref() }, &text, filter, PAGE, (page - 1) * PAGE)).await?;
+    // A plain search that found nothing: what the site is missing (counted once per address
+    // per term per day, so reloading doesn't inflate it).
+    let plain = filter.within.is_none() && filter.level.is_none() && filter.tag.is_none();
+    if total == 0 && page == 1 && plain
+        && let Some(term) = xmuhub_core::hub::missing_key(q.q.as_deref().unwrap_or_default())
+    {
+        let day = xmuhub_core::model::now() / 86400;
+        let first = {
+            let mut seen = app.missing_seen.lock();
+            if seen.0 != day {
+                *seen = (day, Default::default());
+            }
+            seen.1.len() < 100_000 && seen.1.insert(format!("{} {term}", client_ip(&h)))
+        };
+        if first {
+            let hub = app.hub.clone();
+            let _ = blocking(move || hub.record_missing(&term, 1)).await;
+        }
+    }
     let items: Vec<Value> = items
         .iter()
         .map(|i| match i {
@@ -1434,6 +1458,62 @@ async fn suggest_move(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Js
     let user = auth.user.clone();
     let s = blocking(move || hub.suggest_move(Viewer { user: user.as_ref() }, id, b.node, &b.note)).await?;
     Ok(Json(json!(s)))
+}
+
+/// Whether a search for `term` finds anything now (the site may have got the material since).
+fn found_now(app: &App, term: &str) -> bool {
+    app.hub.search(Viewer { user: None }, term, Filter::default(), 1, 0).is_ok_and(|(_, total)| total > 0)
+}
+
+/// 缺资料的课程: the terms admins made public that still find nothing, most searched first.
+async fn missing_public(State(app): S) -> Response {
+    let app2 = app.clone();
+    let list = blocking(move || {
+        Ok(app2.hub.public_missing().into_iter().filter(|m| !found_now(&app2, &m.term)).take(100).map(|m| json!({ "term": m.term, "count": m.count, "last": m.last })).collect::<Vec<_>>())
+    })
+    .await
+    .unwrap_or_default();
+    let mut res = Json(json!(list)).into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("public, max-age=300"));
+    res
+}
+
+/// Admins: every counted term, with whether it finds something now.
+async fn missing_admin(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let list = app.hub.missing_terms(auth.viewer())?;
+    let app2 = app.clone();
+    let out = blocking(move || {
+        Ok(list.into_iter().take(500).map(|m| { let found = found_now(&app2, &m.term); json!({ "term": m.term, "count": m.count, "first": m.first, "last": m.last, "status": m.status, "found": found }) }).collect::<Vec<_>>())
+    })
+    .await?;
+    Ok(Json(json!(out)))
+}
+
+#[derive(Deserialize)]
+struct MissingStatusIn {
+    term: String,
+    status: String,
+}
+
+async fn missing_status(State(app): S, auth: Auth, Json(b): Json<MissingStatusIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.set_missing_status(Viewer { user: user.as_ref() }, &b.term, &b.status)).await?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct MissingImportIn {
+    terms: Vec<(String, u32)>,
+}
+
+/// Admins: adds counts from elsewhere (searches found in old access logs).
+async fn missing_import(State(app): S, auth: Auth, Json(b): Json<MissingImportIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let n = b.terms.len();
+    blocking(move || hub.import_missing(Viewer { user: user.as_ref() }, &b.terms)).await?;
+    Ok(Json(json!({ "ok": true, "terms": n })))
 }
 
 /// Pending items per review tab.

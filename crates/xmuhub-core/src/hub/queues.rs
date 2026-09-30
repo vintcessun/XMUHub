@@ -26,6 +26,7 @@ impl Hub {
         if viewer.user.is_some_and(|u| u.level == Level::Admin) {
             m.insert("reports", st.reports.values().filter(|r| !r.handled).count());
             m.insert("feedback", st.feedback.values().filter(|f| !f.handled).count());
+            m.insert("missing", st.missing.values().filter(|t| t.status == "new").count());
         }
         Ok(m)
     }

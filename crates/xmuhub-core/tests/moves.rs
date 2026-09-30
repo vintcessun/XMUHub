@@ -116,3 +116,35 @@ async fn review_tabs_count_what_waits_and_feedback_replies_reach_the_sender() {
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test]
+async fn empty_searches_are_counted_and_only_admins_publish_them() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-missing-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("files")).unwrap();
+    let h = open(&dir);
+    let admin = register(&h, "a@example.invalid", "admin");
+    let student = register(&h, "s@example.invalid", "student");
+    let (va, vs) = (Viewer { user: Some(&admin) }, Viewer { user: Some(&student) });
+
+    h.record_missing("  四史 ", 1).unwrap();
+    h.record_missing("四史", 1).unwrap();
+    h.record_missing("x", 1).unwrap();
+    assert!(h.import_missing(vs, &[("有限元".into(), 3)]).is_err(), "admins only");
+    h.import_missing(va, &[("有限元".into(), 3), ("社会与文化概论".into(), 5)]).unwrap();
+    assert!(h.missing_terms(vs).is_err());
+    let all = h.missing_terms(va).unwrap();
+    assert_eq!(all.iter().map(|m| (m.term.as_str(), m.count)).collect::<Vec<_>>(), vec![("社会与文化概论", 5), ("有限元", 3), ("四史", 2)], "one-character terms aren't kept");
+    assert!(h.public_missing().is_empty(), "nothing public until an admin says so");
+    assert_eq!(h.review_counts(va).unwrap()["missing"], 3);
+
+    assert!(h.set_missing_status(vs, "四史", "public").is_err());
+    h.set_missing_status(va, "四史", "public").unwrap();
+    h.set_missing_status(va, "有限元", "hidden").unwrap();
+    assert_eq!(h.public_missing().iter().map(|m| m.term.as_str()).collect::<Vec<_>>(), vec!["四史"]);
+    drop(h);
+    let h = open(&dir);
+    assert_eq!(h.public_missing().len(), 1, "kept across restarts");
+    drop(h);
+    let _ = std::fs::remove_dir_all(dir);
+}

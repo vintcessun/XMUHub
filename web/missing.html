@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>缺资料的课程 · {{site.name}}</title>
+<meta name="description" content="{{site.description}}">
+<meta name="theme-color" content="#14263a" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101d2d" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="{{site.logo}}">
+<link rel="apple-touch-icon" href="{{site.logo}}">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="preload" href="{{site.background}}" as="image">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body data-page="missing">
+<header id="top" class="top"></header>
+<script>try{var t=sessionStorage.getItem('ludao.top');if(t){document.getElementById('top').innerHTML=t;document.documentElement.classList.add('seen')}}catch(e){}</script>
+<main><div class="wrap" style="max-width:860px">
+  <div class="page-head"><div><h1>缺资料的课程</h1><div class="muted small">这些课程同学们搜过很多次，但本站还没有资料。你手里有往年试卷、笔记或课件的话，欢迎上传，帮到后面的同学；上传后这里会自动去掉。</div></div>
+    <div class="row"><a class="btn primary" href="/upload">上传资料</a></div></div>
+  <section class="card"><div class="list" id="mlist"><div class="skeleton"></div></div></section>
+  <p class="small faint">列表由管理员从「搜不到结果」的搜索里挑选公开，按搜索人次排序，每人每天同一个词只算一次。想要的课不在上面？在<a href="/feedback">意见反馈</a>告诉我们。</p>
+</div></main>
+<footer id="foot" class="foot"></footer>
+<script>try{var f=sessionStorage.getItem('ludao.foot');if(f)document.getElementById('foot').innerHTML=f}catch(e){}</script>
+<script type="module" src="/assets/pages/missing.js"></script>
+</body>
+</html>

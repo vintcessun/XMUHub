@@ -135,7 +135,7 @@ const ICON_ALIASES: [&str; 11] = [
     "assets/logo.png",
 ];
 /// Where the background and the home-page decorations lived before site/ (cached pages, links).
-const OLD_BACKGROUNDS: [&str; 1] = ["assets/xmu-campus-background.jpg"];
+const OLD_BACKGROUNDS: [&str; 4] = ["assets/xmu-campus-background.jpg", "assets/site/background.png", "assets/site/background.webp", "assets/site/background.jpeg"];
 const OLD_DECORATIONS: [&str; 2] = ["assets/nanqiang-youxue.png", "assets/benbu-weijia.png"];
 
 impl Site {

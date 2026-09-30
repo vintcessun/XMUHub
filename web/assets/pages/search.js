@@ -47,7 +47,8 @@ tree().then((t) => {
 const empty = (msg) => `<div class="empty">${msg}</div>`;
 /** Nothing found: the site may simply not have it yet — offer to fill the gap. */
 const missing = (what) => empty(`<b>没有找到「${esc(q)}」相关的${what}</b>换个关键词、课程简称或拼音首字母试试；如果本站确实还没有：
-  <div class="row" style="justify-content:center;margin-top:10px"><a class="btn primary sm" href="/upload">我有这门课的资料，去上传</a><a class="btn sm" href="/feedback?want=${encodeURIComponent(q)}">告诉我们缺这门课</a></div>`);
+  <div class="row" style="justify-content:center;margin-top:10px"><a class="btn primary sm" href="/upload">我有这门课的资料，去上传</a><a class="btn sm" href="/feedback?want=${encodeURIComponent(q)}">告诉我们缺这门课</a></div>
+  <p class="small faint" style="margin-top:10px">看看<a href="/missing">大家还在找哪些课</a></p>`);
 
 function pager(total, size) {
   const pages = Math.min(50, Math.ceil(total / size));

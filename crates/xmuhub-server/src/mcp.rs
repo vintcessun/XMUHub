@@ -1,7 +1,7 @@
 //! Model Context Protocol endpoint (`POST /mcp`, Streamable HTTP transport, JSON responses).
 //!
 //! Lets AI agents do what a person does on the site: search and browse, download, upload,
-//! rate, 求资料, and for reviewers / admins the review and admin pages. With a
+//! rate, and for reviewers / admins the review and admin pages. With a
 //! personal access token (`Authorization: Bearer xmh_…`, created on the 「我的」 page) the
 //! agent acts as the token's owner, with the owner's role.
 //!
@@ -130,20 +130,6 @@ fn tools(max_part: u64, max_file: u64) -> Value {
           "inputSchema": { "type": "object", "properties": { "id": id("资料 id"), "reason": { "type": "string" } }, "required": ["id", "reason"] } },
         { "name": "move_resources", "description": "审核员：把多份资料移到另一门课程（文件名随之更新）。",
           "inputSchema": { "type": "object", "properties": { "ids": { "type": "array", "items": { "type": "integer" } }, "node": id("目标课程 id") }, "required": ["ids", "node"] } },
-        { "name": "list_wants", "description": "求资料帖：status=open 求助中（默认）、found 已找到、mine 我发的、pending 待审核（审核员）。",
-          "inputSchema": { "type": "object", "properties": { "status": { "type": "string", "enum": ["open", "found", "mine", "pending"] }, "node": id("只看某门课") } } },
-        { "name": "get_want", "description": "一条求资料帖和它的回复。",
-          "inputSchema": { "type": "object", "properties": { "id": id("帖子 id") }, "required": ["id"] } },
-        { "name": "post_want", "description": "发求资料帖（审核通过后公开；需要令牌）。",
-          "inputSchema": { "type": "object", "properties": { "title": { "type": "string", "maxLength": 60 }, "body": { "type": "string", "maxLength": 500 }, "node": id("哪门课（选填）") }, "required": ["title"] } },
-        { "name": "reply_want", "description": "回复求资料帖，可以附上本站资料 id。",
-          "inputSchema": { "type": "object", "properties": { "id": id("帖子 id"), "body": { "type": "string", "maxLength": 500 }, "resource": id("资料 id（选填）") }, "required": ["id"] } },
-        { "name": "vote_want", "description": "「我也要」：on=true 加上，false 取消。",
-          "inputSchema": { "type": "object", "properties": { "id": id("帖子 id"), "on": { "type": "boolean" } }, "required": ["id", "on"] } },
-        { "name": "set_want_status", "description": "发帖人或审核员：标记已找到（可附资料 id）、关闭或重新打开。",
-          "inputSchema": { "type": "object", "properties": { "id": id("帖子 id"), "status": { "type": "string", "enum": ["found", "closed", "open"] }, "resource": id("找到的资料 id") }, "required": ["id", "status"] } },
-        { "name": "review_want", "description": "审核员：通过或驳回（要写原因）一条求资料帖。",
-          "inputSchema": { "type": "object", "properties": { "id": id("帖子 id"), "approve": { "type": "boolean" }, "note": { "type": "string" } }, "required": ["id", "approve"] } },
         { "name": "site_stats", "description": "公开统计：资料数、课程数、总下载量，下载最多/资料最多/近 30 天新增最多的课程，每周新增。",
           "inputSchema": { "type": "object", "properties": {} } },
         { "name": "follow_course", "description": "关注（on=true）或取消关注一门课程/学院；关注后有新资料审核通过会收到站内提醒（需要令牌）。",
@@ -209,14 +195,6 @@ const API: &[(&str, &str, &str)] = &[
     ("GET", "/uploads/{id}", "上传进度"),
     ("POST", "/uploads/{id}/parts/{index}", "确认分卷 {asset_id?}"),
     ("POST", "/uploads/{id}/parts/{index}/renew?via=relay", "换发送目标"),
-    ("GET", "/wants?status=open|found|mine|pending&node=", "求资料帖"),
-    ("POST", "/wants", "发帖 {title, body?, node?}"),
-    ("GET", "/wants/{id}", "帖子和回复"),
-    ("POST", "/wants/{id}/review", "审核员 {approve, note?}"),
-    ("POST", "/wants/{id}/status", "{status: found|closed|open, resource?}"),
-    ("PUT", "/wants/{id}/vote", "{on}"),
-    ("POST", "/wants/{id}/replies", "回复 {body?, resource?}"),
-    ("DELETE", "/want-replies/{id}", "删回复"),
     ("GET", "/stats", "公开统计：总数、下载最多/资料最多/近 30 天新增最多的课程、每周新增"),
     ("GET", "/notices?limit=", "我的站内提醒和未读数"),
     ("POST", "/notices/read", "标为已读 {id?}（不给 id 则全部）"),
@@ -565,32 +543,6 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ctx: &Ctx, ip: &str, name: &str,
         "move_resources" => {
             let body = json!({ "ids": a.get("ids").cloned().unwrap_or(json!([])), "node": arg_id(a, "node")? });
             call_api(app, ctx, "POST", "/resources/move", None, Some(&body)).await?
-        }
-        "list_wants" => {
-            let q = json!({ "status": Some(arg_str(a, "status")).filter(|s| !s.is_empty()).unwrap_or("open"), "node": a.get("node") });
-            call_api(app, ctx, "GET", "/wants", Some(&q), None).await?
-        }
-        "get_want" => call_api(app, ctx, "GET", &format!("/wants/{}", arg_id(a, "id")?), None, None).await?,
-        "post_want" => {
-            let body = json!({ "title": arg_str(a, "title"), "body": arg_str(a, "body"), "node": a.get("node") });
-            call_api(app, ctx, "POST", "/wants", None, Some(&body)).await?
-        }
-        "reply_want" => {
-            let body = json!({ "body": arg_str(a, "body"), "resource": a.get("resource") });
-            call_api(app, ctx, "POST", &format!("/wants/{}/replies", arg_id(a, "id")?), None, Some(&body)).await?
-        }
-        "vote_want" => {
-            let on = a.get("on").and_then(Value::as_bool).ok_or("缺少参数 on")?;
-            call_api(app, ctx, "PUT", &format!("/wants/{}/vote", arg_id(a, "id")?), None, Some(&json!({ "on": on }))).await?
-        }
-        "set_want_status" => {
-            let body = json!({ "status": arg_str(a, "status"), "resource": a.get("resource") });
-            call_api(app, ctx, "POST", &format!("/wants/{}/status", arg_id(a, "id")?), None, Some(&body)).await?
-        }
-        "review_want" => {
-            let approve = a.get("approve").and_then(Value::as_bool).ok_or("缺少参数 approve")?;
-            let body = json!({ "approve": approve, "note": arg_str(a, "note") });
-            call_api(app, ctx, "POST", &format!("/wants/{}/review", arg_id(a, "id")?), None, Some(&body)).await?
         }
         "site_stats" => call_api(app, ctx, "GET", "/stats", None, None).await?,
         "follow_course" => {

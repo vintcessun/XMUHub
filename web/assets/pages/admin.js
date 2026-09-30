@@ -410,23 +410,6 @@ const panels = {
       try { await api(`/admin/feedback/${it.dataset.id}/handle`, { method: 'POST', body: { note: it.querySelector('input').value } }); toast('已处理'); panels.feedback(box, all); } catch (err) { toast(err.message, true); }
     };
   },
-  async wants(box) {
-    const list = await api('/wants?status=pending');
-    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学发的「求资料」，通过后公开在<a href="/wants" target="_blank">求资料</a>页。只放学习资料的求助；留联系方式、买卖、广告、和学习无关的请驳回并写明原因（发帖人能看到）。</p>
-      ${list.length ? list.map((w) => `<div class="item" data-id="${w.id}"><div class="body">
-        <b>${esc(w.title)}</b>${w.body ? `<div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(w.body)}</div>` : ''}
-        <div class="meta">${w.node ? `<a href="/n/${w.node.id}" target="_blank">${esc(w.node.name)}</a>` : '<span>没选课程</span>'}<span>${avatar(w.author.avatar, w.author.nickname, 20)} ${esc(w.author.nickname)}</span><span>${ago(w.created_at)}</span></div>
-        <div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">通过</button><input class="input" placeholder="驳回原因（发帖人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">驳回</button></div>
-      </div></div>`).join('') : '<div class="empty"><b>没有待审核的求助</b></div>'}</section>`;
-    box.onclick = async (e) => {
-      const b = e.target.closest('[data-a]');
-      if (!b) return;
-      const it = b.closest('[data-id]');
-      const note = it.querySelector('input').value.trim();
-      if (b.dataset.a === 'no' && !note) return toast('写一下驳回原因', true);
-      try { await api(`/wants/${it.dataset.id}/review`, { method: 'POST', body: { approve: b.dataset.a === 'ok', note } }); it.remove(); toast(b.dataset.a === 'ok' ? '已通过' : '已驳回'); } catch (err) { toast(err.message, true); }
-    };
-  },
   async links(box) {
     const list = await api('/links/suggestions');
     const host = (u) => { try { return new URL(u).host; } catch { return ''; } };
@@ -731,8 +714,8 @@ function purgeDialog(u, done) {
     <ul class="small muted" style="margin:0 0 10px;padding-left:20px">
       <li>封禁账号，退出所有登录，作废他的 API 令牌</li>
       <li>他上传的 ${u.uploads} 份资料：待审的标为未通过，已公开的下架</li>
-      <li>评论、求资料的回复删除；他打的评分不再计入</li>
-      <li>求资料帖、合集提议、推荐的链接驳回；收藏夹取消公开；头像清掉</li></ul>
+      <li>他发过的评论和回复删除；他打的评分不再计入</li>
+      <li>合集提议、推荐的链接驳回；收藏夹取消公开；头像清掉</li></ul>
     <label class="field"><span>原因（资料和帖子上会显示给审核员和本人）</span><input class="input" id="pg_reason" maxlength="200" value="账号因滥用被封禁，内容已清理"></label>
     <label class="field"><span>确认：输入昵称「${esc(u.nickname)}」</span><input class="input" id="pg_confirm" autocomplete="off"></label>
     <div class="row"><button class="btn danger" id="pg_go" type="button">封禁并清理</button><span class="small faint" id="pg_msg"></span></div>`;

@@ -34,3 +34,4 @@ tower-http = { version = "0.7.1", features = ["cors", "trace", "limit"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 xmuhub-core = { version = "0.1.0", path = "../xmuhub-core" }
+imagesize = "0.15"

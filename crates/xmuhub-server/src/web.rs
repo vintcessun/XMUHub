@@ -18,6 +18,7 @@ use base64::Engine;
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 
+#[derive(Clone)]
 pub struct Asset {
     mime: &'static str,
     raw: Bytes,
@@ -113,10 +114,29 @@ fn mime_of(path: &str) -> &'static str {
         "ico" => "image/x-icon",
         "woff2" => "font/woff2",
         "txt" => "text/plain; charset=utf-8",
+        "webmanifest" => "application/manifest+json",
         "wasm" => "application/wasm",
         _ => "application/octet-stream",
     }
 }
+
+/// Icon names asked for without any page linking them, plus the logo's old path.
+const ICON_ALIASES: [&str; 11] = [
+    "favicon.ico",
+    "favicon.png",
+    "favicon-32x32.png",
+    "favicon-96x96.png",
+    "apple-touch-icon.png",
+    "apple-touch-icon-precomposed.png",
+    "apple-touch-icon-120x120.png",
+    "apple-touch-icon-120x120-precomposed.png",
+    "android-chrome-192x192.png",
+    "android-chrome-512x512.png",
+    "assets/logo.png",
+];
+/// Where the background and the home-page decorations lived before site/ (cached pages, links).
+const OLD_BACKGROUNDS: [&str; 1] = ["assets/xmu-campus-background.jpg"];
+const OLD_DECORATIONS: [&str; 2] = ["assets/nanqiang-youxue.png", "assets/benbu-weijia.png"];
 
 impl Site {
     pub fn load(dir: &Path, site: &crate::site::Site) -> anyhow::Result<Site> {
@@ -170,6 +190,19 @@ impl Site {
             let key = keys.get(&rel).cloned().unwrap_or_default();
             let vendor = rel.starts_with("vendor/");
             files.insert(rel, Asset { mime, raw: Bytes::from(raw), br, gz, etag, key, vendor });
+        }
+        // Names browsers and bots ask for by habit (favicon.ico, apple-touch-icon.png …) and paths
+        // older versions of the site served: answered with the current picture, not a 404.
+        for (target, aliases) in [("logo", ICON_ALIASES.as_slice()), ("background", OLD_BACKGROUNDS.as_slice())] {
+            let Some(a) = site.var(target).and_then(|p| files.get(p.trim_start_matches('/'))).cloned() else { continue };
+            for alias in aliases {
+                files.entry(alias.to_string()).or_insert_with(|| Asset { key: String::new(), ..a.clone() });
+            }
+        }
+        if let Some(a) = files.get("assets/site/home-left.png").cloned() {
+            for alias in OLD_DECORATIONS {
+                files.entry(alias.to_string()).or_insert_with(|| Asset { key: String::new(), ..a.clone() });
+            }
         }
         tracing::info!(files = files.len(), bytes = total, inline_scripts = script_hashes.len(), "static site loaded");
         let csp = HeaderValue::from_str(&build_csp(&script_hashes))?;

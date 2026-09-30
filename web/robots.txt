@@ -1,0 +1,10 @@
+# Pages anyone can read may be indexed; account, admin and API addresses may not.
+User-agent: *
+Disallow: /api/
+Disallow: /mcp
+Disallow: /admin
+Disallow: /me
+Disallow: /login
+Disallow: /upload
+Disallow: /notices
+Disallow: /d/

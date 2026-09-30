@@ -70,13 +70,14 @@ pub fn get() -> &'static Site {
 const IMAGES: [&str; 2] = ["logo", "background"];
 const IMAGE_TYPES: [&str; 5] = ["webp", "png", "jpg", "jpeg", "svg"];
 
-/// `/assets/site/<stem>.<ext>`: the site folder's own picture, else the generic one in `web/`.
-fn site_image(stem: &str, site_dir: &Path, web_dir: &Path) -> anyhow::Result<String> {
+/// `/assets/site/<stem>.<ext>` and the file: the site folder's own picture, else the generic
+/// one in `web/`.
+fn site_image(stem: &str, site_dir: &Path, web_dir: &Path) -> anyhow::Result<(String, PathBuf)> {
     for root in [site_dir, web_dir] {
         let found: Vec<&str> = IMAGE_TYPES.iter().copied().filter(|ext| root.join("assets/site").join(format!("{stem}.{ext}")).is_file()).collect();
         match found.as_slice() {
             [] => continue,
-            [ext] => return Ok(format!("/assets/site/{stem}.{ext}")),
+            [ext] => return Ok((format!("/assets/site/{stem}.{ext}"), root.join("assets/site").join(format!("{stem}.{ext}")))),
             more => anyhow::bail!("{}: more than one {stem} picture ({}), keep one", root.join("assets/site").display(), more.join(", ")),
         }
     }
@@ -134,8 +135,21 @@ impl Site {
         // The logo and background may be any picture format: pages say {{site.logo}} and
         // {{site.background}}, which become the file actually there.
         for stem in IMAGES {
-            vars.insert(stem.to_string(), site_image(stem, dir, web_dir)?);
+            let (url, _) = site_image(stem, dir, web_dir)?;
+            vars.insert(stem.to_string(), url);
         }
+        // The web app manifest describes the logo (browsers want its size and type).
+        let (logo, file) = site_image("logo", dir, web_dir)?;
+        let svg = logo.ends_with(".svg");
+        let size = if svg { "any".to_string() } else { imagesize::size(&file).map(|s| format!("{}x{}", s.width, s.height)).map_err(|e| anyhow::anyhow!("{}: {e}", file.display()))? };
+        let mime = match logo.rsplit('.').next() {
+            Some("png") => "image/png",
+            Some("webp") => "image/webp",
+            Some("svg") => "image/svg+xml",
+            _ => "image/jpeg",
+        };
+        vars.insert("logo_size".into(), size);
+        vars.insert("logo_type".into(), mime.into());
         for (k, v) in &vars {
             if let Some(c) = v.chars().find(|c| FORBIDDEN.contains(c)) {
                 anyhow::bail!("{}: `{k}` may not contain {c:?}", path.display());
@@ -149,6 +163,11 @@ impl Site {
         let _ = SITE.set(Site { dir: dir.to_path_buf(), config, vars });
         tracing::info!(site = %dir.display(), name = %get().config.name, "site loaded");
         Ok(get())
+    }
+
+    /// A placeholder's value (`logo` → `/assets/site/logo.png` …).
+    pub fn var(&self, key: &str) -> Option<&str> {
+        self.vars.get(key).map(String::as_str)
     }
 
     /// Replaces every `{{site.<key>}}` in a text file. An unknown key is an error, so a typo
@@ -203,12 +222,12 @@ mod tests {
         }
         std::fs::write(web.join("assets/site/background.jpg"), b"x").unwrap();
         std::fs::write(web.join("assets/site/logo.png"), b"x").unwrap();
-        assert_eq!(site_image("background", &site, &web).unwrap(), "/assets/site/background.jpg", "the generic one by default");
+        assert_eq!(site_image("background", &site, &web).unwrap().0, "/assets/site/background.jpg", "the generic one by default");
         std::fs::write(site.join("assets/site/background.png"), b"x").unwrap();
-        assert_eq!(site_image("background", &site, &web).unwrap(), "/assets/site/background.png", "the site's own wins");
+        assert_eq!(site_image("background", &site, &web).unwrap().0, "/assets/site/background.png", "the site's own wins");
         std::fs::write(site.join("assets/site/background.webp"), b"x").unwrap();
         assert!(site_image("background", &site, &web).is_err(), "two of them is a mistake");
-        assert_eq!(site_image("logo", &site, &web).unwrap(), "/assets/site/logo.png");
+        assert_eq!(site_image("logo", &site, &web).unwrap().0, "/assets/site/logo.png");
         assert!(site_image("missing", &site, &web).is_err());
         let _ = std::fs::remove_dir_all(root);
     }

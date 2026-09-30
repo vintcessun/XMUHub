@@ -575,7 +575,12 @@ async function hashQueue() {
 
 // ---------------------------------------------------------------- upload
 
-async function uploadRow(r, bar, base, total) {
+/** Files sent at once. One connection from a campus network to the upload Worker carries
+ * about 1 MB/s (measured from the server log, 2026-09-30); several side by side add up. */
+const PARALLEL = 3;
+
+/** `progress(bytes)`: how much of this file has been sent so far. */
+async function uploadRow(r, progress) {
   while (!r.parts) await new Promise((res) => setTimeout(res, 300));
   const f = r.file;
   r.status = '正在准备…';
@@ -602,9 +607,7 @@ async function uploadRow(r, bar, base, total) {
           r.status = plan.parts.length > 1 ? `上传第 ${pp.index + 1} / ${plan.parts.length} 卷…` : '上传中…';
           updateRow(state.rows.indexOf(r));
           if (attempt > 0) target = await renewTarget(plan.upload_id, pp.index, target);
-          const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => {
-            bar.style.width = `${Math.round(((base + sent + n) / total) * 100)}%`;
-          });
+          const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => progress(sent + n));
           await api(`/uploads/${plan.upload_id}/parts/${pp.index}`, { method: 'POST', body: { asset_id: receipt.id ?? null } });
           break;
         } catch (err) {
@@ -719,21 +722,29 @@ $('#submit').onclick = async () => {
   $('#submit').disabled = true;
   $('#prog').hidden = false;
   const bar = $('#prog').firstElementChild;
-  const total = todo.reduce((s, r) => s + r.file.size, 0);
-  let base = 0;
+  const total = todo.reduce((s, r) => s + r.file.size, 0) || 1;
+  const sentOf = new Map();
+  const paint = () => { bar.style.width = `${Math.round(([...sentOf.values()].reduce((a, b) => a + b, 0) / total) * 100)}%`; };
   let ok = 0;
-  for (const r of todo) {
-    r.err = false;
-    try {
-      await uploadRow(r, bar, base, total);
-      ok++;
-    } catch (err) {
-      r.err = true;
-      r.status = esc(err.message);
+  let next = 0;
+  // A few files at a time, each taking the next one in the list when it is done.
+  const lane = async () => {
+    while (next < todo.length) {
+      const r = todo[next++];
+      r.err = false;
+      try {
+        await uploadRow(r, (n) => { sentOf.set(r, n); paint(); });
+        ok++;
+      } catch (err) {
+        r.err = true;
+        r.status = esc(err.message);
+      }
+      sentOf.set(r, r.file.size);
+      paint();
+      updateRow(state.rows.indexOf(r));
     }
-    base += r.file.size;
-    updateRow(state.rows.indexOf(r));
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(PARALLEL, todo.length) }, lane));
   bar.style.width = '100%';
   state.busy = false;
   $('#submit').disabled = false;

@@ -36,6 +36,12 @@
         <label class="field"><span>新密码（至少 8 位）</span><input class="input" id="newpw" type="password" autocomplete="new-password"></label>
         <label class="field"><span>再次输入新密码</span><input class="input" id="newpw2" type="password" autocomplete="new-password"></label>
         <button class="btn">修改</button></form></section>
+      <section class="card"><h3>注销账号</h3>
+        <p class="small muted" style="margin-top:0">注销后会删除你的邮箱、昵称、密码、注册 IP、头像和登录记录，收藏夹不再公开，所有设备退出登录，且<b>无法恢复</b>。你上传的资料会保留，但不再显示你的昵称。同一个邮箱之后可以重新注册（是一个全新的账号）。</p>
+        <form id="delf">
+          <label class="field"><span>输入密码确认</span><input class="input" id="delpw" type="password" autocomplete="current-password"></label>
+          <label class="row small" style="gap:8px;flex-wrap:nowrap;margin-bottom:10px"><input type="checkbox" id="delok"><span>我确认注销，并知道无法恢复</span></label>
+          <button class="btn danger">注销账号</button></form></section>
     </aside>
   </div>
   <section class="card" id="tokens" style="margin-top:20px">

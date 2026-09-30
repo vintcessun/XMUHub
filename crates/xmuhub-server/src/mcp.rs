@@ -252,9 +252,9 @@ const API: &[(&str, &str, &str)] = &[
     ("POST", "/admin/thumbs", "管理员：生成缩略图"),
 ];
 
-/// Paths `call_api` refuses: signing in / up and minting tokens stay on the website, and the
+/// Paths `call_api` refuses: signing in / up, minting tokens and deleting the account stay on the website, and the
 /// byte endpoints are the upload targets' business, not JSON calls.
-const DENIED: &[&str] = &["/auth/", "/me/tokens", "/relay/", "/local/"];
+const DENIED: &[&str] = &["/auth/", "/me/tokens", "/me/delete", "/relay/", "/local/"];
 
 /// What the tools need from the MCP request itself.
 struct Ctx {
@@ -664,7 +664,7 @@ mod tests {
     fn api_paths_are_checked() {
         assert_eq!(api_path("/resources/1", None).unwrap(), "/api/resources/1");
         assert_eq!(api_path("/api/wants?status=open", Some(&json!({ "node": 7, "q": "数据 结构" }))).unwrap(), "/api/wants?status=open&node=7&q=%E6%95%B0%E6%8D%AE%20%E7%BB%93%E6%9E%84");
-        for bad in ["/auth/login", "/me/tokens", "/me/tokens/3", "/api/relay/upload?t=x", "/local/file/a", "/../mcp", "resources", "//x"] {
+        for bad in ["/auth/login", "/me/tokens", "/me/delete", "/me/tokens/3", "/api/relay/upload?t=x", "/local/file/a", "/../mcp", "resources", "//x"] {
             assert!(api_path(bad, None).is_err(), "{bad}");
         }
         assert!(api_path("/me", None).is_ok());

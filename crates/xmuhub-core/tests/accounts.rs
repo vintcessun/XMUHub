@@ -77,3 +77,32 @@ fn accounts_and_tokens() {
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn deleting_an_account_erases_who_it_was() {
+    let dir = std::env::temp_dir().join(format!("xmuhub-delete-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let h = hub(&dir);
+    let a = register(&h, "a@x.com", "admin");
+    let b = register(&h, "b@x.com", "bob");
+    let (_, session) = h.login("b@x.com", &test_password(), "2.2.2.2").map(|(s, u)| (u, s)).unwrap();
+    let (token, _) = h.create_token(Viewer { user: Some(&b) }, "agent").unwrap();
+
+    // The password is checked, and admins must leave the list first.
+    assert!(h.delete_account(&b, &common::other_test_password()).is_err());
+    assert!(h.delete_account(&a, &test_password()).is_err());
+
+    h.delete_account(&b, &test_password()).unwrap();
+    let gone = h.user(b.id).unwrap();
+    assert!(gone.banned && gone.password.is_empty() && gone.created_ip.is_empty());
+    assert!(!gone.email.contains("b@x.com") && gone.nickname != "bob");
+    assert!(h.session_user(&session).is_none());
+    assert!(h.token_user(&token).is_none());
+    assert!(h.login("b@x.com", &test_password(), "2.2.2.2").is_err());
+
+    // The address can sign up again, as a new account.
+    let again = register(&h, "b@x.com", "bob2");
+    assert_ne!(again.id, b.id);
+    let _ = std::fs::remove_dir_all(dir);
+}

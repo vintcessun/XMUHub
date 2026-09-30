@@ -304,6 +304,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/me", get(me).patch(update_me))
         .route("/me/tokens", get(list_tokens).post(create_token))
         .route("/me/avatar", post(set_avatar).delete(clear_avatar))
+        .route("/me/delete", post(delete_account))
         .route("/inbox", post(inbox))
         .route("/me/tokens/{id}", axum::routing::delete(revoke_token))
         .route("/auth/code", post(send_code))
@@ -516,6 +517,22 @@ async fn logout(State(app): S, auth: Auth) -> R<Response> {
         let hub = app.hub.clone();
         blocking(move || hub.logout(&s)).await?;
     }
+    let mut res = Json(json!({ "ok": true })).into_response();
+    res.headers_mut().insert(header::SET_COOKIE, session_cookie(&app, "", 0));
+    res.headers_mut().append(header::SET_COOKIE, legacy_cookie_gone());
+    Ok(res)
+}
+
+#[derive(Deserialize)]
+struct DeleteAccountIn {
+    password: String,
+}
+
+/// 注销账号 (see `Hub::delete_account`); signs the browser out too.
+async fn delete_account(State(app): S, auth: Auth, Json(b): Json<DeleteAccountIn>) -> R<Response> {
+    let me = auth.require()?.clone();
+    let hub = app.hub.clone();
+    blocking(move || hub.delete_account(&me, &b.password)).await?;
     let mut res = Json(json!({ "ok": true })).into_response();
     res.headers_mut().insert(header::SET_COOKIE, session_cookie(&app, "", 0));
     res.headers_mut().append(header::SET_COOKIE, legacy_cookie_gone());

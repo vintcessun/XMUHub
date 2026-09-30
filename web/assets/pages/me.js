@@ -69,6 +69,18 @@ pwToggle($('#oldpw'), $('#newpw'), $('#newpw2'));
     } catch (err) { toast(err.message, true); }
   };
 
+  $('#delf').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!$('#delok').checked) return toast('请先勾选确认', true);
+    if (!$('#delpw').value) return toast('请输入密码', true);
+    try {
+      await api('/me/delete', { method: 'POST', body: { password: $('#delpw').value } });
+      forgetMe();
+      toast('账号已注销');
+      setTimeout(() => location.replace('/'), 1200);
+    } catch (err) { toast(err.message, true); }
+  };
+
   loadTokens();
   $('#tf').onsubmit = async (e) => {
     e.preventDefault();

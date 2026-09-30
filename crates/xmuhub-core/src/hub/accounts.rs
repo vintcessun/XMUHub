@@ -570,6 +570,48 @@ impl Hub {
         })
     }
 
+    /// 注销账号: the owner (password re-entered) erases what identifies them: email, nickname,
+    /// password, sign-up IP, avatar, sessions and tokens; the nickname is no longer shown on
+    /// their files and their collections turn private. The account id stays (files, review
+    /// records and ratings point at it) but can never sign in again; the address is free to
+    /// register afresh. Admins are defined by the list, so they ask to be taken off it first.
+    pub fn delete_account(&self, me: &User, password: &str) -> Result<()> {
+        if me.level == Level::Admin {
+            return Err(bad("管理员请先让其他管理员把你移出管理员名单，再注销"));
+        }
+        {
+            let _slot = self.auth.hash_slot()?;
+            if !verify_password(password, &me.password) {
+                return Err(bad("密码不正确"));
+            }
+        }
+        self.mutate(|st, tx| {
+            let mut u = st.users.get(&me.id).cloned().ok_or(Error::NotFound("用户"))?;
+            st.user_by_email.remove(&u.email);
+            u.email = format!("deleted-{}@deleted.invalid", u.id);
+            u.nickname = "已注销用户".into();
+            u.password = String::new();
+            u.created_ip = String::new();
+            u.banned = true;
+            st.put_user(tx, u)?;
+            Self::drop_sessions(st, tx, me.id, None)?;
+            Self::drop_tokens(st, tx, me.id)?;
+            if let Some(a) = st.avatars.get_mut(&me.id) {
+                a.current.clear();
+                a.pending.clear();
+                tx.put_avatar(a)?;
+            }
+            if st.public_uploaders.remove(&me.id) {
+                tx.put_public_uploader(me.id, false)?;
+            }
+            for c in st.collections.values_mut().filter(|c| c.user == me.id && c.status != "private") {
+                c.status = "private".into();
+                tx.put_collection(c)?;
+            }
+            Ok(())
+        })
+    }
+
     // ------------------------------------------------------------ roles
 
     pub fn users(&self, actor: Viewer, q: &str) -> Result<Vec<User>> {

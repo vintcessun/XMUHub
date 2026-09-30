@@ -3,7 +3,7 @@ import { ago, api, esc, fmtDate, layout, linkify, loginUrl, pathText, setBell, t
 // 站内提醒: the admins' 公告 on top, then new files where the reader follows and decisions on
 // what they submitted. Opening one marks it read. Below: the courses they follow.
 
-const KIND = { bulletin: '公告', course: '关注', approved: '审核', upload: '审核', want: '求资料', link: '站外资源', question: '提问', avatar: '头像', change: '申请', collection: '收藏夹' };
+const KIND = { bulletin: '公告', move: '分类建议', course: '关注', approved: '审核', upload: '审核', want: '求资料', link: '站外资源', question: '提问', avatar: '头像', change: '申请', collection: '收藏夹' };
 
 async function load() {
   let d;

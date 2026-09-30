@@ -10,6 +10,7 @@ mod batches;
 mod imports;
 mod inbox;
 mod links;
+mod moves;
 mod notices;
 mod collections;
 mod series;
@@ -53,6 +54,7 @@ pub use collections::CollectionView;
 pub use purge::PurgeReport;
 pub use series::{SeriesItem, SeriesText, SeriesView};
 pub use links::LinkSuggestionView;
+pub use moves::MoveSuggestionView;
 pub use notices::NoticeList;
 pub use stats_public::SiteStats;
 pub use bulletins::Bulletin;
@@ -144,6 +146,7 @@ pub(crate) struct State {
     /// want → users who said 「我也要」
     want_votes: HashMap<Id, HashSet<Id>>,
     link_suggestions: HashMap<Id, LinkSuggestion>,
+    move_suggestions: HashMap<Id, MoveSuggestion>,
     /// node → users following it, and user → nodes they follow
     followers: HashMap<Id, HashSet<Id>>,
     following: HashMap<Id, HashSet<Id>>,
@@ -238,6 +241,7 @@ impl State {
         }
         st.collections = snap.collections.into_iter().map(|c| (c.id, c)).collect();
         st.series = snap.series.into_iter().map(|s| (s.id, s)).collect();
+        st.move_suggestions = snap.move_suggestions.into_iter().map(|s| (s.id, s)).collect();
         for (want, user) in snap.want_votes {
             st.want_votes.entry(want).or_default().insert(user);
         }

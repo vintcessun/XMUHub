@@ -433,6 +433,27 @@ const panels = {
       try { await api(`/links/suggestions/${it.dataset.id}/review`, { method: 'POST', body }); it.remove(); toast(approve ? '已加入站外资源' : '已处理'); } catch (err) { toast(err.message, true); }
     };
   },
+  async moves(box) {
+    const list = await api('/move-suggestions');
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学认为资料放错了课程，建议移到别处。打开资料看一下，对的就「采纳并移动」（文件名会跟着新课程改），不对就写原因不采纳；提建议的人会在站内提醒里看到结果。</p>
+      ${list.length ? list.map((s) => `<div class="item" data-id="${s.id}"><div class="body">
+        <a class="title" href="/r/${s.resource}" target="_blank">${esc(s.title || `#${s.resource}`)}</a>
+        <div class="small" style="margin:4px 0"><a href="/n/${s.from_id}" target="_blank">${esc(s.from)}</a> → <b><a href="/n/${s.to_id}" target="_blank">${esc(s.to)}</a></b></div>
+        ${s.note ? `<div class="note">${esc(s.note)}</div>` : ''}
+        <div class="meta"><span>${avatar(s.by.avatar, s.by.nickname, 20)} ${esc(s.by.nickname)} 建议</span><span>${ago(s.created_at)}</span></div>
+        ${s.mine ? '<p class="small faint">这是你提的建议，要由其他审核员处理。</p>' : `<div class="row" style="margin-top:8px"><button class="btn sm ok" data-a="ok" type="button">采纳并移动</button>
+          <input class="input" placeholder="不采纳的原因（提建议的人能看到）" maxlength="200" style="max-width:300px;min-height:30px;padding:3px 8px"><button class="btn sm danger" data-a="no" type="button">不采纳</button></div>`}
+      </div></div>`).join('') : '<div class="empty"><b>没有待处理的分类建议</b></div>'}</section>`;
+    box.onclick = async (e) => {
+      const b = e.target.closest('[data-a]');
+      if (!b) return;
+      const it = b.closest('[data-id]');
+      const approve = b.dataset.a === 'ok';
+      const reason = it.querySelector('input').value.trim();
+      if (!approve && !reason) return toast('写一下不采纳的原因', true);
+      try { await api(`/move-suggestions/${it.dataset.id}/review`, { method: 'POST', body: { approve, reason } }); it.remove(); toast(approve ? '已移动' : '已处理'); } catch (err) { toast(err.message, true); }
+    };
+  },
   async collections(box) {
     const list = await api('/review/collections');
     box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学申请公开分享的收藏夹，通过后显示在<a href="/collections" target="_blank">收藏夹</a>页。看名字和说明是否合适（没有广告、联系方式、不当内容），点开看看里面的资料。不通过要写原因（本人能看到）。自己的收藏夹要由其他审核员审核。</p>

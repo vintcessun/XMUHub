@@ -146,6 +146,22 @@ $('#dl').onclick = async () => {
   }
 };
 
+// 建议换个分类: pick the right course; a reviewer moves the file after checking.
+$('#suggestmove').onclick = async (e) => {
+  e.preventDefault();
+  const user = await mePromise;
+  if (!user) { location.href = loginUrl(); return; }
+  const picked = await pickFromTree('这份资料应该放在哪门课程');
+  if (!picked) return;
+  const note = prompt(`建议移到「${picked.path.map((n) => n.name).concat(picked.node.name).join(' / ')}」。
+可以说一下原因（选填）：`);
+  if (note === null) return;
+  try {
+    await api(`/resources/${id}/move-suggestion`, { method: 'POST', body: { node: picked.node.id, note } });
+    toast('已提交，审核员确认后会移过去，结果会在站内提醒里告诉你');
+  } catch (err) { toast(err.message, true); }
+};
+
 $('#report').onclick = async (e) => {
   e.preventDefault();
   const user = await mePromise;

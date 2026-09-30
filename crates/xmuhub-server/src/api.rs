@@ -352,6 +352,9 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/links/{id}", axum::routing::patch(update_link).delete(delete_link))
         .route("/links/suggestions", get(link_suggestions).post(suggest_link))
         .route("/links/suggestions/{id}/review", post(review_link_suggestion))
+        .route("/resources/{id}/move-suggestion", post(suggest_move))
+        .route("/move-suggestions", get(move_suggestions))
+        .route("/move-suggestions/{id}/review", post(review_move_suggestion))
         .route("/announcement", put(set_announcement))
         .route("/bulletins", get(bulletins).post(post_bulletin))
         .route("/bulletins/{id}", axum::routing::delete(delete_bulletin))
@@ -1415,6 +1418,41 @@ async fn suggest_link(State(app): S, auth: Auth, Json(b): Json<SuggestLinkIn>) -
     let user = auth.user.clone();
     let s = blocking(move || hub.suggest_link(Viewer { user: user.as_ref() }, &b.title, &b.url, &b.note)).await?;
     Ok(Json(json!(s)))
+}
+
+#[derive(Deserialize)]
+struct SuggestMoveIn {
+    node: Id,
+    #[serde(default)]
+    note: String,
+}
+
+/// 建议换个分类 (see `Hub::suggest_move`).
+async fn suggest_move(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<SuggestMoveIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let s = blocking(move || hub.suggest_move(Viewer { user: user.as_ref() }, id, b.node, &b.note)).await?;
+    Ok(Json(json!(s)))
+}
+
+/// Staff: the move suggestions waiting for review. Anyone else: their own.
+async fn move_suggestions(State(app): S, auth: Auth) -> R<Json<Value>> {
+    Ok(Json(json!(app.hub.move_suggestions(auth.viewer())?)))
+}
+
+#[derive(Deserialize)]
+struct MoveReviewIn {
+    approve: bool,
+    /// Why it's turned down.
+    #[serde(default)]
+    reason: String,
+}
+
+async fn review_move_suggestion(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<MoveReviewIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    blocking(move || hub.review_move_suggestion(Viewer { user: user.as_ref() }, id, b.approve, &b.reason)).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// Staff: the suggestions waiting for review. Anyone else: their own.

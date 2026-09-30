@@ -48,6 +48,7 @@ pub const NOTICES: TableDefinition<u64, &[u8]> = TableDefinition::new("notices")
 pub const COLLECTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("collections");
 /// id → Series (合集).
 pub const SERIES: TableDefinition<u64, &[u8]> = TableDefinition::new("series");
+pub const MOVE_SUGGESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("move_suggestions");
 /// id → LinkSuggestion (a 站外资源 link waiting for a reviewer, or its outcome).
 pub const LINK_SUGGESTIONS: TableDefinition<u64, &[u8]> = TableDefinition::new("link_suggestions");
 /// id → Want (a 求资料 post).
@@ -110,6 +111,7 @@ pub struct Snapshot {
     pub notices: Vec<Notice>,
     pub collections: Vec<Collection>,
     pub series: Vec<Series>,
+    pub move_suggestions: Vec<MoveSuggestion>,
 }
 
 fn rating_key(resource: Id, user: Id) -> [u8; 16] {
@@ -156,6 +158,7 @@ impl Db {
         txn.open_table(NOTICES)?;
         txn.open_table(COLLECTIONS)?;
         txn.open_table(SERIES)?;
+        txn.open_table(MOVE_SUGGESTIONS)?;
         txn.open_table(THUMBS)?;
         txn.commit()?;
         Ok(Db { inner })
@@ -256,6 +259,9 @@ impl Db {
         for row in txn.open_table(SERIES)?.iter()? {
             snap.series.push(decode(row?.1.value())?);
         }
+        for row in txn.open_table(MOVE_SUGGESTIONS)?.iter()? {
+            snap.move_suggestions.push(decode(row?.1.value())?);
+        }
         for row in txn.open_table(WANT_REPLIES)?.iter()? {
             snap.want_replies.push(decode(row?.1.value())?);
         }
@@ -315,6 +321,7 @@ impl Db {
             notices: snap.notices,
             collections: snap.collections,
             series: snap.series,
+            move_suggestions: snap.move_suggestions,
         };
         serde_json::to_vec(&dump).map_err(|e| Error::Internal(e.to_string()))
     }
@@ -373,6 +380,8 @@ pub struct Dump {
     pub collections: Vec<Collection>,
     #[serde(default)]
     pub series: Vec<Series>,
+    #[serde(default)]
+    pub move_suggestions: Vec<MoveSuggestion>,
 }
 
 /// An open write transaction; dropping it without `commit` aborts it.
@@ -527,6 +536,11 @@ impl Tx<'_> {
         self.txn.open_table(COLLECTIONS)?.remove(id)?;
         Ok(())
     }
+    pub fn put_move_suggestion(&self, s: &MoveSuggestion) -> Result<()> {
+        self.txn.open_table(MOVE_SUGGESTIONS)?.insert(s.id, encode(s).as_slice())?;
+        Ok(())
+    }
+
     pub fn put_series(&self, s: &Series) -> Result<()> {
         self.txn.open_table(SERIES)?.insert(s.id, encode(s).as_slice())?;
         Ok(())

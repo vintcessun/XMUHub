@@ -753,3 +753,22 @@ pub struct Announcement {
     pub text: String,
     pub at: i64,
 }
+
+/// 建议换个分类: a signed-in student says a file belongs in another course; a reviewer moves it
+/// or turns the suggestion down.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoveSuggestion {
+    pub id: Id,
+    pub resource: Id,
+    pub user: Id,
+    /// Where the file was when suggested, and where it should go.
+    pub from: Id,
+    pub to: Id,
+    pub note: String,
+    pub created_at: i64,
+    /// "pending", "approved" or "rejected".
+    pub status: String,
+    pub reviewed_by: Option<Id>,
+    /// Why it was turned down (shown to whoever suggested it).
+    pub review_note: String,
+}

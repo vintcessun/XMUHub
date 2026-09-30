@@ -1,7 +1,7 @@
 // In-page previews. Files are fetched by the browser from CORS-readable mirrors (never
 // through our server — see AGENTS.md), then rendered in the browser. Loaded on demand; previews don't count as downloads.
 
-import { api, esc, fetchPart, fmtSize } from './app.js';
+import { api, esc, fetchPart, fmtSize, inParallel, PARTS_AT_ONCE } from './app.js';
 
 const V = '/vendor';
 const MAX = 80 * 1024 * 1024;
@@ -87,14 +87,15 @@ export async function preview(id, box) {
   if (plan.parts.some((p) => !(p.preview_urls || []).length)) return note(box, '暂时没有支持在线预览的下载线路，请稍后再试或直接下载。');
   box.innerHTML = '<p class="small muted">正在加载预览…</p><div class="progress"><i></i></div>';
   const bar = box.querySelector('.progress i');
-  const blobs = [];
-  let done = 0;
+  let blobs;
+  const got = plan.parts.map(() => 0);
+  const alive = () => box.isConnected && box.previewTicket === ticket;
   try {
-    for (const part of plan.parts) {
-      blobs.push(await fetchPart(part, part.preview_urls, (n) => { if (bar.isConnected) bar.style.width = `${Math.round(((done + n) / (plan.size || 1)) * 100)}%`; }, () => box.isConnected && box.previewTicket === ticket));
-      done += part.size;
-      if (!box.isConnected || box.previewTicket !== ticket) return;
-    }
+    blobs = await inParallel(plan.parts, PARTS_AT_ONCE, (part, i) => fetchPart(part, part.preview_urls, (n) => {
+      got[i] = n;
+      if (bar.isConnected) bar.style.width = `${Math.round((got.reduce((a, b) => a + b, 0) / (plan.size || 1)) * 100)}%`;
+    }, alive));
+    if (!alive()) return;
   } catch (e) {
     return note(box, `预览加载失败（${esc(e.message)}），请稍后再试或直接下载。`);
   }

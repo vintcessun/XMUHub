@@ -489,6 +489,23 @@ export async function fetchPart(part, urls, onBytes, alive = () => true) {
   throw lastErr || new Error('没有可用的下载地址');
 }
 
+/** Parts of one file sent or fetched side by side: one connection carries ~1 MB/s. */
+export const PARTS_AT_ONCE = 3;
+
+/** `work(item, index)` for every item, at most `limit` at a time; results in the items' order. */
+export async function inParallel(items, limit, work) {
+  const out = new Array(items.length);
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await work(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return out;
+}
+
 /**
  * Downloads a resource. Single files: try a cross-origin fetch through the fastest mirror
  * (keeps the Chinese filename); most mirrors send no CORS headers, in which case we navigate
@@ -497,19 +514,16 @@ export async function fetchPart(part, urls, onBytes, alive = () => true) {
  */
 export async function downloadResource(id, onProgress = () => {}, { batch = false } = {}) {
   const plan = await api(`/resources/${id}/download`);
-  const total = plan.size;
+  const total = plan.size || 1;
   const single = plan.parts.length === 1;
-  let doneBytes = 0;
+  const got = plan.parts.map(() => 0);
   try {
-    const blobs = [];
-    for (const part of plan.parts) {
-      // One click, one file: the first mirror, else the browser opens it itself (below). A batch
-      // can't hand files to the browser that way, so it tries every mirror that allows fetching.
+    // One click, one file: the first mirror, else the browser opens it itself (below). A batch
+    // can't hand files to the browser that way, so it tries every mirror that allows fetching.
+    const blobs = await inParallel(plan.parts, PARTS_AT_ONCE, (part, i) => {
       const urls = single && !batch ? part.urls.slice(0, 1) : part.urls;
-      const b = await fetchPart(part, urls, (n) => onProgress(Math.min(1, (doneBytes + n) / total)));
-      doneBytes += part.size;
-      blobs.push(b);
-    }
+      return fetchPart(part, urls, (n) => { got[i] = n; onProgress(Math.min(1, got.reduce((a, b) => a + b, 0) / total)); });
+    });
     saveBlob(new Blob(blobs, { type: plan.mime || 'application/octet-stream' }), plan.filename);
     return { ok: true };
   } catch (e) {

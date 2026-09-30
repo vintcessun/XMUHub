@@ -372,8 +372,10 @@ async function addFiles(files) {
     const saved = draft.files && draft.files[fileKey(f)];
     if (saved) {
       for (const k of FIELDS) if (k in saved) row[k] = saved[k];
-      if (Array.isArray(saved.parts)) row.parts = saved.parts;
-      if (saved.upload_id) row.upload_id = saved.upload_id;
+      // Parts cut to an older, larger size are cut again (the old upload can't be resumed).
+      const fits = Array.isArray(saved.parts) && saved.parts.every((p) => p.size <= M.limits.max_part);
+      if (fits) row.parts = saved.parts;
+      if (fits && saved.upload_id) row.upload_id = saved.upload_id;
       row.status = saved.upload_id ? '已恢复上次填写的信息，上传会从断点继续' : '已恢复上次填写的信息';
     } else if (t) {
       // A file named after a course goes there when no category was picked; against one the
@@ -575,9 +577,23 @@ async function hashQueue() {
 
 // ---------------------------------------------------------------- upload
 
-/** Files sent at once. One connection from a campus network to the upload Worker carries
- * about 1 MB/s (measured from the server log, 2026-09-30); several side by side add up. */
+/** Parts sent at once, across all files. One connection from a campus network to the upload
+ * Worker carries about 1 MB/s (measured from the server log, 2026-09-30); several side by
+ * side add up. A big file's parts share them with the other files. */
 const PARALLEL = 3;
+let freeSlots = PARALLEL;
+const waitingForSlot = [];
+async function inSlot(work) {
+  if (freeSlots > 0) freeSlots--;
+  else await new Promise((res) => waitingForSlot.push(res));
+  try {
+    return await work();
+  } finally {
+    const next = waitingForSlot.shift();
+    if (next) next();
+    else freeSlots++;
+  }
+}
 
 /** `progress(bytes)`: how much of this file has been sent so far. */
 async function uploadRow(r, progress) {
@@ -597,18 +613,22 @@ async function uploadRow(r, progress) {
   r.upload_id = plan.upload_id;
   saveDraft();
   if (!plan.dedup) {
-    let sent = 0;
-    for (const pp of plan.parts) {
-      if (pp.done) { sent += pp.size; continue; }
+    const got = new Map(plan.parts.filter((pp) => pp.done).map((pp) => [pp.index, pp.size]));
+    const report = () => progress([...got.values()].reduce((a, b) => a + b, 0));
+    const many = plan.parts.length > 1;
+    const finished = () => plan.parts.filter((pp) => pp.done || got.get(pp.index) === pp.size).length;
+    await Promise.all(plan.parts.filter((pp) => !pp.done).map((pp) => inSlot(async () => {
       const part = r.parts[pp.index];
       let target = pp.target;
       for (let attempt = 0; ; attempt++) {
         try {
-          r.status = plan.parts.length > 1 ? `上传第 ${pp.index + 1} / ${plan.parts.length} 卷…` : '上传中…';
+          r.status = many ? `上传中，已完成 ${finished()} / ${plan.parts.length} 卷…` : '上传中…';
           updateRow(state.rows.indexOf(r));
           if (attempt > 0) target = await renewTarget(plan.upload_id, pp.index, target);
-          const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => progress(sent + n));
+          const receipt = await sendPart(target, f.slice(part.start, part.end), (n) => { got.set(pp.index, n); report(); });
           await api(`/uploads/${plan.upload_id}/parts/${pp.index}`, { method: 'POST', body: { asset_id: receipt.id ?? null } });
+          got.set(pp.index, pp.size);
+          report();
           break;
         } catch (err) {
           if (attempt >= 2) throw err;
@@ -617,8 +637,7 @@ async function uploadRow(r, progress) {
           await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
         }
       }
-      sent += pp.size;
-    }
+    })));
   }
   const body = {
     upload_id: plan.upload_id, node: nodeOf(r).id, time: timeOf(r), type_word: r.type_word,

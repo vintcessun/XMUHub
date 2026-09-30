@@ -79,8 +79,10 @@ impl Default for Limits {
     fn default() -> Limits {
         Limits {
             max_file: 2 * 1024 * 1024 * 1024,
-            // Cloudflare's free plan caps a request body at 100 MB and nginx is set to 100m.
-            max_part: 95 * 1024 * 1024,
+            // Small enough that a big file goes up (and down) as several parts side by side:
+            // one connection from campus carries ~1 MB/s. (Cloudflare's free plan caps a request
+            // body at 100 MB; files uploaded before 2026-10 have parts of up to 95 MB.)
+            max_part: 20 * 1024 * 1024,
             contributor_daily: (60, 3 * 1024 * 1024 * 1024),
             trusted_daily: (500, 30 * 1024 * 1024 * 1024),
         }

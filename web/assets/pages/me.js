@@ -162,7 +162,7 @@ function showAvatar(u) {
   const pending = u.avatar_pending && u.avatar_pending.length;
   $('#avbox').innerHTML = avatar(pending ? u.avatar_pending : u.avatar, u.nickname, 64);
   $('#avclear').hidden = !(u.avatar && u.avatar.length) && !pending;
-  $('#avnote').textContent = pending ? '新头像正在等待审核，通过前别人看到的还是原来的。' : '显示在页头、你的评论和公开昵称的资料页上。图片会裁成正方形。';
+  $('#avnote').textContent = pending ? '新头像正在等待审核，通过前别人看到的还是原来的。' : '显示在页头和公开昵称的资料页上。图片会裁成正方形。';
 }
 
 /** Crops the picture to a 256×256 square in the browser, uploads it like any file (to

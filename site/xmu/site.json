@@ -1,17 +1,17 @@
 {
   "name": "鹭岛书阁",
-  "subtitle": "厦大资料库",
-  "school": "厦门大学",
-  "school_short": "厦大",
-  "description": "鹭岛书阁是厦门大学学生资料共享平台，按课程整理的往年试卷、笔记、课件，免费下载与分享。",
-  "slogan": "厦门大学学生资料共享 · 试卷、笔记、课件，按课程一站找齐",
-  "footer": "鹭岛书阁 · 厦门大学学生资料共享 · 非官方学生项目，与厦门大学官方无关",
+  "subtitle": "学生资料共享",
+  "school": "本校",
+  "school_short": "校内",
+  "description": "鹭岛书阁是同学自发维护的非官方学习资料索引站，按课程整理同学分享的往年试卷、笔记、课件信息与第三方下载链接。",
+  "slogan": "同学自发分享的学习资料 · 试卷、笔记、课件，按课程一站找齐",
+  "footer": "鹭岛书阁 · 学生自发的非官方学习交流项目，与任何学校及其官方机构无关，不代表任何学校",
   "domain": "xmu.vintces.icu",
   "repo": "https://github.com/vintcessun/XMUHub",
   "mcp_name": "ludao-shuge",
   "community": "QQ 群：1124715660",
   "verified_domains": ["stu.xmu.edu.cn", "xmu.edu.cn"],
-  "verified_label": "厦大认证",
-  "link_example": "如 XMU-CS-exam（信息学院试卷）",
-  "announcement": "鹭岛书阁目前只面向厦门大学的同学。资料都由同学上传，不保证准确、完整，下载使用前请自行仔细甄别。"
+  "verified_label": "校园邮箱",
+  "link_example": "如 某学院历年试卷合集",
+  "announcement": "资料均由用户自行上传并存放在第三方平台，本站只提供信息索引，不保证准确、完整，请仅用于个人学习并自行甄别。如资料侵犯了您的权益，请点资料页「投诉 / 申请下架」或在意见反馈留言（无需注册），核实后 48 小时内处理。"
 }

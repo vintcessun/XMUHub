@@ -1,7 +1,7 @@
 //! Model Context Protocol endpoint (`POST /mcp`, Streamable HTTP transport, JSON responses).
 //!
 //! Lets AI agents do what a person does on the site: search and browse, download, upload,
-//! comment and rate, 求资料, and for reviewers / admins the review and admin pages. With a
+//! rate, 求资料, and for reviewers / admins the review and admin pages. With a
 //! personal access token (`Authorization: Bearer xmh_…`, created on the 「我的」 page) the
 //! agent acts as the token's owner, with the owner's role.
 //!
@@ -76,10 +76,8 @@ fn tools(max_part: u64, max_file: u64) -> Value {
           "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 50 } } } },
         { "name": "list_popular", "description": "下载最多的资料。",
           "inputSchema": { "type": "object", "properties": { "limit": { "type": "integer", "minimum": 1, "maximum": 50 } } } },
-        { "name": "get_comments", "description": "资料的评分汇总和评论。",
+        { "name": "get_rating", "description": "资料的评分汇总。",
           "inputSchema": { "type": "object", "properties": { "id": id("资料 id") }, "required": ["id"] } },
-        { "name": "post_comment", "description": "以令牌主人身份发表评论（需要令牌）。",
-          "inputSchema": { "type": "object", "properties": { "id": id("资料 id"), "body": { "type": "string", "maxLength": 500 } }, "required": ["id", "body"] } },
         { "name": "rate_resource", "description": "给资料打 1–5 星，0 表示取消（需要令牌）。",
           "inputSchema": { "type": "object", "properties": { "id": id("资料 id"), "stars": { "type": "integer", "minimum": 0, "maximum": 5 } }, "required": ["id", "stars"] } },
         { "name": "whoami", "description": "当前令牌对应的账号和角色（无令牌时为访客）。",
@@ -199,10 +197,8 @@ const API: &[(&str, &str, &str)] = &[
     ("POST", "/resources/{id}/review", "审核员：{action: approve|reject|remove|restrict|restore, note?}"),
     ("POST", "/resources/{id}/report", "举报 {reason}"),
     ("GET", "/resources/{id}/download", "下载地址（每个分卷一组镜像 URL 和 sha256）"),
-    ("GET", "/resources/{id}/social", "评分和评论"),
+    ("GET", "/resources/{id}/social", "评分"),
     ("PUT", "/resources/{id}/rating", "打分 {stars: 0–5}"),
-    ("POST", "/resources/{id}/comments", "发评论 {body}"),
-    ("DELETE", "/comments/{id}", "删评论（本人或审核员）"),
     ("GET", "/resources/{id}/reviews", "审核记录"),
     ("POST", "/resources/{id}/questions", "审核员向上传者提问 {text}"),
     ("POST", "/questions/{id}/answer", "上传者回答 {text}"),
@@ -480,15 +476,10 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ctx: &Ctx, ip: &str, name: &str,
             let list = if name == "list_recent" { app.hub.recent(limit) } else { app.hub.popular(limit) };
             json!(list.iter().map(|(r, n)| brief(r, n)).collect::<Vec<_>>())
         }
-        "get_comments" => {
+        "get_rating" => {
             let id = arg_id(a, "id")?;
-            let comments = app.hub.comments(v, id).map_err(|e| e.to_string())?;
-            json!({ "rating": app.hub.rating(id), "comments": comments })
-        }
-        "post_comment" => {
-            let (hub, user, id, body) = (app.hub.clone(), auth.user.clone(), arg_id(a, "id")?, arg_str(a, "body").to_string());
-            let c = blocking(move || hub.add_comment(Viewer { user: user.as_ref() }, id, &body)).await?;
-            json!({ "ok": true, "comment_id": c.id })
+            app.hub.resource(v, id).map_err(|e| e.to_string())?;
+            json!({ "rating": app.hub.rating(id) })
         }
         "rate_resource" => {
             let stars = a.get("stars").and_then(Value::as_u64).ok_or("缺少参数 stars")?.min(255) as u8;

@@ -85,7 +85,7 @@ async function load() {
 
 $('#pvgo').onclick = () => { $('#pvgo').hidden = true; preview(id, $('#pv')); };
 
-// ---------------------------------------------------------------- ratings & comments
+// ---------------------------------------------------------------- ratings
 
 const ACTIONS = { edit: '上传者修改了信息', approve: '通过', reject: '驳回', remove: '下架', restrict: '设为仅内部', restore: '恢复发布', note_approved: '同意修改备注', note_rejected: '驳回备注申请', delete_approved: '同意删除', delete_rejected: '驳回删除申请' };
 
@@ -113,34 +113,6 @@ async function loadSocial(me) {
     const n = Number(b.dataset.s);
     try {
       await api(`/resources/${id}/rating`, { method: 'PUT', body: { stars: n === s.my_rating ? 0 : n } });
-      loadSocial(me);
-    } catch (err) { toast(err.message, true); }
-  };
-  $('#cf').hidden = !me;
-  // Unsent comment survives a refresh.
-  const DK = `xmuhub.comment.${id}`;
-  if (!$('#cbody').value) $('#cbody').value = store.get(DK) || '';
-  $('#cbody').oninput = () => store.set(DK, $('#cbody').value.trim() ? $('#cbody').value : null);
-  $('#chint').textContent = '';
-  $('#ccount').textContent = s.comments.length ? `${s.comments.length} 条` : '';
-  $('#clist').innerHTML = (!me ? `<p class="small muted"><a href="${loginUrl()}">登录</a>后可以留言</p>` : '') +
-    (s.comments.length ? s.comments.map((c) => `<div class="comment" data-id="${c.id}"><div class="who">${avatar(c.avatar, c.nickname, 24)}<b>${esc(c.nickname)}</b>${c.role ? `<span class="badge published">${esc(c.role)}</span>` : ''}<span class="faint">${ago(c.created_at)}</span>
-        <span class="grow"></span>${c.can_delete ? '<a href="#" data-del class="small">删除</a>' : ''}</div><div class="text">${esc(c.body)}</div></div>`).join('')
-      : '<p class="small faint">还没有留言，下载看过之后来说两句吧</p>');
-  $('#clist').onclick = async (e) => {
-    const d = e.target.closest('[data-del]');
-    if (!d) return;
-    e.preventDefault();
-    try { await api(`/comments/${d.closest('[data-id]').dataset.id}`, { method: 'DELETE' }); loadSocial(me); } catch (err) { toast(err.message, true); }
-  };
-  $('#cf').onsubmit = async (e) => {
-    e.preventDefault();
-    const body = $('#cbody').value.trim();
-    if (!body) return;
-    try {
-      await api(`/resources/${id}/comments`, { method: 'POST', body: { body } });
-      $('#cbody').value = '';
-      store.set(`xmuhub.comment.${id}`, null);
       loadSocial(me);
     } catch (err) { toast(err.message, true); }
   };
@@ -177,7 +149,8 @@ $('#dl').onclick = async () => {
 $('#report').onclick = async (e) => {
   e.preventDefault();
   const user = await mePromise;
-  if (!user) { toast('请先登录再投诉', true); setTimeout(() => { location.href = loginUrl(); }, 800); return; }
+  // Rights holders needn't have an account: without one, the feedback form takes the notice.
+  if (!user) { location.href = `/feedback?from=${encodeURIComponent(location.pathname)}`; return; }
   const reason = prompt(`请写明投诉或申请下架的理由（例如：侵犯版权 / 含个人隐私 / 分类错误）。
 处理结果会通过你的账号邮箱 ${user.email} 联系你。`);
   if (!reason) return;

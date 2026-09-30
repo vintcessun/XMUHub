@@ -19,6 +19,8 @@
   <div id="gate"></div>
   <div id="draftnote" hidden style="margin-bottom:16px"></div>
   <div id="form" hidden>
+    <div class="notice warn"><b>上传前请阅读</b><p class="small" style="margin:6px 0 0"><b>文件托管说明：</b>本站服务器不存储任何资料文件。文件的上传、存储及下载由第三方服务提供商（GitHub 及国内公共加速镜像）完成，本站仅提供上传辅助、资源信息展示及第三方链接索引服务。</p>
+      <p class="small" style="margin:6px 0 0">请只上传你拥有著作权、已获授权或属于合理使用的学习资料；不要上传含他人隐私、标明「勿外传」或来源与授权不明的内容。上传者对所上传内容承担全部法律责任，详见<a href="/about" target="_blank">使用须知与免责声明</a>。</p></div>
     <section class="card">
       <h2>1 · 选择分类</h2>
       <div id="nodepick">
@@ -70,6 +72,7 @@
     <section class="card">
       <div id="status"></div>
       <div class="progress" id="prog" hidden><i></i></div>
+      <label class="row small" style="margin-top:14px;gap:8px;align-items:flex-start;flex-wrap:nowrap"><input type="checkbox" id="agree" style="margin-top:3px"><span>我确认对上传的资料拥有著作权、已取得授权或属于合理使用，不含他人隐私，并已阅读、同意<a href="/about" target="_blank">使用须知与免责声明</a>；因上传内容产生的法律责任由我本人承担。</span></label>
       <div class="row" style="margin-top:14px"><button class="btn primary lg" id="submit" type="button">上传并提交</button><span class="small muted" id="hint"></span></div>
     </section>
   </div>

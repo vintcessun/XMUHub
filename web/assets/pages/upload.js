@@ -703,6 +703,7 @@ async function confirmCategory(todo) {
 $('#submit').onclick = async () => {
   const todo = state.rows.filter((r) => !r.done);
   if (!todo.length) return toast('请先添加文件', true);
+  if (!$('#agree').checked) { $('#agree').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast('请先勾选确认你有权分享这些资料', true); }
   if (!(await confirmCategory(todo))) return;
   const albumErr = albumProblem(todo);
   if (albumErr) { $('#albumcard').scrollIntoView({ behavior: 'smooth', block: 'center' }); return toast(albumErr, true); }

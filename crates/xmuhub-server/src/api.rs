@@ -330,9 +330,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/download", get(download_plan))
         .route("/resources/{id}/social", get(social))
         .route("/resources/{id}/rating", put(rate))
-        .route("/resources/{id}/comments", post(add_comment))
         .route("/resources/{id}/reviews", get(resource_reviews))
-        .route("/comments/{id}", axum::routing::delete(delete_comment))
         .route("/feedback", post(feedback))
         .route("/feedback/mine", get(my_feedback))
         .route("/uploads", post(begin_upload))
@@ -952,12 +950,14 @@ async fn download_plan(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<I
     Ok(Json(v))
 }
 
-// ------------------------------------------------------------------ ratings, comments, feedback
+// ------------------------------------------------------------------ ratings, feedback
+// Comments were taken down (owner's decision, 2026-09-30): nothing posts or shows them any
+// more; the records stay in the database untouched.
 
 async fn social(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
     let v = auth.viewer();
-    let comments = app.hub.comments(v, id)?;
-    Ok(Json(json!({ "rating": app.hub.rating(id), "my_rating": app.hub.my_rating(v, id), "comments": comments })))
+    app.hub.resource(v, id)?;
+    Ok(Json(json!({ "rating": app.hub.rating(id), "my_rating": app.hub.my_rating(v, id) })))
 }
 
 #[derive(Deserialize)]
@@ -970,25 +970,6 @@ async fn rate(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<RateI
     let user = auth.user.clone();
     let sum = blocking(move || hub.rate(Viewer { user: user.as_ref() }, id, b.stars)).await?;
     Ok(Json(json!({ "rating": sum, "my_rating": b.stars })))
-}
-
-#[derive(Deserialize)]
-struct CommentIn {
-    body: String,
-}
-
-async fn add_comment(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<CommentIn>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let user = auth.user.clone();
-    let c = blocking(move || hub.add_comment(Viewer { user: user.as_ref() }, id, &b.body)).await?;
-    Ok(Json(json!({ "id": c.id })))
-}
-
-async fn delete_comment(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
-    let hub = app.hub.clone();
-    let user = auth.user.clone();
-    blocking(move || hub.delete_comment(Viewer { user: user.as_ref() }, id)).await?;
-    Ok(Json(json!({ "ok": true })))
 }
 
 #[derive(Deserialize)]
@@ -1794,7 +1775,7 @@ struct ImportIn {
     depth: usize,
     /// group key → node id
     mappings: std::collections::HashMap<String, Id>,
-    /// 专业 for every imported file (repos kept per major, e.g. XMU-SE).
+    /// 专业 for every imported file (repos kept per major, e.g. a software-engineering repo).
     #[serde(default)]
     major: String,
 }

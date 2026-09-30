@@ -21,7 +21,7 @@ WantedBy=multi-user.target
 EOF
 cat > /etc/systemd/system/xmuhub-ddos-ban.service <<'EOF'
 [Unit]
-Description=XMUHub flood guard: ban sources holding over 60 connections to 80/443 for an hour
+Description=XMUHub flood guard: ban sources holding over 100 connections to 80/443 for an hour
 
 [Service]
 Type=oneshot

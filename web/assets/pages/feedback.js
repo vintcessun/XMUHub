@@ -11,6 +11,9 @@ if (COMMUNITY) {
 const DK = 'xmuhub.feedback.draft';
 try { const d = JSON.parse(store.get(DK) || 'null'); if (d) { $('#body').value = d.body || ''; $('#contact').value = d.contact || ''; } } catch { /* ignore */ }
 const saveDraft = () => store.set(DK, $('#body').value.trim() || $('#contact').value.trim() ? JSON.stringify({ body: $('#body').value, contact: $('#contact').value }) : null);
+// From an empty search (「告诉我们缺这门课」): start the message with what was searched for.
+const want = (qs.get('want') || '').trim().slice(0, 60);
+if (want && !$('#body').value.trim()) $('#body').value = `想找「${want}」的资料，本站还没有。课程全称 / 老师 / 学院（选填）：`;
 $('#body').oninput = saveDraft;
 $('#contact').oninput = saveDraft;
 

@@ -473,11 +473,11 @@ const panels = {
     const all = await api('/admin/missing');
     const S = { new: '待处理', public: '已公开征集', hidden: '已隐藏' };
     const list = all.filter((m) => m.status === show);
-    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学搜了但一条结果都没有的词（每人每天同一个词只算一次）。是本站缺的课程就「公开征集」，会列在<a href="/missing" target="_blank">缺资料的课程</a>页，有资料后自动从那里消失；小说游戏、不适合公开的就「隐藏」；乱码、随手敲的字母就勾上后「删除」（只删这条搜索记录）。标了「现在能搜到」的说明已经有资料或加了别名。</p>
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学搜了但一条结果都没有的词（每人每天同一个词只算一次）。是本站缺的课程就「公开征集」，会列在<a href="/missing" target="_blank">缺资料的课程</a>页，有资料后自动从那里消失；小说游戏、不适合公开的就「隐藏」；乱码、随手敲的字母就勾上后「删除」（只删这条搜索记录）。已经能搜到的词（有人上传了资料，或课程加了别名）会自动从这里移除。</p>
       <div class="tabs" style="margin-bottom:10px">${Object.entries(S).map(([k, v]) => `<button type="button" data-s="${k}" class="${k === show ? 'on' : ''}">${v} ${all.filter((m) => m.status === k).length}</button>`).join('')}</div>
       ${list.length ? `<div class="row" style="gap:6px;margin-bottom:8px"><label class="small"><input type="checkbox" id="msall"> 全选</label><span class="grow"></span><button class="btn sm" data-bulk="hidden" type="button">隐藏选中</button><button class="btn sm danger" data-bulk="delete" type="button">删除选中</button></div>
       <table class="table"><thead><tr><th></th><th>搜索词</th><th>人次</th><th>最近</th><th></th></tr></thead><tbody>
-      ${list.map((m) => `<tr data-term="${esc(m.term)}"><td><input type="checkbox" data-pick></td><td><a href="/search?q=${encodeURIComponent(m.term)}" target="_blank">${esc(m.term)}</a>${m.found ? ' <span class="badge published">现在能搜到</span>' : ''}</td><td>${m.count}</td><td class="small faint">${ago(m.last)}</td>
+      ${list.map((m) => `<tr data-term="${esc(m.term)}"><td><input type="checkbox" data-pick></td><td><a href="/search?q=${encodeURIComponent(m.term)}" target="_blank">${esc(m.term)}</a></td><td>${m.count}</td><td class="small faint">${ago(m.last)}</td>
         <td class="row" style="gap:6px;justify-content:flex-end">${show !== 'public' ? '<button class="btn sm ok" data-to="public" type="button">公开征集</button>' : ''}${show !== 'hidden' ? '<button class="btn sm" data-to="hidden" type="button">隐藏</button>' : ''}${show !== 'new' ? '<button class="btn sm" data-to="new" type="button">撤回</button>' : ''}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty"><b>这里没有</b></div>'}</section>`;
     box.onclick = async (e) => {

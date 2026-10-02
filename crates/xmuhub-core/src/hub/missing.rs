@@ -3,6 +3,7 @@
 //! it 公开征集 (or hides it). Kept as one JSON map in the meta table (a few hundred short terms).
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,9 @@ pub(super) const MISSING_KEY: &str = "missing_searches";
 /// Terms kept; past this the least searched go.
 const KEEP: usize = 2000;
 const TERM_MAX: usize = 30;
+/// How often (seconds) found terms are dropped when nobody asks for it outright.
+const PRUNE_EVERY: i64 = 600;
+static LAST_PRUNE: AtomicI64 = AtomicI64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MissingTerm {
@@ -64,9 +68,34 @@ impl Hub {
         Ok(())
     }
 
-    /// Admins: every counted term, most searched first.
+    /// Drops the terms that find something now (files were added, or a course got an alias):
+    /// they aren't missing any more, and searching them again with no result counts anew.
+    /// Without `force`, at most once every PRUNE_EVERY seconds (it runs a search per term).
+    pub fn prune_found_missing(&self, force: bool) -> Result<usize> {
+        let t = now();
+        if !force && t - LAST_PRUNE.load(Ordering::Relaxed) < PRUNE_EVERY {
+            return Ok(0);
+        }
+        LAST_PRUNE.store(t, Ordering::Relaxed);
+        let terms: Vec<String> = self.st.read().missing.keys().cloned().collect();
+        let found: Vec<String> = terms
+            .into_iter()
+            .filter(|k| self.search(Viewer { user: None }, k, crate::search::Filter::default(), 1, 0).is_ok_and(|(_, total)| total > 0))
+            .collect();
+        if found.is_empty() {
+            return Ok(0);
+        }
+        self.mutate(|st, tx| {
+            let n = found.iter().filter(|k| st.missing.remove(*k).is_some()).count();
+            Self::save_missing(st, tx)?;
+            Ok(n)
+        })
+    }
+
+    /// Admins: every counted term that still finds nothing, most searched first.
     pub fn missing_terms(&self, viewer: Viewer) -> Result<Vec<MissingTerm>> {
         viewer.at_least(Level::Admin)?;
+        self.prune_found_missing(true)?;
         let mut v: Vec<MissingTerm> = self.st.read().missing.values().cloned().collect();
         v.sort_by(|a, b| b.count.cmp(&a.count).then(b.last.cmp(&a.last)));
         Ok(v)
@@ -74,6 +103,7 @@ impl Hub {
 
     /// The terms admins chose to show on the 缺资料 page, most searched first.
     pub fn public_missing(&self) -> Vec<MissingTerm> {
+        let _ = self.prune_found_missing(false);
         let mut v: Vec<MissingTerm> = self.st.read().missing.values().filter(|m| m.status == "public").cloned().collect();
         v.sort_by(|a, b| b.count.cmp(&a.count).then(b.last.cmp(&a.last)));
         v

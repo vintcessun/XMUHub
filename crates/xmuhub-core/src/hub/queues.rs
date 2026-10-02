@@ -10,6 +10,10 @@ impl Hub {
     /// Pending items per review tab (keyed like the tabs); complaints and feedback for admins only.
     pub fn review_counts(&self, viewer: Viewer) -> Result<BTreeMap<&'static str, usize>> {
         viewer.at_least(Level::Reviewer)?;
+        // So the 搜不到 count leaves out what finds something by now.
+        if viewer.at_least(Level::Admin).is_ok() {
+            self.prune_found_missing(false)?;
+        }
         let st = self.st.read();
         let waiting = |r: &&Resource| r.status == Status::Pending || (r.status == Status::Published && r.needs_review);
         let mut m = BTreeMap::from([

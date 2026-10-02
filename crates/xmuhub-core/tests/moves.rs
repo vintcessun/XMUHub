@@ -147,6 +147,16 @@ async fn empty_searches_are_counted_and_only_admins_publish_them() {
     assert!(h.delete_missing(vs, &["有限元".into()]).is_err());
     assert_eq!(h.delete_missing(va, &["有限元".into(), "不存在".into()]).unwrap(), 1, "junk can be dropped");
     assert_eq!(h.missing_terms(va).unwrap().len(), 2);
+
+    // Once a search finds something, the term isn't missing any more.
+    h.record_missing("操作系统", 1).unwrap();
+    let section = node(&h, va, None, "section", "专业课");
+    let college = node(&h, va, Some(section), "group", "信息学院");
+    let os = node(&h, va, Some(college), "course", "操作系统");
+    upload(&h, &dir, va, os, b"slides").await;
+    let left = h.missing_terms(va).unwrap();
+    assert!(!left.iter().any(|m| m.term == "操作系统"), "found terms are dropped: {left:?}");
+    assert_eq!(left.len(), 2);
     drop(h);
     let h = open(&dir);
     assert_eq!(h.public_missing().len(), 1, "kept across restarts");

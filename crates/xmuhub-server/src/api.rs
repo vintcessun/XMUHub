@@ -1533,15 +1533,11 @@ async fn missing_public(State(app): S) -> Response {
     res
 }
 
-/// Admins: every counted term, with whether it finds something now.
+/// Admins: every counted term that still finds nothing (the found ones are dropped first).
 async fn missing_admin(State(app): S, auth: Auth) -> R<Json<Value>> {
-    let list = app.hub.missing_terms(auth.viewer())?;
-    let app2 = app.clone();
-    let out = blocking(move || {
-        Ok(list.into_iter().take(500).map(|m| { let found = found_now(&app2, &m.term); json!({ "term": m.term, "count": m.count, "first": m.first, "last": m.last, "status": m.status, "found": found }) }).collect::<Vec<_>>())
-    })
-    .await?;
-    Ok(Json(json!(out)))
+    let (hub, user) = (app.hub.clone(), auth.user.clone());
+    let list = blocking(move || hub.missing_terms(Viewer { user: user.as_ref() })).await?;
+    Ok(Json(json!(list.into_iter().take(500).map(|m| json!({ "term": m.term, "count": m.count, "first": m.first, "last": m.last, "status": m.status })).collect::<Vec<_>>())))
 }
 
 #[derive(Deserialize)]

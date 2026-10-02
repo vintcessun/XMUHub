@@ -21,23 +21,19 @@ nginx -t && nginx -s reload
 Cloudflare 的网段偶尔会变，列表来自 <https://api.cloudflare.com/client/v4/ips>，变了就重新生成 `set_real_ip_from` 那几行。
 没有这份配置时，服务器看到的访问者 IP 全是 Cloudflare 的，按 IP 的限制（验证码、注册、限流）会把所有人算成同一个人。
 
-## 暂不启用：只接受来自 Cloudflare 的请求
+## 只接受来自 Cloudflare 的请求（2026-10-02 起启用）
 
-源站 IP 已经暴露，攻击者可以绕过 Cloudflare 直接打服务器。需要时在 `xmuhub-cloudflare.conf` 末尾加上下面这段，
-非 Cloudflare 来源直接断开连接、不记日志（`real_ip` 生效前的原始地址是 `$realip_remote_addr`）：
+源站 IP 已经暴露，攻击者可以绕过 Cloudflare 直接打服务器。服务器防火墙不能整体只放 Cloudflare（同一台机器上还有「仅 DNS」的其他子域名），
+所以只在 xmu 这一个站点上检查：`0.xmuhub-limits.conf` 里的 `geo $realip_remote_addr $xmuhub_from_cf` 列出 Cloudflare 网段和本机（`127.0.0.1`、`::1`，服务器上的管理脚本用 `--resolve xmu.vintces.icu:443:127.0.0.1`），
+`xmuhub-cloudflare.conf` 里 `if ($xmuhub_from_cf = 0) { return 444; }` 把其他来源直接断开、不回任何内容。其他子域名不受影响。
 
-```nginx
-# 在 0.xmuhub-limits.conf（http 级）里：
-geo $realip_remote_addr $xmuhub_from_cf {
-    default 0;
-    # 与 set_real_ip_from 相同的 Cloudflare 网段，每行 "<网段> 1;"
-}
-# 在 xmuhub-cloudflare.conf（站点级）里：
-if ($xmuhub_from_cf = 0) { return 444; }
+Cloudflare 网段变了要**同时**改 `geo` 和 `set_real_ip_from` 两处。验证：
+
+```sh
+curl -sk -o /dev/null -w '%{http_code}\n' --resolve xmu.vintces.icu:443:127.0.0.1 https://xmu.vintces.icu/api/meta   # 200（本机）
+curl -sk -o /dev/null -w '%{http_code}\n' --resolve xmu.vintces.icu:443:<源站公网 IP> https://xmu.vintces.icu/      # 000（被断开）
+curl -s  -o /dev/null -w '%{http_code}\n' https://xmu.vintces.icu/                                                  # 200（经 Cloudflare）
 ```
-
-启用前确认所有解析都已经切到 Cloudflare（各地 DNS 缓存可能要 1–2 天），否则还在直连的同学会打不开网站。
-
 ## 请求耗时日志
 
 `/www/wwwlogs/xmu.vintces.icu.timing.log`，每行：时间、访问者、请求、状态、字节数、`rt`（整个请求）、`ut`（XMUHub 处理）、`uc`（连上 XMUHub）。

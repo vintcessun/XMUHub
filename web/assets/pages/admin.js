@@ -232,6 +232,18 @@ function chart(days, bars, line) {
 
 let current = 'dash';
 
+// 要求补证明: a takedown claim without proof is answered with what to send, and how (a new
+// 申请下架 with an email); the admin can also write to the email left with it.
+function proofLink(page) {
+  return `${location.origin}/feedback?takedown=1${page && page.startsWith('/r/') ? `&from=${encodeURIComponent(page)}` : ''}`;
+}
+function proofText(page) {
+  return `下架申请需要证明资料确实属于你：请写明资料链接和你的身份说明，附上证明材料（原始文件或手稿、编写 / 整理记录、署名或出版信息、教师或单位说明等），并留下邮箱，我们会通过邮箱联系你核实，图片和文件可以等邮件联系后再发。请在这里重新提交：${proofLink(page)}　没有证明材料或证明不足的申请一律驳回。`;
+}
+function proofMail(to, page) {
+  const subject = '关于你在本站提交的资料下架申请';
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`你好，\n\n我们收到了你对 ${location.origin}${page || ''} 的下架申请。本站只在权利人证明资料确实属于本人后才下架，请直接回复本邮件，写明你的身份说明，并附上证明材料（原始文件或手稿、编写 / 整理记录、署名或出版信息、教师或单位说明等）。核实后我们会尽快处理；没有证明材料或证明不足的申请将被驳回。\n\n谢谢。`)}`;
+}
 const panels = {
   async dash(box, days = 30) {
     const [list, s] = await Promise.all([api(`/admin/daily?days=${days}`), api('/admin/status')]);
@@ -360,17 +372,17 @@ const panels = {
   async reports(box, all = false) {
     const list = await api(`/admin/reports${all ? '?all=true' : ''}`);
     const STATUS = { pending: '待审核', published: '已发布', rejected: '未通过', removed: '已下架', restricted: '仅内部' };
-    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。以权利人身份申请下架的，<b>必须有足以证明资料属于对方的材料</b>才下架（先点「下架」再标记已处理）；没有证明或证明不足的，写明原因后直接标记已处理（驳回），需要补充材料的通过投诉人邮箱联系。</p><span class="grow"></span>
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。以权利人身份申请下架的，<b>必须有足以证明资料属于对方的材料</b>才下架（先点「下架」再标记已处理）；没有证明或证明不足的，点「发邮件要证明」联系投诉人，再点「要求补证明」并标记已处理（暂不下架）。</p><span class="grow"></span>
         <label class="small"><input type="checkbox" id="rpall"${all ? ' checked' : ''}> 显示已处理</label></div>
       ${list.length ? list.map((r) => `
       <div class="item" data-id="${r.id}" data-res="${r.resource ? r.resource.id : ''}"><div class="body">
         <div><b>${esc(r.reason)}</b></div>
-        <div class="meta"><span>${ago(r.created_at)}</span>${r.contact ? `<span>投诉人：${esc(r.contact)}</span>` : ''}
+        <div class="meta"><span>${ago(r.created_at)}</span>${r.contact ? `<span>投诉人：${esc(r.contact)}</span><a href="${esc(proofMail(r.contact, r.resource ? `/r/${r.resource.id}` : ''))}">发邮件要证明</a>` : ''}
           ${r.resource ? `<a href="/r/${r.resource.id}" target="_blank">${esc(r.resource.title)}</a><span class="badge ${esc(r.resource.status)}">${STATUS[r.resource.status] || esc(r.resource.status)}</span>` : '<span>资料已不存在</span>'}
           ${r.handled ? `<span class="badge published">已处理${r.handled_by ? ` · ${esc(r.handled_by)}` : ''}</span>${r.handled_note ? `<span>${esc(r.handled_note)}</span>` : ''}` : ''}
           ${me.level >= 4 ? '<a href="#" class="small" data-a="delete" style="color:var(--bad)">删除</a>' : ''}</div>
         ${r.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="处理说明" style="max-width:260px;min-height:30px;padding:3px 8px">
-          ${r.resource && r.resource.status !== 'removed' ? '<button class="btn sm danger" data-a="remove">下架</button>' : ''}<button class="btn sm ok" data-a="done">标记已处理</button></div>`}
+          ${r.resource && r.resource.status !== 'removed' ? '<button class="btn sm danger" data-a="remove">下架</button>' : ''}<button class="btn sm" data-a="proof" title="填入「已邮件要求补充证明材料，暂不下架」">要求补证明</button><button class="btn sm ok" data-a="done">标记已处理</button></div>`}
       </div></div>`).join('') : `<div class="empty"><b>${all ? '还没有投诉' : '没有待处理的投诉'}</b>${all ? '' : '勾选右上角「显示已处理」可查看历史'}</div>`}</section>`;
     box.querySelector('#rpall').onchange = (e) => panels.reports(box, e.target.checked);
     box.onclick = async (e) => {
@@ -387,6 +399,7 @@ const panels = {
           panels.reports(box, all);
           return;
         }
+        if (b.dataset.a === 'proof') { it.querySelector('input').value = '未附权属证明，已邮件要求投诉人补充证明材料，暂不下架；补充后可重新投诉'; return; }
         if (b.dataset.a === 'remove') { await api(`/resources/${it.dataset.res}/review`, { method: 'POST', body: { action: 'remove', note: note || '收到投诉，已下架' } }); toast('已下架'); panels.reports(box, all); }
         else { await api(`/admin/reports/${it.dataset.id}/handle`, { method: 'POST', body: { note } }); toast('已处理，可在「显示已处理」中查看'); panels.reports(box, all); }
       } catch (err) { toast(err.message, true); }
@@ -394,19 +407,21 @@ const panels = {
   },
   async feedback(box, all = false) {
     const list = await api(`/admin/feedback${all ? '?all=true' : ''}`);
-    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">用户从「意见反馈」页提交的问题和建议。标着【申请下架】的：有足以证明资料属于对方的材料才下架，否则回复驳回；需要补充材料的发邮件到对方留下的邮箱。</p><span class="grow"></span>
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">用户从「意见反馈」页提交的问题和建议。标着【申请下架】的：有足以证明资料属于对方的材料才下架；没有的点「要求补证明」回复（对方在反馈页能看到），留了邮箱的也可以点「发邮件要证明」直接联系。</p><span class="grow"></span>
         <label class="small"><input type="checkbox" id="fball"${all ? ' checked' : ''}> 显示已处理</label></div>
       ${list.length ? list.map((f) => `<div class="item" data-id="${f.id}"><div class="body">
         <div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(f.body)}</div>
-        <div class="meta"><span>${ago(f.created_at)}</span>${f.nickname ? `<span>${esc(f.nickname)}</span>` : '<span>未登录</span>'}${f.contact ? `<span>联系：${esc(f.contact)}</span>` : ''}${f.page ? `<span class="faint">${esc(f.page)}</span>` : ''}
+        <div class="meta"><span>${ago(f.created_at)}</span>${f.nickname ? `<span>${esc(f.nickname)}</span>` : '<span>未登录</span>'}${f.contact ? `<span>联系：${esc(f.contact)}</span>${f.contact.includes('@') ? `<a href="${esc(proofMail(f.contact, f.page))}">发邮件要证明</a>` : ''}` : ''}${f.page ? `<span class="faint">${esc(f.page)}</span>` : ''}
           ${f.handled ? `<span class="badge published">已处理${f.handled_by ? ` · ${esc(f.handled_by)}` : ''}</span>${f.handled_note ? `<span>回复：${esc(f.handled_note)}</span>` : ''}` : ''}</div>
-        ${f.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="回复反馈人（选填，对方在反馈页能看到）" maxlength="500" style="max-width:360px;min-height:30px;padding:3px 8px"><button class="btn sm ok" data-a="done">回复并标记已处理</button></div>`}
+        ${f.handled ? '' : `<div class="row" style="margin-top:8px"><input class="input" placeholder="回复反馈人（选填，对方在反馈页能看到）" maxlength="500" style="max-width:360px;min-height:30px;padding:3px 8px"><button class="btn sm" data-a="proof" title="下架申请没有证明材料时用：填入请对方补充证明并留邮箱的回复">要求补证明</button><button class="btn sm ok" data-a="done">回复并标记已处理</button></div>`}
       </div></div>`).join('') : '<div class="empty"><b>没有待处理的反馈</b></div>'}</section>`;
     box.querySelector('#fball').onchange = (e) => panels.feedback(box, e.target.checked);
     box.onclick = async (e) => {
-      const b = e.target.closest('[data-a="done"]');
+      const b = e.target.closest('[data-a]');
       if (!b) return;
       const it = b.closest('[data-id]');
+      if (b.dataset.a === 'proof') { it.querySelector('input').value = proofText(list.find((f) => String(f.id) === it.dataset.id)?.page || ''); return; }
+      if (b.dataset.a !== 'done') return;
       try { await api(`/admin/feedback/${it.dataset.id}/handle`, { method: 'POST', body: { note: it.querySelector('input').value } }); toast('已处理'); panels.feedback(box, all); } catch (err) { toast(err.message, true); }
     };
   },

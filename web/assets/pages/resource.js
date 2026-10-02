@@ -166,9 +166,11 @@ $('#report').onclick = async (e) => {
   e.preventDefault();
   const user = await mePromise;
   // Rights holders needn't have an account: without one, the feedback form takes the notice.
-  if (!user) { location.href = `/feedback?from=${encodeURIComponent(location.pathname)}`; return; }
-  const reason = prompt(`请写明投诉或申请下架的理由（例如：侵犯版权 / 含个人隐私 / 分类错误）。
-处理结果会通过你的账号邮箱 ${user.email} 联系你。`);
+  if (!user) { location.href = `/feedback?takedown=1&from=${encodeURIComponent(location.pathname)}`; return; }
+  const reason = prompt(`请写明投诉或申请下架的理由（例如：侵犯版权 / 含个人隐私）。
+以权利人身份申请下架的，请写明你的身份，并说明能证明资料属于你的材料（原始文件或手稿、编写记录、署名或出版信息等）；没有证明材料的一律驳回。
+核实和补充材料会通过你的账号邮箱 ${user.email} 联系你。
+（只是分类放错了，请用「建议换个分类」。）`);
   if (!reason) return;
   try {
     await api(`/resources/${id}/report`, { method: 'POST', body: { reason } });

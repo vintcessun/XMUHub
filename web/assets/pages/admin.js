@@ -360,7 +360,7 @@ const panels = {
   async reports(box, all = false) {
     const list = await api(`/admin/reports${all ? '?all=true' : ''}`);
     const STATUS = { pending: '待审核', published: '已发布', rejected: '未通过', removed: '已下架', restricted: '仅内部' };
-    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。需要下架的，先点「下架」再标记已处理。</p><span class="grow"></span>
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">请在 48 小时内处理。以权利人身份申请下架的，<b>必须有足以证明资料属于对方的材料</b>才下架（先点「下架」再标记已处理）；没有证明或证明不足的，写明原因后直接标记已处理（驳回），需要补充材料的通过投诉人邮箱联系。</p><span class="grow"></span>
         <label class="small"><input type="checkbox" id="rpall"${all ? ' checked' : ''}> 显示已处理</label></div>
       ${list.length ? list.map((r) => `
       <div class="item" data-id="${r.id}" data-res="${r.resource ? r.resource.id : ''}"><div class="body">
@@ -394,7 +394,7 @@ const panels = {
   },
   async feedback(box, all = false) {
     const list = await api(`/admin/feedback${all ? '?all=true' : ''}`);
-    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">用户从「意见反馈」页提交的问题和建议。</p><span class="grow"></span>
+    box.innerHTML = `<section class="card"><div class="row" style="margin-bottom:8px"><p class="small muted" style="margin:0">用户从「意见反馈」页提交的问题和建议。标着【申请下架】的：有足以证明资料属于对方的材料才下架，否则回复驳回；需要补充材料的发邮件到对方留下的邮箱。</p><span class="grow"></span>
         <label class="small"><input type="checkbox" id="fball"${all ? ' checked' : ''}> 显示已处理</label></div>
       ${list.length ? list.map((f) => `<div class="item" data-id="${f.id}"><div class="body">
         <div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(f.body)}</div>

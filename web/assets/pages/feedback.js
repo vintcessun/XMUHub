@@ -17,12 +17,32 @@ if (want && !$('#body').value.trim()) $('#body').value = `想找「${want}」的
 $('#body').oninput = saveDraft;
 $('#contact').oninput = saveDraft;
 
+// 申请下架: rights holders must leave an email and show the file is theirs; that is how they are
+// reached for more proof, and a claim without proof is turned down.
+const TAKEDOWN = '【申请下架】';
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const takedownMode = () => {
+  const on = $('#takedown').checked;
+  $('#takedown-help').hidden = !on;
+  $('#contact').required = on;
+  $('#contact').type = on ? 'email' : 'text';
+  $('#contact-label').innerHTML = on ? '邮箱 <em>*</em>（核实和补充证明材料都通过邮箱联系你）' : '联系方式（选填：邮箱 / QQ，方便我们回复你）';
+  if (on && !$('#body').value.trim()) $('#body').value = `资料链接：${qs.get('from') ? location.origin + qs.get('from') : ''}\n我的身份 / 权利说明：\n证明材料（证明这份资料属于我）：\n`;
+};
+$('#takedown').checked = qs.get('takedown') === '1';
+$('#takedown').onchange = takedownMode;
+takedownMode();
+
 $('#f').onsubmit = async (e) => {
   e.preventDefault();
+  const takedown = $('#takedown').checked;
+  const contact = $('#contact').value.trim();
+  if (takedown && !EMAIL.test(contact)) { $('#msg').innerHTML = '<div class="notice bad">申请下架必须留下邮箱，我们通过邮箱核实和联系你补充材料。</div>'; return; }
   const btn = $('#f button');
   btn.disabled = true;
   try {
-    const r = await api('/feedback', { method: 'POST', body: { body: $('#body').value, contact: $('#contact').value, page: qs.get('from') || referrer() } });
+    const body = takedown && !$('#body').value.startsWith(TAKEDOWN) ? TAKEDOWN + $('#body').value : $('#body').value;
+    const r = await api('/feedback', { method: 'POST', body: { body, contact, page: qs.get('from') || referrer() } });
     store.set(DK, null);
     remember(r);
     $('#f').innerHTML = '<div class="notice ok">谢谢！我们已经收到你的反馈，处理结果会显示在下面的「我的反馈」里。</div>';

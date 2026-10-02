@@ -82,7 +82,7 @@ fn tools(max_part: u64, max_file: u64) -> Value {
           "inputSchema": { "type": "object", "properties": { "id": id("资料 id"), "stars": { "type": "integer", "minimum": 0, "maximum": 5 } }, "required": ["id", "stars"] } },
         { "name": "whoami", "description": "当前令牌对应的账号和角色（无令牌时为访客）。",
           "inputSchema": { "type": "object", "properties": {} } },
-        { "name": "submit_feedback", "description": "向站点管理员提交意见反馈。",
+        { "name": "submit_feedback", "description": "向站点管理员提交意见反馈（需登录）。",
           "inputSchema": { "type": "object", "properties": { "body": { "type": "string" }, "contact": { "type": "string" } }, "required": ["body"] } },
         { "name": "review_queue", "description": "审核员：待审核/待核实/仅内部的资料列表。",
           "inputSchema": { "type": "object", "properties": {
@@ -189,7 +189,7 @@ const API: &[(&str, &str, &str)] = &[
     ("POST", "/resources/{id}/questions", "审核员向上传者提问 {text}"),
     ("POST", "/questions/{id}/answer", "上传者回答 {text}"),
     ("GET", "/me/questions", "审核员问我的问题"),
-    ("POST", "/feedback", "意见反馈 {body, contact?, page?}"),
+    ("POST", "/feedback", "意见反馈（需登录）{body, contact?（不填用账号邮箱）, page?}"),
     ("GET", "/feedback/mine", "我的反馈和回复"),
     ("POST", "/uploads", "开始上传 {filename, mime?, parts: [{size, sha256}]}"),
     ("GET", "/uploads/{id}", "上传进度"),
@@ -482,6 +482,10 @@ async fn call_tool(app: &Arc<App>, auth: &Auth, ctx: &Ctx, ip: &str, name: &str,
             None => json!({ "role": "访客", "hint": "在网站「我的」页面创建个人令牌，以 Authorization: Bearer <令牌> 连接即可使用写操作" }),
         },
         "submit_feedback" => {
+            // The human check can't be shown here: past the allowance, it is done on the site.
+            if app.check_human(auth, crate::gate::Kind::Feedback).is_err() {
+                return Err("提交反馈太频繁了，请到网站上提交（会要求先完成人机验证）".into());
+            }
             let (hub, user, ip) = (app.hub.clone(), auth.user.clone(), ip.to_string());
             let (body, contact) = (arg_str(a, "body").to_string(), arg_str(a, "contact").to_string());
             blocking(move || hub.submit_feedback(Viewer { user: user.as_ref() }, &body, &contact, "mcp", &ip)).await?;

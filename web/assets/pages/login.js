@@ -1,4 +1,4 @@
-import { api, forgetMe, layout, meta, pwToggle, qs, toast, $ } from '../app.js';
+import { api, forgetMe, layout, loadTurnstile, meta, pwToggle, qs, toast, $ } from '../app.js';
 
 pwToggle($('#password'), $('#password2'));
 
@@ -42,17 +42,6 @@ function tick() {
 // server answers with its site key, the widget appears, and passing it sends the code.
 let captchaToken = '';
 let captchaWidget = null;
-function loadTurnstile() {
-  if (window.turnstile) return Promise.resolve(window.turnstile);
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-    s.async = true;
-    s.onload = () => resolve(window.turnstile);
-    s.onerror = () => reject(new Error('人机验证加载失败，请检查网络后刷新重试'));
-    document.head.appendChild(s);
-  });
-}
 async function showCaptcha(sitekey) {
   $('#captchabox').hidden = false;
   const ts = await loadTurnstile();

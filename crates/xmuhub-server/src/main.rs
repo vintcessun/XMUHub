@@ -2,6 +2,7 @@ mod alloc;
 mod api;
 mod captcha;
 mod config;
+mod gate;
 mod mailer;
 mod mcp;
 mod ratelimit;
@@ -185,6 +186,7 @@ async fn run(cmd: Cmd, cfg: Config) -> anyhow::Result<()> {
         scans: Default::default(),
         tree_json: Default::default(),
         missing_seen: Default::default(),
+        gates: Default::default(),
         secret: cfg.ticket_secret.clone(),
         turnstile: if cfg.turnstile_sitekey.is_empty() || cfg.turnstile_secret.is_empty() {
             tracing::warn!("Turnstile not configured: uncommon mail domains can sign up without a human check");

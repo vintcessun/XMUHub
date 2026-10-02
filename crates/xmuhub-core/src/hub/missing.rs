@@ -91,6 +91,17 @@ impl Hub {
             Self::save_missing(st, tx)
         })
     }
+
+    /// Admins: drops junk terms (garbled input) from the list; searching them again counts anew.
+    pub fn delete_missing(&self, viewer: Viewer, terms: &[String]) -> Result<usize> {
+        viewer.at_least(Level::Admin)?;
+        let keys: Vec<String> = terms.iter().filter_map(|t| missing_key(t)).collect();
+        self.mutate(|st, tx| {
+            let n = keys.iter().filter(|k| st.missing.remove(*k).is_some()).count();
+            Self::save_missing(st, tx)?;
+            Ok(n)
+        })
+    }
 }
 
 /// Stored as a map from the counted form.

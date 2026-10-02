@@ -167,7 +167,10 @@ impl Hub {
 
     // ---------------------------------------------------------------- feedback
 
+    /// Signed-in users only. Without a contact given, the account email is where to reply.
     pub fn submit_feedback(&self, viewer: Viewer, body: &str, contact: &str, page: &str, ip: &str) -> Result<Feedback> {
+        let me = viewer.at_least(Level::Contributor)?;
+        let contact = if contact.trim().is_empty() { me.email.as_str() } else { contact };
         let body: String = body.trim().chars().filter(|c| *c == '\n' || !c.is_control()).take(2000).collect();
         if body.chars().count() < 4 {
             return Err(bad("请多写几个字，说清楚问题或建议"));

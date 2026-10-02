@@ -103,7 +103,9 @@ async fn review_tabs_count_what_waits_and_feedback_replies_reach_the_sender() {
     let f = upload(&h, &dir, va, a, b"slides").await;
     upload(&h, &dir, vs, a, b"waiting").await;
     h.suggest_move(vs, f, b, "").unwrap();
+    assert!(h.submit_feedback(Viewer { user: None }, "上传太慢了", "x@example.invalid", "/upload", "1.1.1.1").is_err(), "signed-in users only");
     let fb = h.submit_feedback(vs, "上传太慢了", "", "/upload", "1.1.1.1").unwrap();
+    assert_eq!(fb.contact, "s@example.invalid", "no contact given: reply to the account email");
 
     assert!(h.review_counts(vs).is_err(), "reviewers only");
     let c = h.review_counts(va).unwrap();
@@ -142,6 +144,9 @@ async fn empty_searches_are_counted_and_only_admins_publish_them() {
     h.set_missing_status(va, "四史", "public").unwrap();
     h.set_missing_status(va, "有限元", "hidden").unwrap();
     assert_eq!(h.public_missing().iter().map(|m| m.term.as_str()).collect::<Vec<_>>(), vec!["四史"]);
+    assert!(h.delete_missing(vs, &["有限元".into()]).is_err());
+    assert_eq!(h.delete_missing(va, &["有限元".into(), "不存在".into()]).unwrap(), 1, "junk can be dropped");
+    assert_eq!(h.missing_terms(va).unwrap().len(), 2);
     drop(h);
     let h = open(&dir);
     assert_eq!(h.public_missing().len(), 1, "kept across restarts");

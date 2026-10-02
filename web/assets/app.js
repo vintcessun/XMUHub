@@ -25,7 +25,14 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
     metaCache = null;
   }
   inflight++;
-  try { return await request(path, method, headers, body, signal); } finally {
+  try {
+    try { return await request(path, method, headers, body, signal); } catch (e) {
+      // Too many submissions in an hour: pass the human check once, then the same call again.
+      if (e.status !== 429 || !e.data || e.data.captcha !== true) throw e;
+      await passHumanCheck(e.message);
+      return await request(path, method, headers, body, signal);
+    }
+  } finally {
     if (--inflight === 0) setTimeout(() => { if (!inflight) { for (const f of idleWaiters) f(); idleWaiters.clear(); } }, 0);
   }
 }
@@ -319,7 +326,7 @@ export async function layout(active) {
     <span>{{site.footer}}</span>
     <span><a href="/help">使用教程</a> · <a href="/about">使用须知</a> · <a href="/feedback">意见反馈</a>${COMMUNITY ? `（${esc(COMMUNITY)}）` : ''} · <a href="/collections">收藏夹</a> · <a href="/links">站外资源</a> · <a href="/missing">缺资料的课程</a> · <a href="/stats">统计</a> · <a href="${REPO_URL}" rel="noopener">源代码（AGPL-3.0）</a> · 资料由用户上传，仅供个人学习交流</span>
     <span>本站服务器不存储任何资料文件。文件的上传、存储及下载由第三方服务提供商（GitHub 及国内公共加速镜像）完成，本站仅提供上传辅助、资源信息展示及第三方链接索引服务。<a href="/about#hosting">文件托管说明</a> · <a href="/about">免责声明</a> · <a href="/privacy">隐私政策</a></span>
-    <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（无需注册），请留下邮箱并附上权属证明材料，核实后 48 小时内下架，无证明材料的不予受理。<a href="/about#copyright">版权声明与侵权投诉</a></span>
+    <span>如认为资料侵犯了您的著作权或其他合法权益，请通过资料页「投诉 / 申请下架」或<a href="/feedback">意见反馈</a>联系我们（需要登录），并附上权属证明材料，核实后 48 小时内下架，无证明材料的不予受理。<a href="/about#copyright">版权声明与侵权投诉</a></span>
     ${ICP ? `<span><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener">${esc(ICP)}</a></span>` : ''}</div>`;
   feedbackButton(active !== 'feedback');
   topButton();
@@ -558,6 +565,57 @@ export function modal(title, { wide = false } = {}) {
   const body = wrap.querySelector('.modal-body');
   body.close = close;
   return body;
+}
+
+// ---------------------------------------------------------------- human check (Cloudflare Turnstile)
+//
+// Loaded only when the server asks for it (an answer carrying `captcha`, the site key): signing
+// up with an uncommon mail domain, or starting many uploads in a short time.
+
+export function loadTurnstile() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.onload = () => resolve(window.turnstile);
+    s.onerror = () => reject(new Error('人机验证加载失败，请检查网络后刷新重试'));
+    document.head.appendChild(s);
+  });
+}
+
+/** Shows the check in a dialog; resolves with its token, rejects if the dialog is closed. */
+export function humanCheck(sitekey, why) {
+  const body = modal('人机验证');
+  body.innerHTML = `<p class="small muted" style="margin-top:0">${esc(why)}</p><div data-ts></div>`;
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const watch = setInterval(() => {
+      if (!done && !document.body.contains(body)) { clearInterval(watch); reject(new Error('已取消人机验证')); }
+    }, 300);
+    loadTurnstile().then((ts) => ts.render(body.querySelector('[data-ts]'), {
+      sitekey,
+      language: 'zh-cn',
+      callback: (token) => { done = true; clearInterval(watch); body.close(); resolve(token); },
+    })).catch((e) => { done = true; clearInterval(watch); body.close(); reject(e); });
+  });
+}
+
+// Calls that hit the limit at the same time (several uploads at once) wait for the same check;
+// one asked just after another passed goes straight on.
+let checking = null;
+let passedAt = 0;
+function passHumanCheck(why) {
+  if (Date.now() - passedAt < 60_000) return Promise.resolve();
+  checking ||= meta()
+    .then((m) => {
+      if (!m.captcha_sitekey) throw new ApiError(429, why);
+      return humanCheck(m.captcha_sitekey, `${why}。通过后 6 小时内不会再问。`);
+    })
+    .then((captcha) => request('/captcha', 'POST', { 'X-XMUHub': '1' }, { captcha }))
+    .then(() => { passedAt = Date.now(); })
+    .finally(() => { checking = null; });
+  return checking;
 }
 
 /** Adds a 显示/隐藏 button to each password input. */

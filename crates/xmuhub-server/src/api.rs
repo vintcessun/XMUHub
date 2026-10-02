@@ -20,6 +20,7 @@ use xmuhub_core::storage::local::LocalBackend;
 use xmuhub_core::storage::mirrors::Mirrors;
 use xmuhub_core::{Error, Hub};
 
+use crate::gate;
 use crate::mailer::Mailer;
 use crate::web::Site;
 
@@ -44,8 +45,10 @@ pub struct App {
     pub script_token: Option<String>,
     pub secure_cookie: bool,
     pub github: Option<Arc<xmuhub_core::storage::github::GitHubBackend>>,
-    /// Searches that found nothing, already counted today, as "ip term" (see `search`).
+    /// Searches that found nothing, already counted today, as "user-id term" (see `search`).
     pub missing_seen: parking_lot::Mutex<(i64, std::collections::HashSet<String>)>,
+    /// Recent submissions per account and kind, for the human check (see `App::check_human`).
+    pub gates: parking_lot::Mutex<crate::gate::Gates>,
     /// `/api/tree` as sent, with the tree generation it was built from (see `Hub::tree_generation`).
     /// Every page that shows the tree asks for it; rebuilding it took ~9 ms at 2 000 courses.
     pub tree_json: parking_lot::Mutex<Option<(u64, bytes::Bytes)>>,
@@ -55,6 +58,20 @@ pub struct App {
     pub turnstile: Option<crate::captcha::Turnstile>,
     /// Signs receipts for things submitted without an account (feedback).
     pub secret: Vec<u8>,
+}
+
+impl App {
+    /// Counts a submission for people to review; past the hourly allowance for its kind the
+    /// account must pass a human check first (Error::HumanCheck, which the page answers by
+    /// showing Turnstile and posting /captcha). Admins, and sites without Turnstile, never are.
+    pub fn check_human(&self, auth: &Auth, kind: gate::Kind) -> R<()> {
+        let Some(u) = auth.user.as_ref().filter(|u| u.level < Level::Admin) else { return Ok(()) };
+        if self.turnstile.is_none() || self.gates.lock().admit(u.id, kind, xmuhub_core::model::now()) {
+            return Ok(());
+        }
+        let msg = format!("{}太频繁了（一小时超过 {} 次），请先完成人机验证", kind.what(), kind.free_per_hour());
+        Err(ApiError(Error::HumanCheck(msg)))
+    }
 }
 
 type S = State<Arc<App>>;
@@ -77,14 +94,16 @@ impl IntoResponse for ApiError {
             Error::Unauthorized => StatusCode::UNAUTHORIZED,
             Error::BadRequest(_) => StatusCode::BAD_REQUEST,
             Error::Conflict(_) => StatusCode::CONFLICT,
-            Error::TooMany(_) => StatusCode::TOO_MANY_REQUESTS,
+            Error::TooMany(_) | Error::HumanCheck(_) => StatusCode::TOO_MANY_REQUESTS,
             Error::Upstream(_) => StatusCode::BAD_GATEWAY,
             Error::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         if status.is_server_error() {
             tracing::error!("{}", self.0);
         }
-        (status, Json(json!({ "error": self.0.to_string() }))).into_response()
+        // `captcha`: the page shows the human check (site key in /api/meta) and tries again.
+        let captcha = matches!(self.0, Error::HumanCheck(_));
+        (status, Json(json!({ "error": self.0.to_string(), "captcha": captcha }))).into_response()
     }
 }
 
@@ -337,6 +356,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/feedback", post(feedback))
         .route("/feedback/mine", get(my_feedback))
         .route("/uploads", post(begin_upload))
+        .route("/captcha", post(pass_human_check))
         .route("/uploads/{id}", get(upload_plan))
         .route("/uploads/{id}/parts/{index}", post(confirm_part))
         .route("/uploads/{id}/parts/{index}/renew", post(renew_part))
@@ -360,6 +380,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/missing", get(missing_public))
         .route("/admin/missing", get(missing_admin).post(missing_import))
         .route("/admin/missing/status", post(missing_status))
+        .route("/admin/missing/delete", post(missing_delete))
         .route("/move-suggestions/{id}/review", post(review_move_suggestion))
         .route("/announcement", put(set_announcement))
         .route("/bulletins", get(bulletins).post(post_bulletin))
@@ -445,6 +466,8 @@ async fn meta(State(app): S) -> Json<Value> {
         "upload_via": if app.worker_url.is_empty() { "relay" } else { "worker" },
         "mail": app.mailer.is_some(),
         "announcement": app.hub.announcement(),
+        // For the human check that too many submissions (or some sign-ups) are asked to pass.
+        "captcha_sitekey": app.turnstile.as_ref().map(|t| t.sitekey.as_str()),
     }))
 }
 
@@ -637,6 +660,7 @@ struct AvatarIn {
 
 /// The picture itself was uploaded like any file (`/uploads`); this makes it the avatar.
 async fn set_avatar(State(app): S, auth: Auth, Json(b): Json<AvatarIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Avatar)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     blocking(move || hub.set_avatar(Viewer { user: user.as_ref() }, b.upload_id)).await?;
@@ -712,6 +736,7 @@ async fn suggest(State(app): S, Query(q): Query<Q>) -> Json<Value> {
 }
 
 async fn create_node(State(app): S, auth: Auth, Json(b): Json<NodeInput>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Node)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let n = blocking(move || hub.create_node(Viewer { user: user.as_ref() }, b)).await?;
@@ -761,7 +786,7 @@ struct SearchQ {
     page: Option<String>,
 }
 
-async fn search(State(app): S, auth: Auth, h: HeaderMap, Query(q): Query<SearchQ>) -> R<Json<Value>> {
+async fn search(State(app): S, auth: Auth, Query(q): Query<SearchQ>) -> R<Json<Value>> {
     const PAGE: usize = 20;
     let courses_only = q.ty.as_deref() == Some("course");
     let filter = Filter {
@@ -785,19 +810,24 @@ async fn search(State(app): S, auth: Auth, h: HeaderMap, Query(q): Query<SearchQ
     // Off the two async worker threads: a search takes CPU time.
     let (hub, user, text) = (app.hub.clone(), auth.user.clone(), q.q.clone().unwrap_or_default());
     let (items, total) = blocking(move || hub.search(Viewer { user: user.as_ref() }, &text, filter, PAGE, (page - 1) * PAGE)).await?;
-    // A plain search that found nothing: what the site is missing (counted once per address
-    // per term per day, so reloading doesn't inflate it).
+    // A plain search by a signed-in user that found nothing: what the site is missing. Counted
+    // once per account per term per day (reloading doesn't inflate it), and at most
+    // MISSING_PER_USER terms per account per day, so nobody can fill the list with junk.
     let plain = filter.within.is_none() && filter.level.is_none() && filter.tag.is_none();
     if total == 0 && page == 1 && plain
+        && let Some(me) = &auth.user
         && let Some(term) = xmuhub_core::hub::missing_key(q.q.as_deref().unwrap_or_default())
     {
+        const MISSING_PER_USER: usize = 20;
         let day = xmuhub_core::model::now() / 86400;
         let first = {
             let mut seen = app.missing_seen.lock();
             if seen.0 != day {
                 *seen = (day, Default::default());
             }
-            seen.1.len() < 100_000 && seen.1.insert(format!("{} {term}", client_ip(&h)))
+            let prefix = format!("{} ", me.id);
+            let mine = seen.1.iter().filter(|k| k.starts_with(&prefix)).count();
+            mine < MISSING_PER_USER && seen.1.len() < 100_000 && seen.1.insert(format!("{prefix}{term}"))
         };
         if first {
             let hub = app.hub.clone();
@@ -923,6 +953,7 @@ struct ResourceChangeIn {
 }
 
 async fn request_resource_change(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<ResourceChangeIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::ChangeRequest)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let q = blocking(move || hub.request_resource_change(Viewer { user: user.as_ref() }, id, &b.kind, &b.value)).await?;
@@ -961,6 +992,7 @@ struct ReportIn {
 }
 
 async fn report(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<Id>, Json(b): Json<ReportIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Report)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let ip = client_ip(&h);
@@ -1022,6 +1054,7 @@ struct FeedbackIn {
 }
 
 async fn feedback(State(app): S, auth: Auth, h: HeaderMap, Json(b): Json<FeedbackIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Feedback)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let ip = client_ip(&h);
@@ -1125,8 +1158,25 @@ struct BeginUpload {
 }
 
 async fn begin_upload(State(app): S, auth: Auth, Json(b): Json<BeginUpload>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Upload)?;
     let plan = app.hub.begin_upload(auth.viewer(), &b.filename, &b.mime, b.parts).await?;
     Ok(Json(json!(plan)))
+}
+
+#[derive(Deserialize)]
+struct CaptchaIn {
+    captcha: String,
+}
+
+/// A passed Turnstile check lets the account go on submitting for the next six hours.
+async fn pass_human_check(State(app): S, auth: Auth, h: HeaderMap, Json(b): Json<CaptchaIn>) -> R<Json<Value>> {
+    let u = auth.user.as_ref().ok_or(Error::Unauthorized)?;
+    let Some(t) = &app.turnstile else { return Ok(Json(json!({ "ok": true }))) };
+    if !t.verify(&b.captcha, &real_ip(&h)).await {
+        return Err(bad("人机验证没有通过，请再试一次"));
+    }
+    app.gates.lock().pass(u.id, xmuhub_core::model::now());
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn upload_plan(State(app): S, auth: Auth, Path(id): Path<Id>) -> R<Json<Value>> {
@@ -1320,6 +1370,7 @@ async fn collect(State(app): S, auth: Auth, Path((id, resource)): Path<(Id, Id)>
 }
 
 async fn share_collection(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<OnIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Collection)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     Ok(Json(json!(blocking(move || hub.share_collection(Viewer { user: user.as_ref() }, id, b.on)).await?)))
@@ -1340,12 +1391,14 @@ struct SeriesIn {
 }
 
 async fn create_series(State(app): S, auth: Auth, Json(b): Json<SeriesIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Series)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, None, b.node, SeriesText { title: &b.title, source: &b.source, year: &b.year }, &b.items)).await?)))
 }
 
 async fn change_series(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<SeriesIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Series)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     Ok(Json(json!(blocking(move || hub.propose_series(Viewer { user: user.as_ref() }, Some(id), b.node, SeriesText { title: &b.title, source: &b.source, year: &b.year }, &b.items)).await?)))
@@ -1439,6 +1492,7 @@ struct SuggestLinkIn {
 }
 
 async fn suggest_link(State(app): S, auth: Auth, Json(b): Json<SuggestLinkIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Link)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let s = blocking(move || hub.suggest_link(Viewer { user: user.as_ref() }, &b.title, &b.url, &b.note)).await?;
@@ -1454,6 +1508,7 @@ struct SuggestMoveIn {
 
 /// 建议换个分类 (see `Hub::suggest_move`).
 async fn suggest_move(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<SuggestMoveIn>) -> R<Json<Value>> {
+    app.check_human(&auth, gate::Kind::Move)?;
     let hub = app.hub.clone();
     let user = auth.user.clone();
     let s = blocking(move || hub.suggest_move(Viewer { user: user.as_ref() }, id, b.node, &b.note)).await?;
@@ -1500,6 +1555,19 @@ async fn missing_status(State(app): S, auth: Auth, Json(b): Json<MissingStatusIn
     let user = auth.user.clone();
     blocking(move || hub.set_missing_status(Viewer { user: user.as_ref() }, &b.term, &b.status)).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct MissingDeleteIn {
+    terms: Vec<String>,
+}
+
+/// Admins: drops junk terms from the 搜不到 list.
+async fn missing_delete(State(app): S, auth: Auth, Json(b): Json<MissingDeleteIn>) -> R<Json<Value>> {
+    let hub = app.hub.clone();
+    let user = auth.user.clone();
+    let n = blocking(move || hub.delete_missing(Viewer { user: user.as_ref() }, &b.terms)).await?;
+    Ok(Json(json!({ "ok": true, "deleted": n })))
 }
 
 #[derive(Deserialize)]

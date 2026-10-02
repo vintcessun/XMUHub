@@ -238,7 +238,7 @@ function proofLink(page) {
   return `${location.origin}/feedback?takedown=1${page && page.startsWith('/r/') ? `&from=${encodeURIComponent(page)}` : ''}`;
 }
 function proofText(page) {
-  return `下架申请需要证明资料确实属于你：请写明资料链接和你的身份说明，附上证明材料（原始文件或手稿、编写 / 整理记录、署名或出版信息、教师或单位说明等），并留下邮箱，我们会通过邮箱联系你核实，图片和文件可以等邮件联系后再发。请在这里重新提交：${proofLink(page)}　没有证明材料或证明不足的申请一律驳回。`;
+  return `下架申请需要证明资料确实属于你：请写明资料链接和你的身份说明，附上证明材料（原始文件或手稿、编写 / 整理记录、署名或出版信息、教师或单位说明等），我们会通过你的账号邮箱联系你核实，图片和文件可以等邮件联系后再发。请在这里重新提交：${proofLink(page)}　没有证明材料或证明不足的申请一律驳回。`;
 }
 function proofMail(to, page) {
   const subject = '关于你在本站提交的资料下架申请';
@@ -473,15 +473,29 @@ const panels = {
     const all = await api('/admin/missing');
     const S = { new: '待处理', public: '已公开征集', hidden: '已隐藏' };
     const list = all.filter((m) => m.status === show);
-    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学搜了但一条结果都没有的词（每人每天同一个词只算一次）。是本站缺的课程就「公开征集」，会列在<a href="/missing" target="_blank">缺资料的课程</a>页，有资料后自动从那里消失；乱码、小说游戏、不适合公开的就「隐藏」。标了「现在能搜到」的说明已经有资料或加了别名。</p>
+    box.innerHTML = `<section class="card"><p class="small muted" style="margin-top:0">同学搜了但一条结果都没有的词（每人每天同一个词只算一次）。是本站缺的课程就「公开征集」，会列在<a href="/missing" target="_blank">缺资料的课程</a>页，有资料后自动从那里消失；小说游戏、不适合公开的就「隐藏」；乱码、随手敲的字母就勾上后「删除」（只删这条搜索记录）。标了「现在能搜到」的说明已经有资料或加了别名。</p>
       <div class="tabs" style="margin-bottom:10px">${Object.entries(S).map(([k, v]) => `<button type="button" data-s="${k}" class="${k === show ? 'on' : ''}">${v} ${all.filter((m) => m.status === k).length}</button>`).join('')}</div>
-      ${list.length ? `<table class="table"><thead><tr><th>搜索词</th><th>人次</th><th>最近</th><th></th></tr></thead><tbody>
-      ${list.map((m) => `<tr data-term="${esc(m.term)}"><td><a href="/search?q=${encodeURIComponent(m.term)}" target="_blank">${esc(m.term)}</a>${m.found ? ' <span class="badge published">现在能搜到</span>' : ''}</td><td>${m.count}</td><td class="small faint">${ago(m.last)}</td>
+      ${list.length ? `<div class="row" style="gap:6px;margin-bottom:8px"><label class="small"><input type="checkbox" id="msall"> 全选</label><span class="grow"></span><button class="btn sm" data-bulk="hidden" type="button">隐藏选中</button><button class="btn sm danger" data-bulk="delete" type="button">删除选中</button></div>
+      <table class="table"><thead><tr><th></th><th>搜索词</th><th>人次</th><th>最近</th><th></th></tr></thead><tbody>
+      ${list.map((m) => `<tr data-term="${esc(m.term)}"><td><input type="checkbox" data-pick></td><td><a href="/search?q=${encodeURIComponent(m.term)}" target="_blank">${esc(m.term)}</a>${m.found ? ' <span class="badge published">现在能搜到</span>' : ''}</td><td>${m.count}</td><td class="small faint">${ago(m.last)}</td>
         <td class="row" style="gap:6px;justify-content:flex-end">${show !== 'public' ? '<button class="btn sm ok" data-to="public" type="button">公开征集</button>' : ''}${show !== 'hidden' ? '<button class="btn sm" data-to="hidden" type="button">隐藏</button>' : ''}${show !== 'new' ? '<button class="btn sm" data-to="new" type="button">撤回</button>' : ''}</td></tr>`).join('')}</tbody></table>`
       : '<div class="empty"><b>这里没有</b></div>'}</section>`;
     box.onclick = async (e) => {
       const tab = e.target.closest('[data-s]');
       if (tab) { panels.missing(box, tab.dataset.s); return; }
+      if (e.target.id === 'msall') { box.querySelectorAll('[data-pick]').forEach((x) => { x.checked = e.target.checked; }); return; }
+      const bulk = e.target.closest('[data-bulk]');
+      if (bulk) {
+        const rows = [...box.querySelectorAll('[data-pick]:checked')].map((x) => x.closest('[data-term]'));
+        if (!rows.length) { toast('先勾选要处理的词', true); return; }
+        try {
+          if (bulk.dataset.bulk === 'delete') await api('/admin/missing/delete', { method: 'POST', body: { terms: rows.map((tr) => tr.dataset.term) } });
+          else for (const tr of rows) await api('/admin/missing/status', { method: 'POST', body: { term: tr.dataset.term, status: 'hidden' } });
+          rows.forEach((tr) => tr.remove());
+          toast(bulk.dataset.bulk === 'delete' ? `已删除 ${rows.length} 个` : `已隐藏 ${rows.length} 个`);
+        } catch (err) { toast(err.message, true); }
+        return;
+      }
       const b = e.target.closest('[data-to]');
       if (!b) return;
       const tr = b.closest('[data-term]');

@@ -12,6 +12,9 @@ pub enum Error {
     Conflict(String),
     #[error("{0}")]
     TooMany(String),
+    /// Too many submissions in a short time: allowed again once the sender passes a human check.
+    #[error("{0}")]
+    HumanCheck(String),
     #[error("存储服务错误：{0}")]
     Upstream(String),
     #[error("内部错误：{0}")]
@@ -25,7 +28,7 @@ impl Error {
     /// something that failed. Writes check before they change anything, so a rejected write
     /// leaves memory as it was (see `Hub::mutate`).
     pub fn is_rejection(&self) -> bool {
-        matches!(self, Error::NotFound(_) | Error::Forbidden | Error::Unauthorized | Error::BadRequest(_) | Error::Conflict(_) | Error::TooMany(_))
+        matches!(self, Error::NotFound(_) | Error::Forbidden | Error::Unauthorized | Error::BadRequest(_) | Error::Conflict(_) | Error::TooMany(_) | Error::HumanCheck(_))
     }
 }
 

@@ -431,6 +431,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/n/{id}", get(|s: S, h: HeaderMap| async move { page(s, "node.html", h) }))
         .route("/r/{id}", get(|s: S, h: HeaderMap| async move { page(s, "resource.html", h) }))
         .route("/{*path}", get(static_file))
+        .layer(axum::middleware::from_fn_with_state(app.clone(), crate::access::guard))
         .layer(axum::middleware::from_fn(csrf_guard))
         .layer(axum::middleware::from_fn(crate::ratelimit::guard))
         .with_state(app)

@@ -63,13 +63,15 @@ async function request(path, method, headers, body, signal) {
 }
 
 let meCache = null;
+let signedIn = false;
 /** The signed-in user or null. */
 export function me() {
-  if (!meCache) meCache = api('/me').then((r) => r.user).catch(() => null);
+  if (!meCache) meCache = api('/me').then((r) => { signedIn = !!r.user; return r.user; }).catch(() => { signedIn = false; return null; });
   return meCache;
 }
 export function forgetMe() {
   meCache = null;
+  signedIn = false;
   try { sessionStorage.removeItem('ludao.top'); } catch { /* storage blocked */ }
 }
 
@@ -1035,7 +1037,7 @@ document.addEventListener('click', (e) => {
  */
 const SOFT = /^\/(?:|browse|help|about|feedback|links|missing|search|[nr]\/\d+\/?)$/;
 const here = () => location.pathname + location.search;
-const soft = (u) => u.origin === location.origin && SOFT.test(u.pathname) && SOFT.test(location.pathname);
+const soft = (u) => signedIn && u.origin === location.origin && SOFT.test(u.pathname) && SOFT.test(location.pathname);
 const templates = new Map();
 // Version of this app module (the server stamps it into every page, see versioning.rs).
 const BUILD = document.querySelector('meta[name="xmuhub-version"]')?.content || '';
@@ -1071,6 +1073,7 @@ function template(path) {
   const p = fetch(path, { credentials: 'same-origin' }).then(async (res) => {
     if (!res.ok || !(res.headers.get('content-type') || '').includes('text/html')) throw new Error(`HTTP ${res.status}`);
     const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+    if (new URL(res.url).pathname === '/login') throw Object.assign(new Error('login required'), { login: res.url });
     const main = doc.querySelector('main');
     const script = doc.querySelector('script[type="module"][src]');
     if (!main || !script) throw new Error('not a page');
@@ -1122,8 +1125,9 @@ async function render({ y = 0, hash = '' } = {}) {
     // A fresh query makes import() run the page module again; the script is already versioned.
     t.src = `${t.script}${t.script.includes('?') ? '&' : '?'}r=${seq}`;
     await preloadModule(t.src);
-  } catch {
-    location.reload();
+  } catch (e) {
+    if (e.login) location.assign(e.login);
+    else location.reload();
     return;
   } finally {
     clearTimeout(busy);

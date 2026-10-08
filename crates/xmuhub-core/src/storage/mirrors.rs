@@ -1,7 +1,10 @@
 //! ghproxy-style download mirrors (`{prefix}/https://github.com/...`).
-//! Public mirrors come and go, so they are probed periodically and ranked by latency;
+//! Public mirrors come and go, so they are probed periodically: a small file says which are
+//! up, and a larger one (less often, one mirror at a time) how fast they keep going, since some
+//! serve the first few hundred KB quickly and then throttle to a crawl. Ranked by that speed;
 //! direct GitHub is always kept as the last resort.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
@@ -21,7 +24,14 @@ pub struct MirrorStat {
     pub cors: bool,
     /// Failed only with a rate limit or a timeout, which may be specific to our server's IP.
     pub soft_fail: bool,
+    /// Throughput on the larger speed probe, KiB/s (0 until measured).
+    pub sustained_kbps: u64,
 }
+
+/// Mirrors slower than this (KiB/s) on the speed probe go after the others.
+const SLOW_KBPS: u64 = 300;
+/// How long the speed probe reads from each mirror.
+const SPEED_READ: Duration = Duration::from_secs(8);
 
 /// Mirrors known to send CORS headers; used for previews until the first probe has run
 /// (otherwise every restart leaves previews without a route for a minute).
@@ -43,13 +53,15 @@ pub struct Mirrors {
     stats: RwLock<Vec<MirrorStat>>,
     /// Healthy prefixes that allow cross-origin reads, fastest first.
     cors: RwLock<Vec<String>>,
+    /// Last speed-probe result per prefix, KiB/s.
+    sustained: RwLock<HashMap<String, u64>>,
 }
 
 impl Mirrors {
     pub fn new(candidates: Vec<String>) -> Mirrors {
         let candidates: Vec<String> = candidates.into_iter().map(|c| c.trim_end_matches('/').to_string()).collect();
         let cors = candidates.iter().filter(|c| KNOWN_CORS.contains(&c.as_str())).cloned().collect();
-        Mirrors { ranked: RwLock::new(candidates.clone()), candidates, stats: RwLock::new(Vec::new()), cors: RwLock::new(cors) }
+        Mirrors { ranked: RwLock::new(candidates.clone()), candidates, stats: RwLock::new(Vec::new()), cors: RwLock::new(cors), sustained: RwLock::new(HashMap::new()) }
     }
 
     /// `url` rewritten through each healthy mirror, then the original.
@@ -109,10 +121,60 @@ impl Mirrors {
                 error,
                 cors: cors && ok,
                 soft_fail: !ok && soft,
+                sustained_kbps: 0,
             }
         });
-        let mut stats = futures_util::future::join_all(checks).await;
-        stats.sort_by_key(|s| (!s.ok, s.latency_ms));
+        let stats = futures_util::future::join_all(checks).await;
+        self.rerank(stats);
+    }
+
+    /// Reads up to `SPEED_READ` of the larger speed-probe file through each healthy mirror, one
+    /// at a time (side by side they would share our server's line), and re-ranks by the result.
+    pub async fn probe_speed(&self, client: &reqwest::Client, probe_url: &str) {
+        let healthy = self.ranked.read().clone();
+        for prefix in healthy {
+            let start = Instant::now();
+            let mut got = 0u64;
+            let mut first: Option<Instant> = None;
+            if let Ok(mut r) = client.get(format!("{prefix}/{probe_url}")).timeout(SPEED_READ + Duration::from_secs(10)).send().await
+                && r.status().is_success()
+            {
+                // Counted as it arrives, never kept.
+                while start.elapsed() < SPEED_READ {
+                    match r.chunk().await {
+                        Ok(Some(c)) => {
+                            first.get_or_insert_with(Instant::now);
+                            got += c.len() as u64;
+                        }
+                        _ => break,
+                    }
+                }
+            }
+            // Throughput once bytes flow (the small probe already measures the wait for them).
+            let ms = first.map_or(0, |f| f.elapsed().as_millis() as u64).max(1);
+            let kbps = if got == 0 { 0 } else { got * 1000 / 1024 / ms };
+            self.sustained.write().insert(prefix, kbps);
+        }
+        let stats = self.stats.read().clone();
+        self.rerank(stats);
+        tracing::info!(speeds = ?*self.sustained.read(), "mirror speed probe finished");
+    }
+
+    /// Ranks healthy mirrors: those measured at least SLOW_KBPS on the speed probe, fastest
+    /// first; then unmeasured ones by small-probe time; then the slow ones.
+    fn rerank(&self, mut stats: Vec<MirrorStat>) {
+        let speeds = self.sustained.read().clone();
+        for s in &mut stats {
+            s.sustained_kbps = speeds.get(&s.prefix).copied().unwrap_or(0);
+        }
+        stats.sort_by_key(|s| {
+            let class = match speeds.get(&s.prefix) {
+                Some(&k) if k >= SLOW_KBPS => 0,
+                None => 1,
+                Some(_) => 2,
+            };
+            (!s.ok, class, std::cmp::Reverse(s.sustained_kbps), s.latency_ms)
+        });
         let ranked: Vec<String> = stats.iter().filter(|s| s.ok).map(|s| s.prefix.clone()).collect();
         tracing::info!(healthy = ranked.len(), total = stats.len(), "mirror probe finished");
         // If every probe failed the problem is more likely on our side (probe file, network)
@@ -131,12 +193,23 @@ impl Mirrors {
 
 #[cfg(test)]
 mod tests {
-    use super::Mirrors;
+    use super::{MirrorStat, Mirrors};
 
     #[test]
     fn local_files_are_readable_by_same_origin_previews() {
         let mirrors = Mirrors::new(vec![]);
         let urls = vec!["/api/local/file/abc123".to_string()];
         assert_eq!(mirrors.cors_urls(&urls), urls);
+    }
+
+    #[test]
+    fn mirrors_that_throttle_after_a_fast_start_go_last() {
+        let mirrors = Mirrors::new(vec!["https://a".into(), "https://b".into(), "https://c".into(), "https://d".into()]);
+        let stat = |p: &str, latency_ms| MirrorStat { prefix: p.into(), ok: true, latency_ms, speed_kbps: 0, checked_at: 0, error: String::new(), cors: true, soft_fail: false, sustained_kbps: 0 };
+        // a answers the small probe fastest but crawls after; c is the fastest for real; d is new.
+        mirrors.sustained.write().extend([("https://a".to_string(), 25), ("https://b".to_string(), 1500), ("https://c".to_string(), 3500)]);
+        mirrors.rerank(vec![stat("https://a", 300), stat("https://b", 900), stat("https://c", 1200), stat("https://d", 500)]);
+        assert_eq!(mirrors.wrap("u"), ["https://c/u", "https://b/u", "https://d/u", "https://a/u", "u"]);
+        assert_eq!(mirrors.stats()[0].sustained_kbps, 3500);
     }
 }

@@ -31,6 +31,8 @@ const PROBE_TAG: &str = "probe";
 /// measure throughput yet cheap to fetch every few minutes through each mirror.
 const PROBE_NAME: &str = "probe-256k.bin";
 pub const PROBE_SIZE: usize = 256 * 1024;
+const SPEED_PROBE_NAME: &str = "probe-4m.bin";
+const SPEED_PROBE_SIZE: usize = 4 * 1024 * 1024;
 
 /// One file of a scanned repository (git blob sha1, size in bytes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,28 +249,37 @@ impl GitHubBackend {
 
     /// Makes sure the tiny probe asset used for mirror health checks exists; returns its URL.
     pub async fn ensure_probe(&self) -> Result<String> {
+        self.ensure_probe_asset(PROBE_NAME, PROBE_SIZE).await
+    }
+
+    /// The larger asset that measures how fast each mirror keeps going; returns its URL.
+    pub async fn ensure_speed_probe(&self) -> Result<String> {
+        self.ensure_probe_asset(SPEED_PROBE_NAME, SPEED_PROBE_SIZE).await
+    }
+
+    async fn ensure_probe_asset(&self, name: &str, size: usize) -> Result<String> {
         let repo = self.repo_name(1);
         self.ensure_repo(&repo, false).await?;
         let rel = self.ensure_release(&repo, PROBE_TAG).await?;
-        let good = rel.assets.iter().find(|a| a.name == PROBE_NAME && a.state == "uploaded" && a.size == PROBE_SIZE as u64);
+        let good = rel.assets.iter().find(|a| a.name == name && a.state == "uploaded" && a.size == size as u64);
         if good.is_none() {
             // Replace a missing, half-written or wrong-sized probe.
-            if let Some(bad) = rel.assets.iter().find(|a| a.name == PROBE_NAME) {
+            if let Some(bad) = rel.assets.iter().find(|a| a.name == name) {
                 self.delete_asset(&repo, bad.id).await?;
             }
             // Deterministic, incompressible-looking bytes so mirrors can't shortcut the transfer.
-            let mut data = Vec::with_capacity(PROBE_SIZE);
+            let mut data = Vec::with_capacity(size);
             let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
-            while data.len() < PROBE_SIZE {
+            while data.len() < size {
                 x ^= x << 13;
                 x ^= x >> 7;
                 x ^= x << 17;
                 data.extend_from_slice(&x.to_le_bytes());
             }
-            data.truncate(PROBE_SIZE);
-            self.upload_small(&repo, rel.id, PROBE_NAME, data, "application/octet-stream").await?;
+            data.truncate(size);
+            self.upload_small(&repo, rel.id, name, data, "application/octet-stream").await?;
         }
-        Ok(format!("https://github.com/{}/{repo}/releases/download/{PROBE_TAG}/{PROBE_NAME}", self.cfg.owner))
+        Ok(format!("https://github.com/{}/{repo}/releases/download/{PROBE_TAG}/{name}", self.cfg.owner))
     }
 
     /// Stores a metadata dump in the private backup repo and keeps the newest `keep`.

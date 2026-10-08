@@ -294,7 +294,7 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
 
     let Some(gh) = github else { return };
 
-    // Mirror health: probe a tiny asset through every mirror, re-rank.
+    // Mirror health: probe a tiny asset through every mirror, re-rank (and hourly, by speed).
     let mirrors = app.mirrors.clone();
     let gh2 = gh.clone();
     tokio::spawn(async move {
@@ -308,9 +308,19 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
             }
         };
         let mut tick = tokio::time::interval(Duration::from_secs(15 * 60));
-        loop {
+        let mut speed_probe = None;
+        for round in 0u64.. {
             tick.tick().await;
             mirrors.probe(&probe_http, &probe, xmuhub_core::storage::github::PROBE_SIZE).await;
+            // Once an hour, how fast each mirror keeps going (4 MB, one mirror at a time).
+            if round % 4 == 0 {
+                if speed_probe.is_none() {
+                    speed_probe = gh2.ensure_speed_probe().await.map_err(|e| tracing::warn!("speed probe asset: {e}")).ok();
+                }
+                if let Some(url) = &speed_probe {
+                    mirrors.probe_speed(&probe_http, url).await;
+                }
+            }
         }
     });
 

@@ -4,7 +4,7 @@ xmu.vintces.icu 经 Cloudflare 代理（橙色云），其他子域名都是「�
 
 ## 缓存
 
-**启用登录限制前，必须先运行 `python3 scripts/cf_cache_rules.py apply`。** 第 6 步会新增最后执行的「XMUHub login gate」规则：除 `/assets/` 和 `/vendor/` 外，本站请求全部绕过边缘缓存；同时禁用 `/n/*`、`/r/*` 改写，保证登录后的返回地址保留资料 / 课程编号。旧缓存规则即使仍在，也会被此规则覆盖，旧公开缓存不再用于返回资料。完成后再用 `pwsh scripts/sync.ps1` 完整编译部署。首页和 API 的源站响应为 `private, no-store`；静态脚本、样式和图片继续缓存。下面的规则 1、2 和 URL 改写描述是旧的公开浏览策略，由第 6 步覆盖 / 禁用。
+**登录限制（2026-10 起）：** 除 `/api/meta`、`/api/me` 和登录注册外，API、MCP 和下载（`/d/`）都要求登录：游客得到 401（下载跳到登录页），响应带 `private, no-store`。网页本身不含资料数据，仍按规则 1 在边缘缓存（访问速度和抗刷都靠它），页面脚本发现没登录就跳到登录页。`scripts/cf_cache_rules.py apply` 的第 6 步把规则 2（匿名 API 缓存）缩小到 `/api/meta` 和 `/api/me`。
 
 | 设置 | 值 | 为什么 |
 |---|---|---|

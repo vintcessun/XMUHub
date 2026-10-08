@@ -305,6 +305,9 @@ export function loginUrl() {
 
 // ---------------------------------------------------------------- layout
 
+/** Pages a guest may see: the home page, signing in, the terms and the privacy policy. */
+const PUBLIC_PAGES = /^\/(?:|index\.html|login(?:\.html)?|about(?:\.html)?|privacy(?:\.html)?)$/;
+
 export async function layout(active) {
   const top = document.getElementById('top');
   const q = qs.get('q') || '';
@@ -334,6 +337,12 @@ export async function layout(active) {
   topButton();
   announcement();
   const user = await me();
+  // Pages are the same for everyone (Cloudflare caches them); the data behind them needs an
+  // account, so a guest is sent to the login page from here (the APIs answer 401 anyway).
+  if (!user && !PUBLIC_PAGES.test(location.pathname)) {
+    location.replace(loginUrl());
+    return new Promise(() => {});
+  }
   const navMe = top.querySelector('#nav-me');
   if (user) {
     navMe.innerHTML = `${avatar(user.avatar, user.nickname, 22)}<span>${esc(user.nickname)}</span>`;
@@ -527,12 +536,10 @@ export async function downloadResource(id, onProgress = () => {}, { batch = fals
   const single = plan.parts.length === 1;
   const got = plan.parts.map(() => 0);
   try {
-    // One click, one file: the first mirror, else the browser opens it itself (below). A batch
-    // can't hand files to the browser that way, so it tries every mirror that allows fetching.
-    const blobs = await inParallel(plan.parts, PARTS_AT_ONCE, (part, i) => {
-      const urls = single && !batch ? part.urls.slice(0, 1) : part.urls;
-      return fetchPart(part, urls, (n) => { got[i] = n; onProgress(Math.min(1, got.reduce((a, b) => a + b, 0) / total)); });
-    });
+    // Mirrors fastest first; one that crawls (some throttle after a fast start) or won't let
+    // the page fetch is left for the next. If none works, the browser opens the first itself.
+    const blobs = await inParallel(plan.parts, PARTS_AT_ONCE, (part, i) =>
+      fetchPart(part, part.urls, (n) => { got[i] = n; onProgress(Math.min(1, got.reduce((a, b) => a + b, 0) / total)); }));
     saveBlob(new Blob(blobs, { type: plan.mime || 'application/octet-stream' }), plan.filename);
     return { ok: true };
   } catch (e) {

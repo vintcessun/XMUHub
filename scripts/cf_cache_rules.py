@@ -97,8 +97,8 @@ new = ('(http.request.uri.path in {"/api/tree" "/api/meta" "/api/recent" "/api/p
        ' or starts_with(http.request.uri.path, "/api/nodes/")'
        ' or (http.request.uri.path wildcard "/api/resources/*" and not http.request.uri.path wildcard "/api/resources/*/*")'
        ' or http.request.uri.path wildcard "/api/resources/*/social")')
-if new in rule['expression']:
-    print('1. API cache rule: already done')
+if new in rule['expression'] or '(http.request.uri.path in {"/api/meta" "/api/me"})' in rule['expression']:
+    print('1. API cache rule: already done (step 6 narrows it later)')
 elif old in rule['expression']:
     body = {k: rule[k] for k in ('description', 'action', 'action_parameters', 'enabled') if k in rule}
     body['expression'] = rule['expression'].replace(old, new)

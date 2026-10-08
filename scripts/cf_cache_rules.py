@@ -20,6 +20,8 @@ Changes:
 4. Pages: the cache key leaves out the query string (a /?x=<random> flood can't miss the cache).
 5. Anonymous API reads live 5 minutes at the edge (not 1); /assets/speculation-rules.json is
    cached with the pages.
+6. Login-required pages and APIs bypass the shared cache, overriding the older public
+   rules above. Disable the /n/ and /r/ rewrites so login redirects keep the original id.
 
 Needs CF_API_TOKEN in .secrets/cloudflare.env with Cache Rules, Transform Rules and
 Zone Settings edit permission.
@@ -176,3 +178,43 @@ for r0 in fresh['rules']:
         body['expression'] = f'({body["expression"]}) or (http.host eq "{HOST}" and http.request.method eq "GET" and http.request.uri.path eq "{SPEC}")'
         r = call('PATCH', f"{Z}/rulesets/{fresh['id']}/rules/{r0['id']}", body)
         print('5. speculation rules cached with pages:', 'ok' if r['success'] else r.get('errors'))
+
+# 6. Login gate: this LAST rule overrides the older public-page/API cache rules.
+# Bypass also stops serving entries cached before login was required.
+fresh = call('GET', f'{Z}/rulesets/phases/http_request_cache_settings/entrypoint')
+if not fresh['success']:
+    sys.exit('Cannot read cache rules; login-gate cache bypass was not applied')
+rs = fresh['result']
+desc = 'XMUHub login gate: bypass pages and APIs'
+body = {
+    'description': desc,
+    'expression': (f'(http.host eq "{HOST}"'
+                   ' and not starts_with(http.request.uri.path, "/assets/")'
+                   ' and not starts_with(http.request.uri.path, "/vendor/"))'),
+    'action': 'set_cache_settings',
+    'action_parameters': {'cache': False},
+    'enabled': True,
+    'position': {'after': ''},
+}
+existing = next((r for r in rs['rules'] if r.get('description') == desc), None)
+if existing:
+    result = call('PATCH', f"{Z}/rulesets/{rs['id']}/rules/{existing['id']}", body)
+else:
+    result = call('POST', f"{Z}/rulesets/{rs['id']}/rules", body)
+if not result['success']:
+    sys.exit(f'Login-gate cache bypass failed: {result.get("errors")}')
+print('6. login-gate cache bypass: ok')
+
+fresh = call('GET', f'{Z}/rulesets/phases/http_request_transform/entrypoint')
+if fresh['success']:
+    rs = fresh['result']
+    for rule in rs.get('rules', []):
+        if rule.get('description') in {r['description'] for r in rewrites} and rule.get('enabled', True):
+            body = {k: rule[k] for k in ('description', 'expression', 'action', 'action_parameters') if k in rule}
+            body['enabled'] = False
+            result = call('PATCH', f"{Z}/rulesets/{rs['id']}/rules/{rule['id']}", body)
+            if not result['success']:
+                sys.exit(f'Cannot disable page rewrite: {result.get("errors")}')
+            print('6. disabled rewrite:', rule['description'])
+else:
+    sys.exit('Cannot verify page rewrites; check Transform Rules before deploying the login gate')

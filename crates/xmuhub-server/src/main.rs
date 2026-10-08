@@ -3,6 +3,7 @@ mod api;
 mod captcha;
 mod config;
 mod gate;
+mod access;
 mod mailer;
 mod mcp;
 mod ratelimit;

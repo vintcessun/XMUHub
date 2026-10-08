@@ -13,11 +13,13 @@
 
   | 级别 | 获得方式 | 权限 |
   |---|---|---|
-  | 访客 | — | 浏览、搜索、下载 |
+  | 未登录访客 | — | 首页、登录 / 注册、使用须知和隐私政策 |
   | 贡献者 | 注册 | 上传，**先审后发** |
   | 可信贡献者 | 审核员提升 | 上传，**先发后审** |
   | 审核员 | 管理员提升 | 审核队列、编辑元数据、整理分类树、处理投诉、管理贡献者 |
   | 管理员 | **只由管理员名单决定** | 以上全部 |
+
+  网页、REST API 和 MCP 统一要求登录后才可浏览分类、搜索、预览和下载。未登录访问页面跳转到带 `next` 的登录页，API 返回 401；已登录用户仍按原有级别和资料状态判断权限。受保护内容使用 `private, no-store`，不进入共享缓存。
 
   管理员名单是服务器上的一个文件（`XMUHUB_ADMINS_FILE`，每行一个邮箱），源文件放在不入库的 `.secrets/admins.txt`，用 `deploy.ps1 -AdminsOnly` 同步，服务每分钟重新读取一次。列入名单的账号自动成为管理员，移出名单的降为审核员；网页后台最多只能把人提升到审核员。
 
@@ -105,7 +107,7 @@ python scripts/import_archive.py 资料库备份.zip --base https://<你的域�
 
 登录后在「我的」页面创建个人令牌（`xmh_…`，只显示一次，可随时删除）。令牌以本人身份和权限访问：
 
-- **MCP**：`https://<你的域名>/mcp`（Streamable HTTP，JSON 响应），请求头 `Authorization: Bearer xmh_…`；不带令牌也能搜索、浏览和取下载地址。
+- **MCP**：`https://<你的域名>/mcp`（Streamable HTTP，JSON 响应），请求头 `Authorization: Bearer xmh_…`；必须使用有效令牌才能搜索、浏览和取下载地址。
   网页上能做的 MCP 都能做：
   - 浏览下载：`search`、`get_tree`、`get_category`、`get_resource`、`get_download_links`、`list_recent`、`list_popular`、`site_info`；
   - 上传：`suggest_category`、`create_category`、`begin_upload`、`get_upload`、`confirm_upload_part`、`renew_upload_part`、`preview_name`、`publish_upload`、`my_uploads`、`edit_resource`、`request_resource_change`；

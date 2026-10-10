@@ -309,11 +309,11 @@ fn spawn_jobs(app: Arc<api::App>, github: Option<Arc<GitHubBackend>>, probe_http
         };
         let mut tick = tokio::time::interval(Duration::from_secs(15 * 60));
         let mut speed_probe = None;
-        for round in 0u64.. {
+        for round in (0u8..4).cycle() {
             tick.tick().await;
             mirrors.probe(&probe_http, &probe, xmuhub_core::storage::github::PROBE_SIZE).await;
             // Once an hour, how fast each mirror keeps going (4 MB, one mirror at a time).
-            if round % 4 == 0 {
+            if round == 0 {
                 if speed_probe.is_none() {
                     speed_probe = gh2.ensure_speed_probe().await.map_err(|e| tracing::warn!("speed probe asset: {e}")).ok();
                 }

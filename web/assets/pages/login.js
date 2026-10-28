@@ -1,4 +1,4 @@
-import { api, forgetMe, layout, loadTurnstile, meta, pwToggle, qs, toast, $ } from '../app.js';
+import { api, forgetMe, layout, loadTurnstile, me, meta, pwToggle, qs, toast, $ } from '../app.js';
 
 pwToggle($('#password'), $('#password2'));
 
@@ -101,6 +101,9 @@ $('#f').onsubmit = async (e) => {
   try {
     await api(`/auth/${mode}`, { method: 'POST', body });
     forgetMe();
+    // Verify that the browser actually sends the new HttpOnly cookie before leaving.
+    // A blocked cookie or failed lookup should show an error here, not a redirect loop.
+    if (!await me()) throw new Error('登录状态未能保存，请允许此网站使用 Cookie 后重试');
     location.replace(next());
   } catch (err) {
     $('#msg').innerHTML = `<div class="notice bad">${err.message.replace(/[<>&]/g, '')}</div>`;
@@ -115,3 +118,6 @@ meta().then((m) => {
   }
 });
 setMode(mode);
+// The HTML starts disabled: a fast tap/autofill before modules load must not submit
+// the form as a native GET and reload the login page.
+$('#go').disabled = false;

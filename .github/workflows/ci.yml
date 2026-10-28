@@ -2,6 +2,7 @@
 #   cargo clippy --workspace --all-targets --locked -- -D warnings
 #   cargo test --workspace --locked
 #   node scripts/check-web.mjs
+#   node --experimental-vm-modules --test scripts/test-auth.mjs
 #   node scripts/check-rules.mjs
 name: CI
 
@@ -42,6 +43,7 @@ jobs:
         with:
           node-version: 22
       - run: node scripts/check-web.mjs
+      - run: node --experimental-vm-modules --test scripts/test-auth.mjs
 
   rules:
     name: Project rules (AGENTS.md)

@@ -20,8 +20,9 @@ Changes:
 4. Pages: the cache key leaves out the query string (a /?x=<random> flood can't miss the cache).
 5. Anonymous API reads live 5 minutes at the edge (not 1); /assets/speculation-rules.json is
    cached with the pages.
-6. Login required for data: the anonymous API cache keeps only /api/meta and /api/me (the rest
-   answers guests 401). Pages stay cached: they hold no data and send guests to log in.
+6. Login required for data: the anonymous API cache keeps only /api/meta (the rest
+   answers guests 401). /api/me always reaches the origin so a cached guest answer cannot
+   undo a successful sign-in. Pages stay cached: they hold no data and send guests to log in.
 
 Needs CF_API_TOKEN in .secrets/cloudflare.env with Cache Rules, Transform Rules and
 Zone Settings edit permission.
@@ -97,7 +98,7 @@ new = ('(http.request.uri.path in {"/api/tree" "/api/meta" "/api/recent" "/api/p
        ' or starts_with(http.request.uri.path, "/api/nodes/")'
        ' or (http.request.uri.path wildcard "/api/resources/*" and not http.request.uri.path wildcard "/api/resources/*/*")'
        ' or http.request.uri.path wildcard "/api/resources/*/social")')
-if new in rule['expression'] or '(http.request.uri.path in {"/api/meta" "/api/me"})' in rule['expression']:
+if new in rule['expression'] or '(http.request.uri.path in {"/api/meta" "/api/me"})' in rule['expression'] or '(http.request.uri.path eq "/api/meta")' in rule['expression']:
     print('1. API cache rule: already done (step 6 narrows it later)')
 elif old in rule['expression']:
     body = {k: rule[k] for k in ('description', 'action', 'action_parameters', 'enabled') if k in rule}
@@ -179,21 +180,22 @@ for r0 in fresh['rules']:
         r = call('PATCH', f"{Z}/rulesets/{fresh['id']}/rules/{r0['id']}", body)
         print('5. speculation rules cached with pages:', 'ok' if r['success'] else r.get('errors'))
 
-# 6. Login required for data (the access guard): guests get 401 from every API but /api/meta
-#    and /api/me, so the anonymous API cache keeps only those two (a 200 cached before would
-#    otherwise reach guests for 5 more minutes). Pages stay cached: they hold no data, and
-#    their script sends a guest to the login page.
+# 6. Only site metadata belongs in the anonymous API cache. /api/me is public but reports
+#    the current session, so it must always reach the origin, including on mobile browsers
+#    immediately after sign-in. Keep all existing cookie/token exclusions on the rule.
+#    Recognize the previous two-path rule as well as the older broad rule when upgrading.
 fresh = call('GET', f'{Z}/rulesets/phases/http_request_cache_settings/entrypoint')['result']
 rule = next((r for r in fresh['rules'] if r.get('description', '').startswith('XMUHub public API')), None)
-paths = '(http.request.uri.path in {"/api/meta" "/api/me"})'
+previous_paths = '(http.request.uri.path in {"/api/meta" "/api/me"})'
+paths = '(http.request.uri.path eq "/api/meta")'
 if rule is None:
     print('6. API cache rule not found, left alone')
 elif paths in rule['expression']:
-    print('6. anonymous API cache: already only /api/meta and /api/me')
-elif new in rule['expression']:
+    print('6. anonymous API cache: already only /api/meta; /api/me is not cached')
+elif new in rule['expression'] or previous_paths in rule['expression']:
     body = {k: rule[k] for k in ('description', 'expression', 'action', 'action_parameters', 'enabled') if k in rule}
-    body['expression'] = rule['expression'].replace(new, paths)
+    body['expression'] = rule['expression'].replace(new, paths).replace(previous_paths, paths)
     r = call('PATCH', f"{Z}/rulesets/{fresh['id']}/rules/{rule['id']}", body)
-    print('6. anonymous API cache -> /api/meta and /api/me:', 'ok' if r['success'] else r.get('errors'))
+    print('6. anonymous API cache -> only /api/meta (never /api/me):', 'ok' if r['success'] else r.get('errors'))
 else:
     print('6. API cache rule: its paths are not what this script expects, left alone:\n  ', rule['expression'])

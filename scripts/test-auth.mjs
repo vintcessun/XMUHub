@@ -119,6 +119,26 @@ test('a confirmed guest still goes to login with the original destination', asyn
   assert.equal(b.redirects[0], '/login?next=%2Fbrowse%3Fq%3Dmath');
 });
 
+for (const path of ['/login', '/login.html']) {
+  test(`the login link on ${path} does not nest the login page inside next`, async () => {
+    const b = await browser({ path, search: '?next=%2Fbrowse' });
+    assert.equal(b.app.loginUrl(), '/login');
+  });
+}
+
+for (const target of ['/login', '/login?next=%2Fbrowse', '/login.html#reset']) {
+  test(`signing in never returns to another login page: ${target}`, async () => {
+    let authenticated = false;
+    const b = await browser({ search: `?next=${encodeURIComponent(target)}`, respond: (url) => {
+      if (url.startsWith('/api/auth/')) authenticated = true;
+      return { user: authenticated ? user : null };
+    } });
+    await b.login();
+    await b.submit();
+    assert.equal(b.redirects[0], '/me');
+  });
+}
+
 for (const mode of ['login', 'register', 'reset']) {
   test(`${mode} confirms the new session before returning to the requested page`, async () => {
     let authenticated = false;

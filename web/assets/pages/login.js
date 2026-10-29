@@ -9,7 +9,10 @@ function next() {
   // Only same-origin targets (open-redirect guard); the URL parser handles //host, /\host, tabs etc.
   try {
     const u = new URL(n, location.origin);
-    return u.origin === location.origin ? u.pathname + u.search + u.hash : '/me';
+    // Old header links may already have nested a login URL in next. Never send a
+    // successful sign-in back through the login page, even when it is same-origin.
+    if (u.origin !== location.origin || /^\/login(?:\.html)?\/?$/.test(u.pathname)) return '/me';
+    return u.pathname + u.search + u.hash;
   } catch { return '/me'; }
 }
 

@@ -311,6 +311,8 @@ export function pathId() {
 export function $(sel, root = document) { return root.querySelector(sel); }
 
 export function loginUrl() {
+  // The login page must not become its own return destination (including nested next).
+  if (/^\/login(?:\.html)?\/?$/.test(location.pathname)) return '/login';
   return `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
 }
 

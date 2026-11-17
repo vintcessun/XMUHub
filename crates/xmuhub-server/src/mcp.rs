@@ -371,7 +371,7 @@ async fn call_api(app: &Arc<App>, ctx: &Ctx, method: &str, path: &str, query: Op
         None => req.body(Body::empty()),
     }
     .map_err(|e| e.to_string())?;
-    let res = crate::api::router(app.clone()).oneshot(req).await.map_err(|e| e.to_string())?;
+    let res = crate::api::router(app.clone()).oneshot(req).await.unwrap_or_else(|never| match never {});
     let status = res.status();
     let raw = axum::body::to_bytes(res.into_body(), MAX_ANSWER).await.map_err(|e| e.to_string())?;
     let mut v: Value = serde_json::from_slice(&raw).unwrap_or_else(|_| json!(String::from_utf8_lossy(&raw)));

@@ -21,7 +21,6 @@ hex = "0.4.3"
 lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls", "builder", "hostname", "rustls-platform-verifier", "aws-lc-rs"] }
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 mimalloc = "0.1.52"
-mime_guess = "2.0.5"
 parking_lot = "0.12.5"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "stream"] }
 regex = { version = "1.13.1", default-features = false, features = ["std", "unicode-perl"] }

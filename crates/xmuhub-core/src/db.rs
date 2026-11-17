@@ -22,6 +22,8 @@ pub const REVIEWS: TableDefinition<u64, &[u8]> = TableDefinition::new("reviews")
 pub const RESOURCE_CHANGE_REQUESTS: TableDefinition<u64, &[u8]> = TableDefinition::new("resource_change_requests");
 /// Key: resource id ++ user id, both big-endian.
 pub const RATINGS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("ratings");
+/// Key: user id ++ resource id, both big-endian; value: last download time.
+pub const DOWNLOAD_HISTORY: TableDefinition<&[u8], i64> = TableDefinition::new("download_history");
 pub const COMMENTS: TableDefinition<u64, &[u8]> = TableDefinition::new("comments");
 pub const FEEDBACK: TableDefinition<u64, &[u8]> = TableDefinition::new("feedback");
 pub const TOKENS: TableDefinition<u64, &[u8]> = TableDefinition::new("tokens");
@@ -121,6 +123,11 @@ fn rating_key(resource: Id, user: Id) -> [u8; 16] {
     k
 }
 
+fn download_pair(key: &[u8]) -> Result<(Id, Id)> {
+    let key: &[u8; 16] = key.try_into().map_err(|_| Error::Internal("invalid download history key".into()))?;
+    Ok((u64::from_be_bytes(key[..8].try_into().unwrap()), u64::from_be_bytes(key[8..].try_into().unwrap())))
+}
+
 impl Db {
     pub fn open(path: &Path, cache_bytes: usize) -> Result<Db> {
         if let Some(dir) = path.parent() {
@@ -140,6 +147,7 @@ impl Db {
         txn.open_table(REVIEWS)?;
         txn.open_table(RESOURCE_CHANGE_REQUESTS)?;
         txn.open_table(RATINGS)?;
+        txn.open_table(DOWNLOAD_HISTORY)?;
         txn.open_table(COMMENTS)?;
         txn.open_table(FEEDBACK)?;
         txn.open_table(TOKENS)?;
@@ -165,7 +173,10 @@ impl Db {
     }
 
     pub fn load(&self) -> Result<Snapshot> {
-        let txn = self.inner.begin_read()?;
+        Self::load_from(&self.inner.begin_read()?)
+    }
+
+    fn load_from(txn: &redb::ReadTransaction) -> Result<Snapshot> {
         let mut snap = Snapshot::default();
         for row in txn.open_table(NODES)?.iter()? {
             snap.nodes.push(decode(row?.1.value())?);
@@ -288,11 +299,36 @@ impl Db {
         Ok(WriteTxn(self.inner.begin_write()?))
     }
 
+    /// Reads only one account's history; never loaded into the boot snapshot.
+    pub fn downloaded_resources(&self, user: Id) -> Result<Vec<Id>> {
+        let txn = self.inner.begin_read()?;
+        let table = txn.open_table(DOWNLOAD_HISTORY)?;
+        let start = rating_key(user, 0);
+        let end = rating_key(user, Id::MAX);
+        let mut ids = Vec::new();
+        for row in table.range(start.as_slice()..=end.as_slice())? {
+            let (key, _) = row?;
+            let (_, resource) = download_pair(key.value())?;
+            ids.push(resource);
+        }
+        Ok(ids)
+    }
+
     /// Dumps every table into one self-describing blob for off-site backup.
     pub fn export(&self) -> Result<Vec<u8>> {
-        let snap = self.load()?;
+        // All exported tables share one read snapshot, including account history.
+        let txn = self.inner.begin_read()?;
+        let snap = Self::load_from(&txn)?;
+        // History is read only for an explicit export, not for normal boot/load.
+        let mut download_history = Vec::new();
+        for row in txn.open_table(DOWNLOAD_HISTORY)?.iter()? {
+            let (key, timestamp) = row?;
+            let (user, resource) = download_pair(key.value())?;
+            download_history.push((user, resource, timestamp.value()));
+        }
         let dump = Dump {
             version: SCHEMA_VERSION,
+            download_history,
             nodes: snap.nodes,
             resources: snap.resources,
             users: snap.users,
@@ -330,6 +366,8 @@ impl Db {
 #[derive(Serialize, serde::Deserialize)]
 pub struct Dump {
     pub version: u8,
+    #[serde(default)]
+    pub download_history: Vec<(Id, Id, i64)>,
     pub nodes: Vec<Node>,
     pub resources: Vec<Resource>,
     pub users: Vec<User>,
@@ -402,6 +440,25 @@ pub struct Tx<'a> {
 }
 
 impl Tx<'_> {
+    pub fn put_download(&self, user: Id, resource: Id, timestamp: i64) -> Result<()> {
+        self.txn.open_table(DOWNLOAD_HISTORY)?.insert(rating_key(user, resource).as_slice(), timestamp)?;
+        Ok(())
+    }
+
+    pub fn del_download_history(&self, user: Id) -> Result<()> {
+        let mut table = self.txn.open_table(DOWNLOAD_HISTORY)?;
+        let start = rating_key(user, 0);
+        let end = rating_key(user, Id::MAX);
+        // Collect only this user's keys before mutating the table.
+        let keys = table.range(start.as_slice()..=end.as_slice())?
+            .map(|row| row.map(|(key, _)| key.value().to_vec()))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for key in keys {
+            table.remove(key.as_slice())?;
+        }
+        Ok(())
+    }
+
     pub fn put_node(&self, n: &Node) -> Result<()> {
         self.txn.open_table(NODES)?.insert(n.id, encode(n).as_slice())?;
         Ok(())

@@ -5,6 +5,7 @@
 //! `resources` (metadata, review, reports), `uploads` (storage slots and blobs).
 
 mod accounts;
+mod downloads;
 mod avatars;
 mod batches;
 mod imports;

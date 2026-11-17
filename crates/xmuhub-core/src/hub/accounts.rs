@@ -600,6 +600,7 @@ impl Hub {
             st.put_user(tx, u)?;
             Self::drop_sessions(st, tx, me.id, None)?;
             Self::drop_tokens(st, tx, me.id)?;
+            tx.del_download_history(me.id)?;
             if let Some(a) = st.avatars.get_mut(&me.id) {
                 a.current.clear();
                 a.pending.clear();

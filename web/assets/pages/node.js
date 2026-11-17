@@ -1,4 +1,4 @@
-import { api, downloadResource, esc, fmtSize, layout, levelBadge, loginUrl, modal, moveResources, nodeCard, nodeTitle, pathId, resourceItem, seriesAbout, seriesEditor, SITE_NAME, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
+import { api, downloadResource, esc, fmtSize, layout, levelBadge, loginUrl, modal, moveResources, nodeCard, nodeTitle, pathId, rememberDownload, resourceItem, seriesAbout, seriesEditor, SITE_NAME, sortNodes, STUDY_LEVELS, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -214,8 +214,16 @@ function dlFailed(failed, total) {
     const name = plan ? esc(plan.filename) : `资料 #${id}`;
     const urls = plan && plan.parts.length === 1 ? plan.parts[0].urls : null;
     return `<div class="item"><div class="body"><b>${name}</b>${plan ? ` <span class="small faint">${fmtSize(plan.size)}</span>` : ''}</div>
-      ${urls ? `<a class="btn sm primary" href="${esc(urls[0])}" target="_blank" rel="noopener noreferrer">下载</a><a class="small" href="${esc(urls[urls.length - 1])}" target="_blank" rel="noopener noreferrer">GitHub 直链</a>` : `<a class="btn sm" href="/r/${id}" target="_blank">去资料页下载</a>`}</div>`;
+      ${urls ? `<a class="btn sm primary" href="${esc(urls[0])}" data-download-start="${id}" data-account="${plan.account}" target="_blank" rel="noopener noreferrer">下载</a><a class="small" href="${esc(urls[urls.length - 1])}" data-download-start="${id}" data-account="${plan.account}" target="_blank" rel="noopener noreferrer">GitHub 直链</a>` : `<a class="btn sm" href="/r/${id}" target="_blank">去资料页下载</a>`}</div>`;
   }).join('')}</div>`;
+  const record = (e) => {
+    const link = e.target.closest('[data-download-start]');
+    if (link && (e.type === 'click' || e.button === 1)) {
+      void rememberDownload(Number(link.dataset.downloadStart), Number(link.dataset.account));
+    }
+  };
+  body.addEventListener('click', record);
+  body.addEventListener('auxclick', record);
 }
 
 $('#list').addEventListener('click', async (e) => {

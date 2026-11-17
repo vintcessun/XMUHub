@@ -2,6 +2,8 @@ mod alloc;
 mod api;
 mod captcha;
 mod config;
+#[cfg(test)]
+mod download_tests;
 mod gate;
 mod access;
 mod mailer;

@@ -350,6 +350,7 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/resources/{id}/review", post(review))
         .route("/resources/{id}/report", post(report))
         .route("/resources/{id}/download", get(download_plan))
+        .route("/resources/{id}/downloaded", post(record_download))
         .route("/resources/{id}/social", get(social))
         .route("/resources/{id}/rating", put(rate))
         .route("/resources/{id}/reviews", get(resource_reviews))
@@ -472,8 +473,9 @@ async fn meta(State(app): S) -> Json<Value> {
     }))
 }
 
-async fn me(State(app): S, auth: Auth) -> Json<Value> {
-    Json(json!({ "user": auth.user.as_ref().map(|u| me_view(&app, u)) }))
+async fn me(State(app): S, auth: Auth) -> R<Json<Value>> {
+    let downloaded = if auth.user.is_some() { app.hub.downloaded_resources(auth.viewer())? } else { Vec::new() };
+    Ok(Json(json!({ "user": auth.user.as_ref().map(|u| me_view(&app, u)), "downloaded_resources": downloaded })))
 }
 
 /// The signed-in user as they see themselves (with their own settings).
@@ -1015,12 +1017,30 @@ async fn download_plan(State(app): S, auth: Auth, h: HeaderMap, Path(id): Path<I
     let who = client_ip(&h);
     let plan = app.hub.download(auth.viewer(), id, (!peek).then_some(who.as_str()))?;
     let mut v = json!(plan);
+    v["account"] = json!(auth.viewer().id());
     if peek {
         for (i, p) in plan.parts.iter().enumerate() {
             v["parts"][i]["preview_urls"] = json!(app.mirrors.cors_urls(&p.urls));
         }
     }
     Ok(Json(v))
+}
+
+#[derive(Deserialize)]
+struct DownloadedIn {
+    account: Id,
+}
+
+/// Records metadata only; the browser fetched the file directly from a mirror.
+async fn record_download(State(app): S, auth: Auth, Path(id): Path<Id>, Json(b): Json<DownloadedIn>) -> R<Json<Value>> {
+    let user = auth.require()?.clone();
+    // A download finishing in an old tab must not be assigned to a newly signed-in account.
+    if user.id != b.account {
+        return Err(Error::Forbidden.into());
+    }
+    let hub = app.hub.clone();
+    blocking(move || hub.record_download(Viewer { user: Some(&user) }, id)).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 // ------------------------------------------------------------------ ratings, feedback
@@ -1145,6 +1165,7 @@ async fn download_redirect(State(app): S, auth: Auth, h: HeaderMap, Path(id): Pa
         return Ok(Redirect::to(&format!("/r/{id}")).into_response());
     }
     let url = plan.parts[0].urls.first().cloned().ok_or(Error::NotFound("下载地址"))?;
+    // A cross-site GET can carry a session cookie. Only the protected POST records history.
     Ok(Redirect::to(&url).into_response())
 }
 

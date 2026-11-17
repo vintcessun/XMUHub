@@ -63,12 +63,27 @@ async function request(path, method, headers, body, signal) {
 }
 
 let meCache = null;
+let identityRefresh = null;
+let meAt = 0;
 let signedIn = false;
+let accountId = null;
+let downloaded = new Set();
+let downloadRevision = 0;
 /** The signed-in user or null. */
 export function me() {
-  if (!meCache) {
+  if (!meCache || Date.now() - meAt > 60_000) {
+    meAt = Date.now();
+    const revision = downloadRevision;
     const pending = api('/me').then((r) => {
-      if (meCache === pending) signedIn = !!r.user;
+      if (meCache === pending) {
+        signedIn = !!r.user;
+        const sameAccount = accountId === r.user?.id;
+        accountId = r.user?.id ?? null;
+        // A response started before a completed download must not erase its new marker.
+        const justRecorded = sameAccount && revision !== downloadRevision ? downloaded : [];
+        downloaded = new Set(r.user ? [...(r.downloaded_resources || []), ...justRecorded] : []);
+        paintDownloaded();
+      }
       return r.user;
     }).catch((err) => {
       // A failed lookup says nothing about the session. Let the next attempt retry;
@@ -80,9 +95,40 @@ export function me() {
   }
   return meCache;
 }
-export function forgetMe() {
+function clearIdentity() {
   meCache = null;
   signedIn = false;
+  accountId = null;
+  downloaded = new Set();
+  downloadRevision++;
+  paintDownloaded();
+}
+
+function refreshIdentity() {
+  if (identityRefresh) return;
+  const previous = accountId;
+  clearIdentity();
+  const pending = me();
+  identityRefresh = pending;
+  void pending.then((user) => {
+    if (identityRefresh !== pending || meCache !== pending) return;
+    if (previous !== (user?.id ?? null)) location.reload();
+  }).catch(() => {}).finally(() => {
+    if (identityRefresh === pending) identityRefresh = null;
+  }); // A failed refresh leaves old account marks hidden; the next lookup can retry.
+}
+
+const sessionChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('xmuhub-session') : null;
+sessionChannel?.addEventListener('message', refreshIdentity);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && meCache) refreshIdentity();
+});
+globalThis.addEventListener?.('pageshow', (e) => { if (e.persisted) refreshIdentity(); });
+
+export function forgetMe() {
+  identityRefresh = null;
+  clearIdentity();
+  sessionChannel?.postMessage(null);
   try { sessionStorage.removeItem('ludao.top'); } catch { /* storage blocked */ }
 }
 
@@ -225,6 +271,7 @@ export function resourceItem(r, { showNode = true } = {}) {
     r.rating && r.rating.count ? `<span title="${r.rating.count} 人评分">${stars(r.rating.avg)} ${r.rating.avg}</span>` : '',
     r.major ? `<span class="badge" title="适用专业">${esc(r.major)}</span>` : '',
     statusBadge(r),
+    downloadedBadge(r.id),
   ].filter(Boolean);
   // First-page thumbnail when one has been made (see server thumbs.rs); else the type badge.
   const icon = r.thumb && r.thumb.length
@@ -238,6 +285,36 @@ export function resourceItem(r, { showNode = true } = {}) {
       <div class="meta">${bits.join('')}</div></div>
     <button class="btn sm qpv" data-qpv="${r.id}" type="button" title="不用点进去，直接看内容">预览</button>
   </div>`;
+}
+
+/** Account-scoped metadata from /api/me, never browser-local download history. */
+export function downloadedBadge(id) {
+  return `<span class="badge downloaded" data-downloaded="${Number(id)}"${downloaded.has(Number(id)) ? '' : ' hidden'}>已下载</span>`;
+}
+
+function paintDownloaded() {
+  for (const badge of document.querySelectorAll('[data-downloaded]')) {
+    badge.hidden = !downloaded.has(Number(badge.dataset.downloaded));
+  }
+}
+
+/** Writes only the resource id and expected account; a file never reaches this endpoint. */
+export async function rememberDownload(id, account) {
+  try {
+    await api(`/resources/${id}/downloaded`, { method: 'POST', body: { account } });
+    // A tab returning to the foreground may still be confirming which account owns it.
+    if (accountId === null && meCache) await meCache.catch(() => null);
+    if (accountId === account) {
+      downloaded.add(Number(id));
+      downloadRevision++;
+      paintDownloaded();
+    }
+    return true;
+  } catch {
+    // Saving the file succeeded independently; a history write must not start it again.
+    toast('下载记录同步失败，请稍后重试', true);
+    return false;
+  }
 }
 
 /** Sends one upload part to its storage target (Worker or this server's relay). */
@@ -565,6 +642,7 @@ export async function downloadResource(id, onProgress = () => {}, { batch = fals
     const blobs = await inParallel(plan.parts, PARTS_AT_ONCE, (part, i) =>
       fetchPart(part, part.urls, (n) => { got[i] = n; onProgress(Math.min(1, got.reduce((a, b) => a + b, 0) / total)); }));
     saveBlob(new Blob(blobs, { type: plan.mime || 'application/octet-stream' }), plan.filename);
+    await rememberDownload(id, plan.account);
     return { ok: true };
   } catch (e) {
     // Usually the fetch failed only because the mirror sends no CORS headers: then the browser
@@ -574,6 +652,7 @@ export async function downloadResource(id, onProgress = () => {}, { batch = fals
     // frames), so the caller lists what failed for the user to click one by one.
     if (single && !batch) {
       const urls = plan.parts[0].urls;
+      await rememberDownload(id, plan.account);
       location.href = e && e.integrity ? urls[urls.length - 1] : urls[0];
       return { ok: true, fallback: true };
     }

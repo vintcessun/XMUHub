@@ -1,4 +1,4 @@
-import { ago, api, avatar, downloadResource, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, seriesAbout, seriesEditor, SITE_NAME, stars, statusBadge, store, toast, $ } from '../app.js';
+import { ago, api, avatar, downloadResource, downloadedBadge, esc, favoriteDialog, fmtDate, fmtSize, layout, linkify, loginUrl, meta, pathId, pickFromTree, preview, rememberDownload, seriesAbout, seriesEditor, SITE_NAME, stars, statusBadge, store, toast, $ } from '../app.js';
 
 const id = pathId();
 const mePromise = layout('browse');
@@ -17,7 +17,7 @@ async function load() {
   $('#title').textContent = r.title;
   $('#subtitle').textContent = r.subtitle || '';
   $('#subtitle').hidden = !r.subtitle;
-  $('#tags').innerHTML = `<span class="tag t-${esc(r.tag.code)}">${esc(r.tag.code)} ${esc(r.tag.label)}</span>${statusBadge(r)}<span>${r.downloads} 次下载</span>`;
+  $('#tags').innerHTML = `<span class="tag t-${esc(r.tag.code)}">${esc(r.tag.code)} ${esc(r.tag.label)}</span>${statusBadge(r)}<span>${r.downloads} 次下载</span>${downloadedBadge(id)}`;
   $('#note').innerHTML = linkify(r.note || '');
   $('#note').hidden = !r.note;
   const n = r.name;
@@ -136,7 +136,20 @@ $('#dl').onclick = async () => {
       btn.textContent = label;
       $('#parts').hidden = false;
       $('#parts').innerHTML = '<p class="notice warn" style="margin-top:12px">自动合并失败，请依次下载以下分卷，再按顺序拼接：</p>' +
-        res.plan.parts.map((p, i) => `<div><a href="${esc(p.urls[0])}" rel="noreferrer">分卷 ${i + 1}</a> · ${fmtSize(p.size)}</div>`).join('');
+        res.plan.parts.map((p, i) => `<div><a href="${esc(p.urls[0])}" data-download-part="${i}" target="_blank" rel="noopener noreferrer">分卷 ${i + 1}</a> · ${fmtSize(p.size)}</div>`).join('');
+      const started = new Set();
+      let recording = false;
+      const recordPart = (e) => {
+        const link = e.target.closest('[data-download-part]');
+        if (!link || (e.type === 'auxclick' && e.button !== 1)) return;
+        started.add(link.dataset.downloadPart);
+        if (started.size === res.plan.parts.length && !recording) {
+          recording = true;
+          void rememberDownload(id, res.plan.account).then((ok) => { recording = ok; });
+        }
+      };
+      $('#parts').onclick = recordPart;
+      $('#parts').onauxclick = recordPart;
     }
   } catch (e) {
     toast(e.message, true);

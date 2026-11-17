@@ -201,7 +201,7 @@ textarea.input { min-height: 90px; resize: vertical; }
 }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
 .badge.pending { background: var(--warn-soft); color: var(--warn); }
-.badge.published { background: var(--ok-soft); color: var(--ok); }
+.badge.published, .badge.downloaded { background: var(--ok-soft); color: var(--ok); }
 .badge.rejected, .badge.removed { background: var(--bad-soft); color: var(--bad); }
 .badge.merged { background: var(--surface-2); color: var(--faint); }
 .badge.restricted { background: var(--surface-2); color: var(--muted); border: 1px dashed var(--line); }

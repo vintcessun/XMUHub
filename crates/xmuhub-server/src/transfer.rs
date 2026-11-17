@@ -58,7 +58,7 @@ jobs:
 "#;
 
 const TRANSFER_PY: &str = r#"# Managed by XMUHub — copies referenced files into a release of this repository.
-import hashlib, json, os, sys, time, urllib.parse, urllib.request
+import base64, hashlib, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
 
 job = json.load(open(sys.argv[1], encoding='utf8'))
 repo = os.environ['GITHUB_REPOSITORY']
@@ -68,13 +68,33 @@ def call(method, url, body=None, data=None, headers=None):
     h = dict(H, **(headers or {}))
     if body is not None:
         data = json.dumps(body).encode(); h['Content-Type'] = 'application/json'
-    with urllib.request.urlopen(urllib.request.Request(url, data=data, method=method, headers=h), timeout=600) as r:
-        raw = r.read()
-        return json.loads(raw) if raw else None
+    # GitHub's API now and then answers 5xx: retry those, give up on anything else.
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, data=data, method=method, headers=h), timeout=600) as r:
+                raw = r.read()
+                return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == 3: raise
+        except urllib.error.URLError:
+            if attempt == 3: raise
+        time.sleep(10 * (attempt + 1))
+
+def lfs_pointer(it):
+    # Repositories imported with Git LFS list the pointer (oid + size) as the file; its git blob
+    # is the key. github.com/<o>/<r>/raw/... serves the real file, checked against the pointer.
+    m = re.match(r'https://github\.com/([^/]+)/([^/]+)/raw/', it['url'])
+    if not m or not it['key'].startswith('git-') or it['size'] >= 1024: return None
+    b = call('GET', f'https://api.github.com/repos/{m[1]}/{m[2]}/git/blobs/{it["key"][4:]}')
+    text = base64.b64decode(b['content']).decode('utf8', 'replace')
+    oid, size = re.search(r'^oid sha256:([0-9a-f]{64})$', text, re.M), re.search(r'^size (\d+)$', text, re.M)
+    if not text.startswith('version https://git-lfs') or not oid or not size: return None
+    return oid[1], int(size[1])
 
 try:
     rel = call('GET', f'https://api.github.com/repos/{repo}/releases/tags/{job["tag"]}')
-except urllib.error.HTTPError:
+except urllib.error.HTTPError as e:
+    if e.code != 404: raise
     rel = call('POST', f'https://api.github.com/repos/{repo}/releases', {'tag_name': job['tag'], 'name': job['tag'], 'make_latest': 'false'})
 have = {a['name'] for a in rel.get('assets', [])}
 
@@ -92,12 +112,16 @@ for it in job['items']:
             except Exception:
                 if attempt == 2: raise
                 time.sleep(5)
-        if len(data) != it['size']:
-            raise RuntimeError(f'size {len(data)} != {it["size"]}')
         sha = hashlib.sha256(data).hexdigest()
+        lfs_size = None
+        if len(data) != it['size']:
+            p = lfs_pointer(it)
+            if not p or (sha, len(data)) != p:
+                raise RuntimeError(f'size {len(data)} != {it["size"]}')
+            lfs_size = len(data)
         up = f'https://uploads.github.com/repos/{repo}/releases/{rel["id"]}/assets?name={urllib.parse.quote(it["name"])}'
         a = call('POST', up, data=data, headers={'Content-Type': 'application/octet-stream'})
-        results.append({'key': it['key'], 'name': a['name'], 'asset_id': a['id'], 'sha256': sha})
+        results.append({'key': it['key'], 'name': a['name'], 'asset_id': a['id'], 'sha256': sha, 'lfs_size': lfs_size})
     except Exception as e:
         results.append({'key': it['key'], 'error': str(e)[:300]})
 
@@ -130,6 +154,9 @@ struct ResultItem {
     sha256: String,
     #[serde(default)]
     error: String,
+    /// Set when the reference was a Git LFS pointer: the real file's size, checked against the pointer.
+    #[serde(default)]
+    lfs_size: Option<u64>,
 }
 
 pub fn current_job(hub: &Hub) -> Option<serde_json::Value> {
@@ -168,6 +195,19 @@ async fn apply(hub: &Arc<Hub>, gh: &GitHubBackend, cur: &Current, res: ResultsFi
             tracing::warn!(key = %it.key, "transfer digest mismatch");
             failed += 1;
             continue;
+        }
+        if let Some(real) = it.lfs_size {
+            if real != size {
+                tracing::warn!(key = %it.key, "transfer size mismatch (lfs)");
+                failed += 1;
+                continue;
+            }
+            let (h, key) = (hub.clone(), it.key.clone());
+            if let Err(e) = tokio::task::spawn_blocking(move || h.fix_lfs_size(&key, real)).await? {
+                tracing::warn!(key = %it.key, "transfer lfs size: {e}");
+                failed += 1;
+                continue;
+            }
         }
         let expected = hub.blob_size(&it.key);
         if expected != Some(size) {

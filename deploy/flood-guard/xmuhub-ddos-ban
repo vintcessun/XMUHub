@@ -1,11 +1,29 @@
 #!/bin/bash
 # XMUHub flood guard, every minute: puts the rules back if a firewall reload removed them,
-# then bans for an hour every source holding more than 100 connections to 80/443
-# (Cloudflare exempt). Bans expire by themselves (ipset timeout).
+# then bans for an hour (Cloudflare, the allow list and this machine exempt):
+# - every source that reaches the 100-connection cap on 80/443
+#   (the limit rule refuses the 101st, so "more than 100" would almost never match);
+# - every source nginx refused at least REQ_LIMIT times in the previous minute for going over the
+#   per-IP request rate on the DNS-only sites (zone direct_req in deploy/nginx/0.xmuhub-limits.conf).
+# Bans expire by themselves (ipset timeout).
 LIMIT=100
+REQ_LIMIT=100
 /usr/local/sbin/xmuhub-ddos-rules
+ORIGIN=$(cat /etc/xmuhub/origin-ip 2>/dev/null)
+
+over_conn_cap() {
+  ss -Htn state established '( sport = :80 or sport = :443 )' | awk '{print $4}' | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//; s/^::ffff://' | sort | uniq -c | awk -v l=$LIMIT '$1 >= l {print $2}'
+}
+# limit_req logs a refusal as: 2026/10/18 13:40:01 [error] ... limiting requests, excess: ... by zone "direct_req", client: 1.2.3.4, ...
+over_req_rate() {
+  local minute; minute=$(date -d '-1 min' '+%Y/%m/%d %H:%M')
+  for f in /www/wwwlogs/*.error.log; do tail -c 4000000 "$f" | grep "^$minute" | grep -F 'zone "direct_req"'; done |
+    sed -nE 's/.* client: ([^,]+),.*/\1/p' | sort | uniq -c | awk -v l=$REQ_LIMIT '$1 >= l {print $2}'
+}
+
 n=0
-for ip in $(ss -Htn state established '( sport = :80 or sport = :443 )' | awk '{print $4}' | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//; s/^::ffff://' | sort | uniq -c | awk -v l=$LIMIT '$1 > l {print $2}'); do
+for ip in $( (over_conn_cap; over_req_rate) | sort -u); do
+  [[ $ip == 127.* || $ip == ::1 || $ip == "$ORIGIN" ]] && continue
   if [[ $ip == *:* ]]; then
     ipset test cf6 "$ip" 2>/dev/null && continue
     ipset add -exist ddos_ban6 "$ip"

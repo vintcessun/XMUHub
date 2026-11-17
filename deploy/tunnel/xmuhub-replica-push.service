@@ -1,0 +1,6 @@
+[Unit]
+Description=XMUHub: send the database to the standby
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xmuhub-replica-push

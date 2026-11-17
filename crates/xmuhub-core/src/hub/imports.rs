@@ -13,6 +13,9 @@ use crate::text::guess_name;
 /// File types imported from repositories: documents and archives, no source code.
 pub const DOC_EXTS: &[&str] = &["pdf", "doc", "docx", "ppt", "pptx", "pptm", "xls", "xlsx", "epub", "zip", "rar", "7z", "caj"];
 
+/// Git LFS pointer files are about 130 bytes; anything this big is a real file.
+pub const LFS_POINTER_MAX: u64 = 1024;
+
 pub fn is_doc(path: &str) -> bool {
     path.rsplit_once('.').is_some_and(|(_, e)| DOC_EXTS.contains(&e.to_lowercase().as_str()))
 }
@@ -167,7 +170,8 @@ impl Hub {
         let st = self.st.read();
         let mut out = Vec::new();
         let mut bytes = 0u64;
-        let mut keys: Vec<&Blob> = st.blobs.values().filter(|b| b.parts.iter().any(|p| !p.replicas.iter().any(Location::owned))).collect();
+        // Empty files stay referenced: GitHub refuses 0-byte release assets.
+        let mut keys: Vec<&Blob> = st.blobs.values().filter(|b| b.size > 0 && b.parts.iter().any(|p| !p.replicas.iter().any(Location::owned))).collect();
         keys.sort_by_key(|b| b.created_at);
         for b in keys {
             if out.len() >= limit || bytes + b.size > max_bytes {
@@ -209,6 +213,31 @@ impl Hub {
         let st = self.st.read();
         let refs = st.blobs.values().filter(|b| b.parts.iter().any(|p| !p.replicas.iter().any(Location::owned))).count();
         (refs, st.blobs.len() - refs)
+    }
+
+    /// A referenced file stored with Git LFS was imported with the size of its pointer (~130 bytes).
+    /// The transfer run checked the real file against the pointer's sha256 and size; record that size
+    /// on the blob and on the resources that show it.
+    pub fn fix_lfs_size(&self, key: &str, size: u64) -> Result<()> {
+        self.mutate(|st, tx| {
+            let mut b = st.blobs.get(key).cloned().ok_or(Error::NotFound("文件"))?;
+            if b.size == size {
+                return Ok(());
+            }
+            if b.size >= LFS_POINTER_MAX || b.parts.len() != 1 {
+                return Err(Error::BadRequest("不是 Git LFS 指针".into()));
+            }
+            let old = b.size;
+            b.size = size;
+            b.parts[0].size = size;
+            tx.put_blob(&b)?;
+            st.blobs.insert(b.key.clone(), b);
+            for r in st.resources.values_mut().filter(|r| r.blob == key && r.size == old) {
+                r.size = size;
+                tx.put_resource(r)?;
+            }
+            Ok(())
+        })
     }
 
     pub fn blob_size(&self, key: &str) -> Option<u64> {

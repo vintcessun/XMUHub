@@ -1,0 +1,24 @@
+#!/bin/sh
+# On the standby: the forced command of the serving machine's ssh key (authorized_keys:
+# command="/usr/local/sbin/xmuhub-replica-recv",restrict). Reads one database copy on stdin,
+# keeps it as /root/xmuhub/replica/latest.redb if it opens, plus one copy per hour for a day.
+set -e
+DIR=/root/xmuhub/replica
+mkdir -p "$DIR/check"
+umask 077
+cat > "$DIR/incoming.redb"
+# Open a scratch copy with the real program (`run export` loads every table); the program may
+# write to the file it opens, so the kept copy is the untouched one.
+cp -f "$DIR/incoming.redb" "$DIR/check/xmuhub.redb"
+if XMUHUB_DATA="$DIR/check" XMUHUB_WEB=/root/xmuhub/web XMUHUB_STORAGE=local RUST_LOG=error \
+    /root/xmuhub/run export > /dev/null 2> "$DIR/check/err"; then
+    mv -f "$DIR/incoming.redb" "$DIR/latest.redb"
+    cp -f "$DIR/latest.redb" "$DIR/hourly-$(date +%H).redb"
+    date '+%F %T' > "$DIR/latest.at"
+    echo ok
+else
+    rm -f "$DIR/incoming.redb"
+    logger -t xmuhub-replica "copy rejected: $(head -c 300 "$DIR/check/err")"
+    echo rejected
+    exit 1
+fi

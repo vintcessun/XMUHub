@@ -1,0 +1,9 @@
+#!/bin/sh
+# On the serving machine, every 5 minutes (xmuhub-replica-push.timer): send a copy of the
+# database to the standby. The standby's ssh key entry runs xmuhub-replica-recv, which checks
+# that the copy opens before keeping it, so a copy torn by a write in progress is dropped and
+# the next round tries again. Nothing is sent while the service is stopped (standby mode).
+set -e
+STANDBY=$(cat /etc/xmuhub/replica-standby 2>/dev/null) || exit 0
+systemctl is-active --quiet xmuhub.service || exit 0
+exec ssh -o BatchMode=yes -o ConnectTimeout=15 -i /etc/xmuhub/replica-key "$STANDBY" < /root/xmuhub/data/xmuhub.redb

@@ -20,10 +20,27 @@ top() { $1 ${2:+-t $2} -C $3 "${@:4}" 2>/dev/null || $1 ${2:+-t $2} -I $3 1 "${@
 top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 32 -j REJECT --reject-with tcp-reset
 # A few of the refused sources per minute go to the kernel log (journalctl -k | grep xmuhub-reject), to spot false positives.
 top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 32 -m limit --limit 6/min --limit-burst 6 -j LOG --log-prefix "xmuhub-reject "
+# A source that goes over the cap is banned on the spot, not only refused: the per-minute check in
+# xmuhub-ddos-ban counts established connections, and a SYN flood that keeps hitting the cap never has 100 of those.
+top iptables  "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 32 -j SET --add-set ddos_ban src
+# Plain-HTTP requests addressed to the bare public IP (Host: <ip>) only come from floods (2026-10-18):
+# no site is served that way. Reset them and ban the source for an hour. The IP comes from the ECS
+# metadata service (or /etc/xmuhub/origin-ip) so it is never written into the repo.
+ORIGIN=$(cat /etc/xmuhub/origin-ip 2>/dev/null || curl -s -m3 http://100.100.100.200/latest/meta-data/eipv4)
+if [[ $ORIGIN =~ ^[0-9.]+$ ]]; then
+  top iptables "" INPUT -p tcp --dport 80 -m string --algo bm --icase --string "Host: $ORIGIN" -j REJECT --reject-with tcp-reset
+  top iptables "" INPUT -p tcp --dport 80 -m string --algo bm --icase --string "Host: $ORIGIN" -j SET --add-set ddos_ban src
+fi
+# This machine (loopback, its own subnets incl. docker bridges, the public IP it reaches itself through) is never limited:
+# requests to its own sites come back from those addresses.
+ipset create -exist xmuhub_self hash:net family inet
+for n in 127.0.0.0/8 $ORIGIN $(ip -4 -o addr show | awk '{print $4}'); do ipset add -exist xmuhub_self "$n"; done
 # The exemption must stay above the limit: always move it back to the top.
 first() { while $1 -D INPUT "${@:2}" 2>/dev/null; do :; done; $1 -I INPUT 1 "${@:2}"; }
+first iptables  -p tcp -m multiport --dports 80,443 -m set --match-set xmuhub_self src -j ACCEPT
 first iptables  -p tcp -m multiport --dports 80,443 -m set --match-set cf4 src -j ACCEPT
 top ip6tables "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 64 -j REJECT --reject-with tcp-reset
+top ip6tables "" INPUT -p tcp --syn -m multiport --dports 80,443 -m connlimit --connlimit-above 100 --connlimit-mask 64 -j SET --add-set ddos_ban6 src
 first ip6tables -p tcp -m multiport --dports 80,443 -m set --match-set cf6 src -j ACCEPT
 top iptables  raw PREROUTING -m set --match-set ddos_ban src -j DROP
 top ip6tables raw PREROUTING -m set --match-set ddos_ban6 src -j DROP

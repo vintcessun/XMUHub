@@ -1,5 +1,6 @@
 //! Outbound mail (verification codes) through an authenticated SMTP relay —
-//! Aliyun DirectMail on 465/implicit TLS, since the host cannot send on port 25.
+//! Aliyun DirectMail on 465/implicit TLS, since the host cannot send on port 25. Other ports
+//! (80, for hosts that block every mail port) use STARTTLS, which is required, never plain text.
 
 use lettre::message::{Mailbox, MultiPart};
 use lettre::transport::smtp::authentication::Credentials;
@@ -20,7 +21,8 @@ pub struct SmtpConfig {
 
 impl Mailer {
     pub fn new(cfg: &SmtpConfig) -> anyhow::Result<Mailer> {
-        let transport = AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.host)?
+        let relay = if cfg.port == 465 { AsyncSmtpTransport::<Tokio1Executor>::relay } else { AsyncSmtpTransport::<Tokio1Executor>::starttls_relay };
+        let transport = relay(&cfg.host)?
             .port(cfg.port)
             .credentials(Credentials::new(cfg.user.clone(), cfg.password.clone()))
             .timeout(Some(std::time::Duration::from_secs(20)))

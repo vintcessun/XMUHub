@@ -23,6 +23,7 @@
     pwsh scripts/deploy.ps1 -OnlyWorker          # 只更新 Cloudflare Worker（需配合自定义域名才在国内可用）
     pwsh scripts/deploy.ps1 -WebOnly             # 只更新网页文件（不需要重新编译）
     pwsh scripts/deploy.ps1 -AdminsOnly          # 只同步管理员名单 .secrets/admins.txt
+    pwsh scripts/deploy.ps1 -Target aliyun       # 部署到 .secrets/deploy.aliyun.env 写的那台（备用机）
 #>
 param(
     [string]$User = "root",
@@ -47,7 +48,9 @@ param(
     [string]$SetRole = "",
     [int]$Level = 3,
     # Only sync .secrets/admins.txt (the maintained admin list) to the server.
-    [switch]$AdminsOnly
+    [switch]$AdminsOnly,
+    # Another machine: read .secrets/deploy.<Target>.env instead of .secrets/deploy.env.
+    [string]$Target = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,7 +59,8 @@ $Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 
 # Where and what to deploy: .secrets/deploy.env (see .secrets.example/deploy.env). Values given
 # on the command line win.
-$DeployEnvPath = Join-Path $Root ".secrets/deploy.env"
+$DeployEnvPath = Join-Path $Root $(if ($Target) { ".secrets/deploy.$Target.env" } else { ".secrets/deploy.env" })
+if ($Target -and -not (Test-Path $DeployEnvPath)) { throw "找不到 $DeployEnvPath" }
 $dep = @{}
 if (Test-Path $DeployEnvPath) {
     foreach ($line in Get-Content $DeployEnvPath) {
@@ -227,7 +231,7 @@ TURNSTILE_SECRET=$($cf.TURNSTILE_SECRET)
 XMUHUB_SCRIPT_TOKEN=$($up.XMUHUB_SCRIPT_TOKEN)
 XMUHUB_ADMINS_FILE=$RemoteBase/admins.txt
 SMTP_HOST=$($mail.SMTP_HOST)
-SMTP_PORT=$($mail.SMTP_PORT)
+SMTP_PORT=$(if ($dep.SMTP_PORT) { $dep.SMTP_PORT } else { $mail.SMTP_PORT })
 SMTP_USER=$($mail.SMTP_USER)
 SMTP_PASSWORD=$($mail.SMTP_PASSWORD)
 MAIL_FROM=$($mail.MAIL_FROM)

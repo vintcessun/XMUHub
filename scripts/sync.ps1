@@ -33,7 +33,9 @@ param(
     # Don't push local commits to GitHub (still pulls and deploys).
     [switch]$NoPush,
     # Deploy even if new Rust code looks like it fetches files on the server (see AGENTS.md §1).
-    [switch]$AllowRisky
+    [switch]$AllowRisky,
+    # Another machine: .secrets/deploy.<Target>.env instead of .secrets/deploy.env (see deploy.ps1).
+    [string]$Target = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,7 +44,8 @@ $Root = (Resolve-Path (Join-Path $ScriptDir "..")).Path
 
 # Where and what to deploy: .secrets/deploy.env (see .secrets.example/deploy.env). Values given
 # on the command line win.
-$DeployEnvPath = Join-Path $Root ".secrets/deploy.env"
+$DeployEnvPath = Join-Path $Root $(if ($Target) { ".secrets/deploy.$Target.env" } else { ".secrets/deploy.env" })
+if ($Target -and -not (Test-Path $DeployEnvPath)) { throw "找不到 $DeployEnvPath" }
 $dep = @{}
 if (Test-Path $DeployEnvPath) {
     foreach ($line in Get-Content $DeployEnvPath) {
@@ -163,10 +166,10 @@ function Sync-Once {
             & (Join-Path $ScriptDir "build-alinux3.ps1")
             if (-not $?) { throw "编译失败" }
         }
-        & (Join-Path $ScriptDir "deploy.ps1") -User $User -HostName $HostName -RemoteBase $RemoteBase
+        & (Join-Path $ScriptDir "deploy.ps1") -User $User -HostName $HostName -RemoteBase $RemoteBase -Target $Target
     }
     else {
-        & (Join-Path $ScriptDir "deploy.ps1") -User $User -HostName $HostName -RemoteBase $RemoteBase -WebOnly
+        & (Join-Path $ScriptDir "deploy.ps1") -User $User -HostName $HostName -RemoteBase $RemoteBase -Target $Target -WebOnly
     }
     if (-not $?) { throw "部署失败" }
     Log "部署完成：$(Short $head)" Green

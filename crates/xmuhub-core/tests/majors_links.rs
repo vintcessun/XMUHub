@@ -132,6 +132,13 @@ fn imports_take_time_and_major_from_the_repo() {
     assert_eq!(files[0].name.time, "2023-2024秋", "time taken from the folder");
     assert_eq!(h.major_of(files[0].id), "软件工程");
 
+    // Git LFS: the import saw the 10-byte pointer; the transfer found the real 5000-byte file.
+    assert!(h.fix_lfs_size("git-aaaa", 5000).is_ok());
+    assert_eq!(h.blob_size("git-aaaa"), Some(5000));
+    let (_, _, _, files) = h.node(staff, course).unwrap();
+    assert_eq!(files[0].size, 5000, "the listing shows the real size");
+    assert!(h.fix_lfs_size("git-aaaa", 7000).is_err(), "a real file's size is never changed");
+
     drop(h);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -36,6 +36,11 @@ const SPEED_READ: Duration = Duration::from_secs(8);
 /// Mirrors known to send CORS headers; used for previews until the first probe has run
 /// (otherwise every restart leaves previews without a route for a minute).
 const KNOWN_CORS: &[&str] = &[
+    // Rechecked 2026-11-17: probe SHA256 matches and Access-Control-Allow-Origin is *.
+    "https://gh-proxy.com",
+    "https://gh-proxy.org",
+    "https://hk.gh-proxy.com",
+    "https://cdn.gh-proxy.com",
     "https://cors.isteed.cc",
     "https://ghpxy.hwinzniej.top",
     "https://gh.monlor.com",
@@ -200,6 +205,13 @@ mod tests {
         let mirrors = Mirrors::new(vec![]);
         let urls = vec!["/api/local/file/abc123".to_string()];
         assert_eq!(mirrors.cors_urls(&urls), urls);
+    }
+
+    #[test]
+    fn verified_cors_candidates_are_available_before_the_first_probe() {
+        let mirrors = Mirrors::new(vec!["https://gh-proxy.com".into(), "https://gh-proxy.org".into(), "https://ghfast.top".into()]);
+        let urls = mirrors.wrap("https://github.com/example/file");
+        assert_eq!(mirrors.cors_urls(&urls), urls[..2]);
     }
 
     #[test]

@@ -50,7 +50,7 @@ async function request(path, method, headers, body, signal) {
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   let res;
   try {
-    res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal, credentials: 'same-origin' });
+    res = await fetch(`/api${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal, credentials: 'same-origin', cache: path === '/me' ? 'no-store' : 'default' });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
     throw new ApiError(0, '网络连接失败，请稍后重试');
@@ -66,7 +66,18 @@ let meCache = null;
 let signedIn = false;
 /** The signed-in user or null. */
 export function me() {
-  if (!meCache) meCache = api('/me').then((r) => { signedIn = !!r.user; return r.user; }).catch(() => { signedIn = false; return null; });
+  if (!meCache) {
+    const pending = api('/me').then((r) => {
+      if (meCache === pending) signedIn = !!r.user;
+      return r.user;
+    }).catch((err) => {
+      // A failed lookup says nothing about the session. Let the next attempt retry;
+      // don't let an older request overwrite a lookup started after signing in/out.
+      if (meCache === pending) meCache = null;
+      throw err;
+    });
+    meCache = pending;
+  }
   return meCache;
 }
 export function forgetMe() {
@@ -300,6 +311,8 @@ export function pathId() {
 export function $(sel, root = document) { return root.querySelector(sel); }
 
 export function loginUrl() {
+  // The login page must not become its own return destination (including nested next).
+  if (/^\/login(?:\.html)?\/?$/.test(location.pathname)) return '/login';
   return `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
 }
 
@@ -336,7 +349,18 @@ export async function layout(active) {
   feedbackButton(active !== 'feedback');
   topButton();
   announcement();
-  const user = await me();
+  let user;
+  try {
+    user = await me();
+  } catch (err) {
+    if (!PUBLIC_PAGES.test(location.pathname)) {
+      document.querySelector('main').innerHTML = `<div class="wrap"><section class="card"><div class="notice bad" role="alert">暂时无法确认登录状态：${esc(err.message)}</div><button class="btn primary" type="button" id="retry-session">重新加载</button></section></div>`;
+      document.getElementById('retry-session').onclick = () => location.reload();
+      return new Promise(() => {});
+    }
+    // Public pages (especially the login form) remain usable while a lookup fails.
+    user = null;
+  }
   // Pages are the same for everyone (Cloudflare caches them); the data behind them needs an
   // account, so a guest is sent to the login page from here (the APIs answer 401 anyway).
   if (!user && !PUBLIC_PAGES.test(location.pathname)) {
